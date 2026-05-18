@@ -196,6 +196,47 @@ L3F:RegisterRaid({
             },
         },
         {
+            name = "Opera Event",
+            npcs = {
+                { id = 16812, name = "Barnes the Stage Manager", marks = TRASH,
+                  spells = {},
+                  notes = "Stage manager and event trigger - speak to him to begin the Opera. Randomly announces Wizard of Oz, Romulo & Julianne, or Big Bad Wolf. Non-combat; despawns when the play begins." },
+
+                -- Variant A: The Wizard of Oz
+                { id = 17535, name = "Dorothee",                marks = {8},
+                  spells = { 31013, 31014, 31012 },
+                  notes = "Wizard of Oz - main caster. Summons Tito (31014) at ~50% HP; kill the dog first when it spawns. Water Bolt (31012) cannot be interrupted/silenced. Frightened Scream (31013) is a short AoE fear - spread casters out." },
+                { id = 17548, name = "Tito",                     marks = {7},
+                  spells = { 31016 },
+                  notes = "Dorothee's summoned dog. Yipping (31016) is a short AoE silence/disorient. Burn immediately when summoned - he ignores aggro and chases the silence target." },
+                { id = 17543, name = "Strawman",                 marks = {6},
+                  spells = { 31046, 31075 },
+                  notes = "Takes bonus damage from fire. Brain Bash (31046) is a 4s stun on the tank - rotate tanks or trinket. Burning Straw (31075) disorients Strawman when fire damage procs it; usable to interrupt his casts." },
+                { id = 17547, name = "Tinhead",                  marks = {5},
+                  spells = { 845, 31086 },
+                  notes = "Melee mechanical - Cleave (845) hits 3 in front; keep ranged out of the cone. Rust (31086) stacks on himself over time, slowing his attacks - just outlast him." },
+                { id = 17546, name = "Roar",                     marks = {4},
+                  spells = { 31041, 31013 },
+                  notes = "Tigon melee - Mangle (31041) bleed debuff on tank, stacks with raid bleeds. Uses Frightened Scream (31013) too. Tank with bleed-mitigation cooldowns." },
+                { id = 18168, name = "The Crone",                marks = {8},
+                  spells = { 33786, 32337 },
+                  notes = "Spawns after Dorothee, Strawman, Tinhead and Roar are all dead. Cyclone (33786) drops tornadoes that knock players up - dodge them. Chain Lightning (32337) hits 5 nearby targets - spread to 10+ yards." },
+
+                -- Variant B: Romulo and Julianne
+                { id = 17534, name = "Julianne",                 marks = {8},
+                  spells = { 30878, 30907, 30888, 30890 },
+                  notes = "Phase 1 caster. Interrupt Eternal Affection (30878) - self/Romulo heal. Powerful Attraction (30888) random 6s stun. Blinding Passion (30890) Holy DoT. At ~10% she Drinks Poison (30907) to fake-die. BOTH must die within ~10 seconds or they resurrect." },
+                { id = 17533, name = "Romulo",                   marks = {7},
+                  spells = { 30815, 30841, 30822, 34586 },
+                  notes = "Phase 2 melee, spawns after Julianne 'dies'. Daring (30841) is +35% damage/haste self-buff - dispel (enrage) or burn tank cooldowns. Backward Lunge (30815) knocks tank back; face him away from raid. Poisoned Thrust (30822) + Romulo's Poison (34586) stack on tank. Coordinate kill timer with Julianne." },
+
+                -- Variant C: The Big Bad Wolf
+                { id = 17521, name = "The Big Bad Wolf",         marks = {8},
+                  spells = { 30753, 30769, 30752, 30761 },
+                  notes = "Single boss. Picks a random raider via Pick Red Riding Hood (30769), applies Red Riding Hood (30753) - target is pacified/silenced and must kite. Terrifying Howl (30752) AoE fear every ~30s - tremor totem / fear ward. Wide Swipe (30761) is a 4s tank stun. Save trinkets for the howl." },
+            },
+        },
+        {
             name = "Curator's Atrium (Menagerie)",
             npcs = {
                 { id = 15691, name = "The Curator",      marks = {8},
