@@ -1,0 +1,53 @@
+-- L3FTools - Hellfire Ramparts
+local _, L3F = ...
+local TRASH = {8, 7, 6, 5, 4, 3, 2, 1}
+
+L3F:RegisterRaid({
+    name = "Hellfire Ramparts",
+    location = "Hellfire Citadel - Hellfire Ramparts",
+    npcs = {
+        { id = 17306, name = "Watchkeeper Gargolmar", marks = {8},
+          level = 70, type = "Humanoid",
+          spells = { 30641, 32154, 36814 },
+          notes = "Charges the furthest player and applies Mortal Wound (stacking healing-reduction debuff). Tank in a corner so charges can't fling players off ledges; kill or CC the two Hellfire Watcher healers first.",
+          drops = {
+              { id = 27510, name = "Boots of the Darkwalker", chance = 18.5 },
+              { id = 27512, name = "Bracers of Just Rewards", chance = 18.3 },
+              { id = 27511, name = "Cloak of the Everliving", chance = 17.9 },
+              { id = 27513, name = "Wild Stalker Boots", chance = 17.6 },
+              { id = 27509, name = "Blood Knight Defender", chance = 16.5 },
+              { id = 29434, name = "Badge of Justice", chance = 100.0 },
+          } },
+        { id = 17308, name = "Omor the Unscarred", marks = {8},
+          level = 70, type = "Demon",
+          spells = { 30898, 33617, 33619 },
+          notes = "Treacherous Aura deals heavy damage if you move while it's on you - stand still. Bane of Treachery casts an MC on a random raid member - dispel fast. Spread out for Shadow Whip throwback.",
+          drops = {
+              { id = 24026, name = "Crystalfire Staff", chance = 18.7 },
+              { id = 24027, name = "Garrote-String Necklace", chance = 18.5 },
+              { id = 24028, name = "Bloodstained Ravager Gauntlets", chance = 18.3 },
+              { id = 29434, name = "Badge of Justice", chance = 100.0 },
+          } },
+        { id = 17537, name = "Vazruden the Herald", marks = {8},
+          level = 70, type = "Humanoid",
+          spells = { 33051, 30940 },
+          notes = "Phase 2 of final encounter. Vazruden dismounts after Nazan reaches ~50% HP. Tank in melee with healer focus; Nazan still flies overhead dropping Fire Patches.",
+          drops = {
+              { id = 27445, name = "Pendant of the Perilous", chance = 19.0 },
+              { id = 27446, name = "Amber Band", chance = 18.8 },
+              { id = 27440, name = "Archmage Gloves", chance = 18.2 },
+              { id = 29434, name = "Badge of Justice", chance = 100.0 },
+          } },
+        { id = 17536, name = "Nazan", marks = {8},
+          level = 70, type = "Dragonkin",
+          spells = { 33419, 33422, 33793 },
+          notes = "Drake flying phase: tight party stack to mitigate Fire Cone Breath; dodge Liquid Fire patches under your feet. Both Nazan and Vazruden share a loot table.",
+          drops = {
+              { id = 27442, name = "Elementalist Boots", chance = 18.5 },
+              { id = 27443, name = "Elementalist Leggings", chance = 18.7 },
+              { id = 27444, name = "Elementalist Tunic", chance = 18.3 },
+              { id = 27451, name = "Thunder Spike", chance = 18.6 },
+              { id = 29434, name = "Badge of Justice", chance = 100.0 },
+          } },
+    },
+})

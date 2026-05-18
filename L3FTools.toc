@@ -1,0 +1,51 @@
+## Interface: 20505
+## Title: L3FTools
+## Notes: Multi-tool suite for TBC Anniversary - Automarker, Atlas/Encyclopedia, more.
+## Author: Willem
+## Version: 0.4.0
+## SavedVariables: L3FToolsDB
+## IconTexture: Interface\AddOns\L3FTools\Media\L3F
+
+Core.lua
+Engine.lua
+Data/Karazhan.lua
+Data/GruulsLair.lua
+Data/MagtheridonsLair.lua
+Data/SerpentshrineCavern.lua
+Data/TempestKeep.lua
+Data/HyjalSummit.lua
+Data/BlackTemple.lua
+Data/ZulAman.lua
+Data/SunwellPlateau.lua
+Data/Heroics/HellfireRamparts.lua
+Data/Heroics/BloodFurnace.lua
+Data/Heroics/ShatteredHalls.lua
+Data/Heroics/SlavePens.lua
+Data/Heroics/Underbog.lua
+Data/Heroics/Steamvault.lua
+Data/Heroics/ManaTombs.lua
+Data/Heroics/AuchenaiCrypts.lua
+Data/Heroics/SethekkHalls.lua
+Data/Heroics/ShadowLabyrinth.lua
+Data/Heroics/OldHillsbrad.lua
+Data/Heroics/BlackMorass.lua
+Data/Heroics/Mechanar.lua
+Data/Heroics/Botanica.lua
+Data/Heroics/Arcatraz.lua
+Data/Heroics/MagistersTerrace.lua
+Data/Drops/Karazhan.lua
+Data/Drops/GruulsLair.lua
+Data/Drops/MagtheridonsLair.lua
+Data/Drops/SerpentshrineCavern.lua
+Data/Drops/TempestKeep.lua
+Data/Drops/HyjalSummit.lua
+Data/Drops/BlackTemple.lua
+Data/Drops/ZulAman.lua
+Data/Drops/SunwellPlateau.lua
+UI/ModelViewer.lua
+UI/HoverPreview.lua
+Frame.lua
+Tabs/Automarker.lua
+Tabs/Atlas.lua
+Tabs/Settings.lua
+Minimap.lua
