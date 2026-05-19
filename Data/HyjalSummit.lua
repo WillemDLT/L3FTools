@@ -57,7 +57,7 @@ L3F:RegisterRaid({
                   spells = { 31729 },
                   notes = "Mana Burn at 30yd drains ~1140 mana per cast from casters/healers. Kill or Banish (demon) before they shred your mana pool for the upcoming boss." },
                 { id = 17864, name = "Lesser Doomguard",   marks = TRASH,
-                  spells = {},
+                  spells = { 31406, 31408 },
                   notes = "Elite demon add spawned when a player afflicted by Azgalor's Doom dies (Summon Lesser Doomguard, spell 31350). Coordinate so the Doom target reaches the off-tank near the Tauren warriors before death, then pick the add up and burn it down before it reaches the raid." },
             },
         },

@@ -154,7 +154,7 @@ L3F:RegisterRaid({
                   spells = { 34133 },
                   notes = "Phoenix add during the Al'ar fight. Heavy melee, and explodes on death for big fire damage + knockback in 15yd - kill it spread out, away from melee, never stacked on the raid." },
                 { id = 21362, name = "Phoenix",                marks = TRASH,
-                  spells = {},
+                  spells = { 34341, 35369, 41587 },
                   notes = "Kael'thas phase 4 add. Pulses fire damage to nearby players; on death drops a Phoenix Egg that must be killed fast before it hatches a new Phoenix. Tank away from raid, AoE the egg." },
                 { id = 20040, name = "Crystalcore Devastator", marks = TRASH,
                   spells = { 35035, 37106 },

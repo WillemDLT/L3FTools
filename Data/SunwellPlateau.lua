@@ -56,7 +56,7 @@ L3F:RegisterRaid({
                   spells = { 46565 },
                   notes = "Holy-school healer paired with a Dusk Priest. Enters Holyform to boost healing and reduce damage taken; casts Renew and a wide Holy Nova. Kill BEFORE the Dusk Priest or it keeps the pack alive." },
                 { id = 25370, name = "Sunblade Dusk Priest", marks = TRASH,
-                  spells = {},
+                  spells = { 46560, 46561, 46562 },
                   notes = "Shadow-priest counterpart that casts Mind Flay (chains to additional targets), Shadow Word: Pain, and may fear. Immune to MC; sheep/sap/trap. Tank both Priests together so the pair can be cleaved." },
                 { id = 25867, name = "Sunblade Dragonhawk",  marks = TRASH,
                   spells = { 47251 },

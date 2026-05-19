@@ -191,7 +191,7 @@ L3F:RegisterRaid({
                   spells = { 29677, 29673 },
                   notes = "Mallet Toss (29677) ranged stun and Sandbag (29673) AoE drop. Pack trash - interrupt the throws and AoE down with Performers." },
                 { id = 16409, name = "Phantom Guest",      marks = TRASH,
-                  spells = {},
+                  spells = { 29492, 29513, 29514, 29579, 29580, 29581, 29582, 29583, 29928, 29930 },
                   notes = "Audience phantom that randomly picks an 'actor' role with wildly varied abilities - no consistent kit to flag. Tank gathers and AoE the cluster; spread for the random ranged abilities." },
             },
         },
