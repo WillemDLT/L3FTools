@@ -59,6 +59,7 @@ local function tryMark(unit)
     if not L3F.db or not L3F.db.automarker.enabled then return end
     if not UnitExists(unit) then return end
     if not UnitCanAttack("player", unit) then return end
+    if UnitIsDead(unit) then return end
     if L3F.db.automarker.combatLock and UnitAffectingCombat("player") then return end
 
     local guid = UnitGUID(unit)
