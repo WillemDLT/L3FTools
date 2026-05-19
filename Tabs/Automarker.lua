@@ -50,6 +50,80 @@ local function togglePriorityMark(npc, markIdx, mapID, wingIdx)
     if L3F.SyncActiveProfile then L3F.SyncActiveProfile() end
 end
 
+-- =============================================================
+-- STRING DIALOG - a fixed-size, draggable window with a scrolling
+-- multi-line edit box, used for profile Export / Import. Replaces
+-- the StaticPopup edit box, whose multi-line form auto-grows over
+-- the dialog's own buttons once the text is long.
+-- =============================================================
+local stringDialog
+local function getStringDialog()
+    if stringDialog then return stringDialog end
+    local d = CreateFrame("Frame", "L3FToolsStringDialog", UIParent, "BasicFrameTemplateWithInset")
+    d:SetSize(440, 340)
+    d:SetPoint("CENTER")
+    d:SetFrameStrata("DIALOG")
+    d:SetToplevel(true)
+    d:SetClampedToScreen(true)
+    d:EnableMouse(true)
+    d:SetMovable(true)
+    d:RegisterForDrag("LeftButton")
+    d:SetScript("OnDragStart", d.StartMoving)
+    d:SetScript("OnDragStop", d.StopMovingOrSizing)
+
+    d.heading = d:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    d.heading:SetPoint("TOPLEFT", d, "TOPLEFT", 14, -28)
+    d.heading:SetPoint("TOPRIGHT", d, "TOPRIGHT", -14, -28)
+    d.heading:SetJustifyH("LEFT")
+
+    local scroll = CreateFrame("ScrollFrame", "L3FToolsStringDialogScroll", d, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", d, "TOPLEFT", 14, -48)
+    scroll:SetPoint("BOTTOMRIGHT", d, "BOTTOMRIGHT", -34, 44)
+
+    local edit = CreateFrame("EditBox", nil, scroll)
+    edit:SetMultiLine(true)
+    edit:SetAutoFocus(false)
+    edit:SetFontObject("ChatFontNormal")
+    edit:SetMaxLetters(0)
+    edit:SetWidth(384)
+    edit:SetScript("OnEscapePressed", function() d:Hide() end)
+    scroll:SetScrollChild(edit)
+    scroll:SetScript("OnMouseDown", function() edit:SetFocus() end)
+    d.edit = edit
+
+    d.accept = CreateFrame("Button", nil, d, "UIPanelButtonTemplate")
+    d.accept:SetSize(110, 24)
+    d.accept:SetPoint("BOTTOMRIGHT", d, "BOTTOMRIGHT", -16, 12)
+
+    d.cancel = CreateFrame("Button", nil, d, "UIPanelButtonTemplate")
+    d.cancel:SetSize(110, 24)
+    d.cancel:SetPoint("RIGHT", d.accept, "LEFT", -8, 0)
+    d.cancel:SetText("Cancel")
+    d.cancel:SetScript("OnClick", function() d:Hide() end)
+
+    tinsert(UISpecialFrames, "L3FToolsStringDialog")
+    stringDialog = d
+    return d
+end
+
+-- opts = { title, text, acceptText, showCancel, selectAll, onAccept }
+function L3F.ShowStringDialog(opts)
+    local d = getStringDialog()
+    d.heading:SetText(opts.title or "")
+    d.accept:SetText(opts.acceptText or "OK")
+    d.accept:SetScript("OnClick", function()
+        local txt = d.edit:GetText()
+        d:Hide()
+        if opts.onAccept then opts.onAccept(txt) end
+    end)
+    d.cancel:SetShown(opts.showCancel ~= false)
+    d.edit:SetText(opts.text or "")
+    d.edit:SetCursorPosition(0)
+    if opts.selectAll then d.edit:HighlightText() end
+    d:Show()
+    d.edit:SetFocus()
+end
+
 local function buildAutomarker(parent)
     -- Forward-declared so the profile strip's applyProfile callback can call it
     -- before its real assignment further down in this function.
@@ -181,30 +255,22 @@ local function buildAutomarker(parent)
             print("|cffffd100L3FTools|r Save the current config as a profile first.")
             return
         end
-        local str = L3F.SerializeProfile(active, profile)
-        StaticPopupDialogs["L3F_AM_EXP"] = {
-            text = "Profile export (Ctrl+A, Ctrl+C):",
-            button1 = "Close", hasEditBox = true, maxLetters = 0,
-            OnShow = function(self)
-                self.EditBox:SetMultiLine(true)
-                self.EditBox:SetText(str)
-                self.EditBox:HighlightText()
-                self.EditBox:SetFocus()
-            end,
-            EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
-            timeout = 0, whileDead = true, hideOnEscape = true,
-        }
-        StaticPopup_Show("L3F_AM_EXP")
+        L3F.ShowStringDialog({
+            title = "Profile export - Ctrl+A then Ctrl+C to copy:",
+            text = L3F.SerializeProfile(active, profile),
+            acceptText = "Close",
+            showCancel = false,
+            selectAll = true,
+        })
     end)
 
     local impBtn = mkBtn("Import", expBtn, 2, 60, function()
-        StaticPopupDialogs["L3F_AM_IMP"] = {
-            text = "Paste profile export string:",
-            button1 = "Import", button2 = "Cancel",
-            hasEditBox = true, maxLetters = 0,
-            OnShow = function(self) self.EditBox:SetText(""); self.EditBox:SetFocus() end,
-            OnAccept = function(self)
-                local str = self.EditBox:GetText()
+        L3F.ShowStringDialog({
+            title = "Paste a profile export string, then Import:",
+            text = "",
+            acceptText = "Import",
+            showCancel = true,
+            onAccept = function(str)
                 local name, profile = L3F.DeserializeProfile(str)
                 if not name then
                     print("|cffff5555L3FTools|r Import failed: " .. tostring(profile))
@@ -214,9 +280,7 @@ local function buildAutomarker(parent)
                 applyProfile(name)
                 print("|cffffd100L3FTools|r Imported '" .. name .. "'.")
             end,
-            timeout = 0, whileDead = true, hideOnEscape = true,
-        }
-        StaticPopup_Show("L3F_AM_IMP")
+        })
     end)
 
     refreshProfileDD()

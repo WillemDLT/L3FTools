@@ -18,9 +18,8 @@
 
 local _, L3F = ...
 
--- Friendly labels for the WoW Key Bindings UI.
-BINDING_HEADER_L3FTOOLS = "L3FTools"
-BINDING_NAME_L3FTOOLS_MOUSEOVERMARK = "Hold to mark mob under cursor"
+-- The Key Bindings labels (BINDING_HEADER_* / BINDING_NAME_*) are set in
+-- Core.lua so they exist before Bindings.xml is processed.
 
 -- While the key is held, mark whatever the cursor passes over.
 local ev = CreateFrame("Frame")

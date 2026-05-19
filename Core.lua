@@ -9,6 +9,12 @@
 local addonName, L3F = ...
 _G.L3FTools = L3F
 
+-- Key Bindings UI labels. Set here in the first-loaded file so they exist
+-- before Bindings.xml is processed - otherwise the Key Bindings window shows
+-- the raw header key ("HEADER_L3FTOOLS") instead of a friendly name.
+BINDING_HEADER_L3FTOOLS = "L3FTools"
+BINDING_NAME_L3FTOOLS_MOUSEOVERMARK = "Hold to mark mob under cursor"
+
 
 -- =============================================================
 -- 1.  RAID REGISTRY  (used by both Automarker tab and Atlas tab)
