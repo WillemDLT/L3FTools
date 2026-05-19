@@ -142,14 +142,14 @@ local function buildAutomarker(parent)
             button1 = "Save", button2 = "Cancel",
             hasEditBox = true, maxLetters = 32,
             OnAccept = function(self)
-                local name = self.editBox:GetText():gsub("^%s+",""):gsub("%s+$","")
+                local name = self.EditBox:GetText():gsub("^%s+",""):gsub("%s+$","")
                 if name ~= "" then
                     local ok, msg = L3F.SaveProfile(name)
                     print("|cffffd100L3FTools|r " .. msg)
                     refreshProfileDD()
                 end
             end,
-            EditBoxOnEnterPressed = function(self) self:GetParent().button1:Click() end,
+            EditBoxOnEnterPressed = function(self) local b = self:GetParent().button1; if b then b:Click() end end,
             timeout = 0, whileDead = true, hideOnEscape = true,
         }
         StaticPopup_Show("L3F_AM_SAVE")
@@ -186,10 +186,10 @@ local function buildAutomarker(parent)
             text = "Profile export (Ctrl+A, Ctrl+C):",
             button1 = "Close", hasEditBox = true, maxLetters = 0,
             OnShow = function(self)
-                self.editBox:SetMultiLine(true)
-                self.editBox:SetText(str)
-                self.editBox:HighlightText()
-                self.editBox:SetFocus()
+                self.EditBox:SetMultiLine(true)
+                self.EditBox:SetText(str)
+                self.EditBox:HighlightText()
+                self.EditBox:SetFocus()
             end,
             EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
             timeout = 0, whileDead = true, hideOnEscape = true,
@@ -202,9 +202,9 @@ local function buildAutomarker(parent)
             text = "Paste profile export string:",
             button1 = "Import", button2 = "Cancel",
             hasEditBox = true, maxLetters = 0,
-            OnShow = function(self) self.editBox:SetText(""); self.editBox:SetFocus() end,
+            OnShow = function(self) self.EditBox:SetText(""); self.EditBox:SetFocus() end,
             OnAccept = function(self)
-                local str = self.editBox:GetText()
+                local str = self.EditBox:GetText()
                 local name, profile = L3F.DeserializeProfile(str)
                 if not name then
                     print("|cffff5555L3FTools|r Import failed: " .. tostring(profile))
