@@ -13,6 +13,7 @@ Sections/TempestKeep.lua
 Sections/SerpentshrineCavern.lua
 Sections/MagtheridonsLair.lua
 Sections/GruulsLair.lua
+Sections/Karazhan.lua
 Data/Karazhan.lua
 Data/GruulsLair.lua
 Data/MagtheridonsLair.lua
