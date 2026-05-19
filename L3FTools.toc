@@ -11,6 +11,8 @@ Engine.lua
 Sections.lua
 Sections/TempestKeep.lua
 Sections/SerpentshrineCavern.lua
+Sections/MagtheridonsLair.lua
+Sections/GruulsLair.lua
 Data/Karazhan.lua
 Data/GruulsLair.lua
 Data/MagtheridonsLair.lua
