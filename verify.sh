@@ -78,6 +78,7 @@ bad = []
 print("=== Brace/paren balance + truncation checks ===")
 for root, dirs, files in os.walk('.'):
     if '.git' in root: continue
+    if 'Libs' in root.replace('\\','/').split('/'): continue  # skip third-party libs
     for fn in sorted(files):
         if not fn.endswith('.lua'): continue
         fp = os.path.join(root, fn)
@@ -157,6 +158,7 @@ npc_names = {}
 dup = 0
 for root, dirs, files in os.walk('.'):
     if '.git' in root: continue
+    if 'Libs' in root.replace('\\','/').split('/'): continue  # skip third-party libs
     for fn in sorted(files):
         if not fn.endswith('.lua'): continue
         fp = os.path.join(root, fn)

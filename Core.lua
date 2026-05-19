@@ -15,6 +15,9 @@ _G.L3FTools = L3F
 BINDING_HEADER_L3FTOOLS = "L3FTools"
 BINDING_NAME_L3FTOOLS_MOUSEOVERMARK = "Hold to mark mob under cursor"
 
+-- LibDeflate (loaded from Libs/) - used to compress profile export strings.
+local LibDeflate = LibStub and LibStub("LibDeflate", true)
+
 
 -- =============================================================
 -- 1.  RAID REGISTRY  (used by both Automarker tab and Atlas tab)
@@ -282,15 +285,34 @@ function L3F.SerializeProfile(name, profile)
     end
     table.sort(secs)
     local safeName = (name or "Untitled"):gsub(":", "_")
-    return "L3F1:" .. safeName .. ":e" .. table.concat(enabled, ",")
+    local inner = safeName .. ":e" .. table.concat(enabled, ",")
         .. ":p" .. table.concat(prios, ";")
         .. ":s" .. table.concat(secs, ";")
+    if LibDeflate then
+        local compressed = LibDeflate:CompressDeflate(inner)
+        return "L3F2:" .. LibDeflate:EncodeForPrint(compressed)
+    end
+    return "L3F1:" .. inner
 end
 
 function L3F.DeserializeProfile(str)
     if type(str) ~= "string" then return nil, "Not a string" end
-    local name, rest = str:match("^L3F1:([^:]+):(.+)$")
-    if not name then return nil, "Invalid format (expected L3F1:name:...)" end
+    str = str:gsub("^%s+", ""):gsub("%s+$", "")
+    local inner
+    if str:sub(1, 5) == "L3F2:" then
+        if not LibDeflate then return nil, "LibDeflate not loaded; cannot decode L3F2 string" end
+        local encoded = str:sub(6)
+        local compressed = LibDeflate:DecodeForPrint(encoded)
+        if not compressed then return nil, "Decode failed (corrupted L3F2 string?)" end
+        inner = LibDeflate:DecompressDeflate(compressed)
+        if not inner then return nil, "Decompress failed (corrupted L3F2 string?)" end
+    elseif str:sub(1, 5) == "L3F1:" then
+        inner = str:sub(6)
+    else
+        return nil, "Invalid format (expected L3F1: or L3F2:)"
+    end
+    local name, rest = inner:match("^([^:]+):(.+)$")
+    if not name then return nil, "Invalid format (missing name)" end
     local enabledPart = rest:match(":?e([^:]*)") or ""
     local prioPart    = rest:match(":?p([^:]*)") or ""
     local sectionPart = rest:match(":?s(.*)$") or ""
