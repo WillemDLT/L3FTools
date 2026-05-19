@@ -1,3 +1,5 @@
 <Bindings>
-    <Binding name="CLICK L3FToolsMouseoverButton:LeftButton" header="L3FTOOLS"/>
+    <Binding name="L3FTOOLS_MOUSEOVERMARK" runOnUp="true" header="L3FTOOLS">
+        if L3FTools then L3FTools.mouseoverHeld = keystate == "down" end
+    </Binding>
 </Bindings>

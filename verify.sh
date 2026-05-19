@@ -119,6 +119,26 @@ for fn in required:
         print(f"  OK     {fn}")
 
 print()
+print("=== Bindings.xml sanity ===")
+bind_bad = 0
+toc_files = [f for f in os.listdir('.') if f.endswith('.toc')]
+if not os.path.exists("Bindings.xml"):
+    print("  WARN   Bindings.xml not found - keybind feature disabled")
+else:
+    print("  OK     Bindings.xml present")
+for tf in sorted(toc_files):
+    listed = False
+    with open(tf, encoding='utf-8', errors='replace') as f:
+        for line in f:
+            if line.strip().lower() == "bindings.xml":
+                listed = True
+    if listed:
+        print(f"  FAIL   {tf} lists Bindings.xml - it is auto-loaded; listing it triggers 'Unrecognized XML: Binding'")
+        bind_bad += 1
+    else:
+        print(f"  OK     {tf} does not list Bindings.xml")
+
+print()
 print("=== TOC load order ===")
 toc_ok = True
 if os.path.exists("L3FTools.toc"):
@@ -192,6 +212,6 @@ else:
 
 print()
 warn_note = f", {sec_warn} section warnings" if sec_warn else ""
-print(f"Summary: {len(bad)} file failures, {len(miss)} missing functions, {dup} id conflicts, {sec_bad} section mismatches{warn_note}")
-sys.exit(1 if (bad or miss or dup or sec_bad or not toc_ok) else 0)
+print(f"Summary: {len(bad)} file failures, {len(miss)} missing functions, {dup} id conflicts, {sec_bad} section mismatches, {bind_bad} bindings issues{warn_note}")
+sys.exit(1 if (bad or miss or dup or sec_bad or bind_bad or not toc_ok) else 0)
 PYEOF
