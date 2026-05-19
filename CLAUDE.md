@@ -63,7 +63,7 @@ L3F.RegisterDrops(17535, {
 - Author: Willem (willem-YT@hotmail.com). GitHub display name: WillemDLT.
 
 ## Project status
-- Version 0.5.0 (`.toc`). Both addons on `dev`, in sync, working tree clean.
+- Version 0.6.0 (`.toc`). Both addons on `dev`, in sync, working tree clean.
 - **Wing-aware marking** (`Sections.lua` + `Sections/`) is built and shipped on `dev` — engine, instance detection, on-screen wing switcher, per-wing mark config, 6h memory. Treated as correct unless in-game verification by Morphéours proves otherwise.
 - Per-raid spatial sectioning done: Tempest Keep, Serpentshrine Cavern. Remaining 7 (Karazhan, Black Temple, Gruul's Lair, Magtheridon's Lair, Hyjal Summit, Zul'Aman, Sunwell Plateau) each await a section list, built via the `wing-section-raid` skill.
 - Open punch-list: bundled default profiles deferred.
