@@ -351,6 +351,10 @@ local function buildAutomarker(parent)
             print("|cffffd100L3FTools|r Save the current config as a profile first.")
             return
         end
+        -- Refresh the stored profile from live config so the export reflects
+        -- the user's CURRENT state, not a stale snapshot (e.g. a profile
+        -- saved before sectionMarks was tracked, never re-synced since).
+        if L3F.SyncActiveProfile then L3F.SyncActiveProfile() end
         L3F.ShowStringDialog({
             title = "Profile export - Ctrl+A then Ctrl+C to copy:",
             text = L3F.SerializeProfile(active, profile),
