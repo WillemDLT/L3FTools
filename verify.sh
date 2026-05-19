@@ -4,7 +4,7 @@ set -e
 cd "$(dirname "$0")"
 
 python << 'PYEOF'
-import os, sys, subprocess
+import os, sys, subprocess, re
 
 def check(t):
     bd = 0; pd = 0; in_str = False; i = 0
@@ -89,6 +89,28 @@ else:
     print("  FAIL   L3FTools.toc missing"); toc_ok = False
 
 print()
-print(f"Summary: {len(bad)} file failures, {len(miss)} missing functions")
-sys.exit(1 if (bad or miss or not toc_ok) else 0)
+print("=== Duplicate NPC id check ===")
+npc_names = {}
+dup = 0
+for root, dirs, files in os.walk('.'):
+    if '.git' in root: continue
+    for fn in sorted(files):
+        if not fn.endswith('.lua'): continue
+        fp = os.path.join(root, fn)
+        with open(fp, encoding='utf-8', errors='replace') as f:
+            for ln, line in enumerate(f, 1):
+                m = re.search(r'id\s*=\s*(\d+)\s*,\s*name\s*=\s*"([^"]*)".*marks\s*=', line)
+                if m:
+                    npc_names.setdefault(m.group(1), {}).setdefault(m.group(2), []).append(f"{fp[2:]}:{ln}")
+for nid, names in sorted(npc_names.items()):
+    if len(names) > 1:
+        detail = "; ".join(f'"{nm}" @{locs[0]}' for nm, locs in names.items())
+        print(f"  FAIL   npc id {nid} -> {len(names)} different names: {detail}")
+        dup += 1
+if dup == 0:
+    print(f"  OK     {len(npc_names)} unique npc ids, no id/name conflicts")
+
+print()
+print(f"Summary: {len(bad)} file failures, {len(miss)} missing functions, {dup} id conflicts")
+sys.exit(1 if (bad or miss or dup or not toc_ok) else 0)
 PYEOF
