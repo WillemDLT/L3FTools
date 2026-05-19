@@ -23,6 +23,39 @@ local viewer, npcTitle, npcMeta
 
 
 -- =============================================================
+-- ITEM QUALITY COLOURING  (for drop labels)
+-- =============================================================
+-- GetItemInfo is async: it returns nil for an uncached item, then the data
+-- arrives via GET_ITEM_INFO_RECEIVED. Colour the label immediately if cached,
+-- otherwise queue it and recolour when the event fires.
+local pendingItemColor = {}
+local itemInfoFrame = CreateFrame("Frame")
+itemInfoFrame:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+itemInfoFrame:SetScript("OnEvent", function(_, _, itemID)
+    local labels = pendingItemColor[itemID]
+    if not labels then return end
+    pendingItemColor[itemID] = nil
+    local _, _, quality = GetItemInfo(itemID)
+    if quality then
+        local r, g, b = GetItemQualityColor(quality)
+        for _, fs in ipairs(labels) do fs:SetTextColor(r, g, b) end
+    end
+end)
+
+local function colorByQuality(fs, itemID)
+    if not itemID then return end
+    local _, _, quality = GetItemInfo(itemID)
+    if quality then
+        local r, g, b = GetItemQualityColor(quality)
+        fs:SetTextColor(r, g, b)
+    else
+        pendingItemColor[itemID] = pendingItemColor[itemID] or {}
+        table.insert(pendingItemColor[itemID], fs)
+    end
+end
+
+
+-- =============================================================
 -- TREE PANE
 -- =============================================================
 local function buildTreePane(parent)
@@ -308,7 +341,7 @@ local function buildDetailPane(parent)
                     idText:SetPoint("LEFT", lbl, "RIGHT", 8, 0)
                     idText:SetText(tostring(spellID))
                     row:SetScript("OnEnter", function(self)
-                        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                        GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
                         if GameTooltip.SetSpellByID then GameTooltip:SetSpellByID(spellID) end
                         GameTooltip:Show()
                     end)
@@ -341,11 +374,12 @@ local function buildDetailPane(parent)
                     local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
                     lbl:SetPoint("LEFT", row, "LEFT", 0, 0); lbl:SetWidth(280); lbl:SetJustifyH("LEFT")
                     lbl:SetText(drop.name or ("Item #" .. drop.id))
+                    colorByQuality(lbl, drop.id)
                     local chance = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
                     chance:SetPoint("LEFT", lbl, "RIGHT", 8, 0)
                     chance:SetText(string.format("%.1f%%", drop.chance or 0))
                     row:SetScript("OnEnter", function(self)
-                        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                        GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
                         if GameTooltip.SetItemByID then GameTooltip:SetItemByID(drop.id)
                         else GameTooltip:SetHyperlink("item:" .. drop.id) end
                         GameTooltip:Show()
