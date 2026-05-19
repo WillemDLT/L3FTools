@@ -300,6 +300,7 @@ local function handleSlash(msg)
         L3F.db.automarker.enabled = not L3F.db.automarker.enabled
         print("|cffffd100L3FTools|r Automarker " ..
             (L3F.db.automarker.enabled and "|cff00ff00enabled|r" or "|cffff5555disabled|r"))
+        if L3F.UpdateSwitcher then L3F.UpdateSwitcher() end
     elseif msg == "minimap" then
         L3F.db.minimap.hide = not L3F.db.minimap.hide
         if L3F.RefreshMinimap then L3F.RefreshMinimap() end

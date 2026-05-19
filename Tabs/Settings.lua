@@ -16,7 +16,10 @@ local function buildSettings(parent)
     cb1:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -16)
     cb1:SetChecked(L3F.db.automarker.enabled)
     cb1.text:SetText("  Enable Automarker (click a mob to mark it)")
-    cb1:SetScript("OnClick", function(self) L3F.db.automarker.enabled = self:GetChecked() end)
+    cb1:SetScript("OnClick", function(self)
+        L3F.db.automarker.enabled = self:GetChecked()
+        if L3F.UpdateSwitcher then L3F.UpdateSwitcher() end
+    end)
 
     local cb2 = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
     cb2:SetPoint("TOPLEFT", cb1, "BOTTOMLEFT", 0, -2)

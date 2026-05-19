@@ -204,6 +204,7 @@ end
 function L3F.UpdateSwitcher()
     if not L3F.db then return end
     local f = buildSwitcher()
+    if not L3F.db.automarker.enabled then f:Hide(); return end
     local def = L3F.activeRaidSections
     if not def then f:Hide(); return end
     local sec = def.sections[L3F.activeSectionIndex]
@@ -226,6 +227,10 @@ function L3F.SwitchSection(delta)
 end
 
 function L3F.ToggleSwitcher()
+    if L3F.db and not L3F.db.automarker.enabled then
+        print("|cffffd100L3FTools|r Automarking is off - enable it to use the wing switcher.")
+        return
+    end
     if not L3F.activeRaidSections then
         print("|cffffd100L3FTools|r The wing switcher only works inside a mapped raid.")
         return

@@ -65,7 +65,10 @@ local function buildAutomarker(parent)
     cbEnable:SetSize(20, 20)
     cbEnable:SetChecked(L3F.db.automarker.enabled)
     cbEnable.text:SetText("  Enable Automarker")
-    cbEnable:SetScript("OnClick", function(self) L3F.db.automarker.enabled = self:GetChecked() end)
+    cbEnable:SetScript("OnClick", function(self)
+        L3F.db.automarker.enabled = self:GetChecked()
+        if L3F.UpdateSwitcher then L3F.UpdateSwitcher() end
+    end)
 
     local cbCombat = CreateFrame("CheckButton", nil, toggleRow, "UICheckButtonTemplate")
     cbCombat:SetPoint("LEFT", cbEnable, "RIGHT", 110, 0)
