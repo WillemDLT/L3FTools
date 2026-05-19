@@ -1,0 +1,35 @@
+name: Package addon
+
+on:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build addon zip
+        run: git archive --prefix=L3FTools/ --format=zip -o L3FTools.zip HEAD
+
+      - name: Publish rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ github.ref_name }}
+        run: |
+          if [ "$REF" = "main" ]; then
+            TAG="live"; PRE=""
+          else
+            TAG="beta"; PRE="--prerelease"
+          fi
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" $PRE --title "$TAG" \
+              --notes "Auto-packaged on every push to the $REF branch. Download L3FTools.zip and extract it straight into Interface/AddOns/ - no renaming needed."
+          fi
+          gh release upload "$TAG" L3FTools.zip --clobber
