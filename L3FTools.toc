@@ -8,6 +8,8 @@
 
 Core.lua
 Engine.lua
+Mouseover.lua
+Bindings.xml
 Sections.lua
 Sections/TempestKeep.lua
 Sections/SerpentshrineCavern.lua
