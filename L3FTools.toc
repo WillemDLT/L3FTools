@@ -4,7 +4,7 @@
 ## Author: Willem
 ## Version: 0.6.0
 ## SavedVariables: L3FToolsDB
-## IconTexture: Interface\AddOns\L3FTools\Media\L3F
+## IconTexture: Interface\AddOns\L3FTools\Media\automarker
 
 Core.lua
 Engine.lua

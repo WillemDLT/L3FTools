@@ -37,15 +37,15 @@ function L3F.BuildMinimap()
     btn:SetFrameStrata("MEDIUM")
     btn:SetFrameLevel(8)
 
-    btn:SetNormalTexture("Interface\\AddOns\\L3FTools\\Media\\L3F.png")
+    btn:SetNormalTexture("Interface\\AddOns\\L3FTools\\Media\\automarker")
     local normal = btn:GetNormalTexture()
     if normal then normal:SetTexCoord(0, 1, 0, 1) end
 
-    btn:SetHighlightTexture("Interface\\AddOns\\L3FTools\\Media\\L3F.png", "ADD")
+    btn:SetHighlightTexture("Interface\\AddOns\\L3FTools\\Media\\automarker", "ADD")
     local hl = btn:GetHighlightTexture()
     if hl then hl:SetAlpha(0.4) end
 
-    btn:SetPushedTexture("Interface\\AddOns\\L3FTools\\Media\\L3F.png")
+    btn:SetPushedTexture("Interface\\AddOns\\L3FTools\\Media\\automarker")
     local pushed = btn:GetPushedTexture()
     if pushed then pushed:SetVertexColor(0.8, 0.8, 0.8) end
 
