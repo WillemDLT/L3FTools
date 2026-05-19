@@ -1,0 +1,63 @@
+-- Sections/SunwellPlateau.lua  --  spatial wing layout for the Automarker wing switcher
+local _, L3F = ...
+
+L3F:RegisterSections({
+    raid  = "Sunwell Plateau",
+    mapID = 580,                                  -- Sunwell Plateau (instanceMapID)
+    sections = {
+        { name = "Path to Kalecgos/Brutallus/Felmyst", npcs = {
+            { id = 25507, name = "Sunblade Protector" },
+            { id = 25363, name = "Sunblade Cabalist" },
+            { id = 25371, name = "Sunblade Dawn Priest" },
+            { id = 25370, name = "Sunblade Dusk Priest" },
+            { id = 25867, name = "Sunblade Dragonhawk" },
+            { id = 25369, name = "Sunblade Vindicator" },
+            { id = 25372, name = "Sunblade Scout" },
+            { id = 26101, name = "Fire Fiend" },
+            { id = 25132, name = "Sunblade Lookout" },
+            { id = 25367, name = "Sunblade Arch Mage" },
+            { id = 25368, name = "Sunblade Slayer" },
+            { id = 24850, name = "Kalecgos" },
+            { id = 24892, name = "Sathrovarr the Corruptor" },
+            { id = 24882, name = "Brutallus" },
+            { id = 25038, name = "Felmyst" },
+            { id = 25268, name = "Unyielding Dead" },
+        }},
+        { name = "Path to Twins", npcs = {
+            { id = 25598, name = "Volatile Felfire Fiend" },
+            { id = 25484, name = "Shadowsword Assassin" },
+            { id = 25485, name = "Shadowsword Deathbringer" },
+            { id = 25506, name = "Shadowsword Lifeshaper" },
+            { id = 25483, name = "Shadowsword Manafiend" },
+            { id = 25373, name = "Shadowsword Soulbinder" },
+            { id = 25486, name = "Shadowsword Vanquisher" },
+            { id = 25837, name = "Shadowsword Commander" },
+            { id = 25165, name = "Lady Sacrolash" },
+            { id = 25166, name = "Grand Warlock Alythess" },
+        }},
+        { name = "Path to M'uru", npcs = {
+            { id = 25592, name = "Doomfire Destroyer" },
+            { id = 25948, name = "Doomfire Shard" },
+            { id = 25597, name = "Oblivion Mage" },
+            { id = 25851, name = "Volatile Fiend" },
+            { id = 25591, name = "Painbringer" },
+            { id = 25593, name = "Apocalypse Guard" },
+            { id = 25599, name = "Cataclysm Hound" },
+            { id = 25595, name = "Chaos Gazer" },
+            { id = 25741, name = "M'uru" },
+            { id = 25744, name = "Dark Fiend" },
+            { id = 25798, name = "Shadowsword Berserker" },
+            { id = 25799, name = "Shadowsword Fury Mage" },
+            { id = 25772, name = "Void Sentinel" },
+            { id = 25824, name = "Void Spawn" },
+            { id = 25840, name = "Entropius (M'uru phase 2)" },
+        }},
+        { name = "Path to Kil'jaeden", npcs = {
+            { id = 25508, name = "Shadowsword Guardian" },
+            { id = 25315, name = "Kil'jaeden" },
+            { id = 25588, name = "Hand of the Deceiver" },
+            { id = 25708, name = "Sinister Reflection" },
+            { id = 25502, name = "Shield Orb" },
+        }},
+    },
+})

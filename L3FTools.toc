@@ -18,6 +18,8 @@ Sections/GruulsLair.lua
 Sections/Karazhan.lua
 Sections/HyjalSummit.lua
 Sections/BlackTemple.lua
+Sections/ZulAman.lua
+Sections/SunwellPlateau.lua
 Data/Karazhan.lua
 Data/GruulsLair.lua
 Data/MagtheridonsLair.lua
