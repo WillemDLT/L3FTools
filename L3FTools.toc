@@ -8,6 +8,8 @@
 
 Core.lua
 Engine.lua
+Sections.lua
+Sections/TempestKeep.lua
 Data/Karazhan.lua
 Data/GruulsLair.lua
 Data/MagtheridonsLair.lua

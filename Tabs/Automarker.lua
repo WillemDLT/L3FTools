@@ -36,7 +36,13 @@ local function togglePriorityMark(npc, markIdx)
                         (m ~= markIdx and inList(m, current))
         if include then table.insert(newList, m) end
     end
-    L3F.db.automarker.markPriorities[npc.id] = newList
+    -- Route through the section-aware setter so per-wing overrides are
+    -- written when inside a mapped raid; falls back to the global store.
+    if L3F.SetSectionPriority then
+        L3F.SetSectionPriority(npc.id, newList)
+    else
+        L3F.db.automarker.markPriorities[npc.id] = newList
+    end
     if L3F.SyncActiveProfile then L3F.SyncActiveProfile() end
 end
 

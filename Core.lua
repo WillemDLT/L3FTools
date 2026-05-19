@@ -305,6 +305,8 @@ local function handleSlash(msg)
         if L3F.RefreshMinimap then L3F.RefreshMinimap() end
         print("|cffffd100L3FTools|r minimap button " ..
             (L3F.db.minimap.hide and "|cffff5555hidden|r" or "|cff00ff00shown|r"))
+    elseif msg == "switcher" or msg == "wing" then
+        if L3F.ToggleSwitcher then L3F.ToggleSwitcher() end
     elseif msg == "automarker" or msg == "atlas" or msg == "settings" then
         if not L3F.mainFrame then if L3F.BuildFrame then L3F.BuildFrame() end end
         if L3F.ShowTab then L3F.ShowTab(msg) end
@@ -317,6 +319,7 @@ local function handleSlash(msg)
         print("  /l3f settings       open on Settings tab")
         print("  /l3f toggle         master Automarker enable on/off")
         print("  /l3f minimap        hide/show the minimap button")
+        print("  /l3f switcher       show/hide the wing switcher")
     else
         if L3F.ToggleFrame then L3F.ToggleFrame() end
     end

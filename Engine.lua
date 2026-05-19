@@ -79,6 +79,9 @@ local function tryMark(unit)
 
     local npcID = getNPCID(unit)
     if not npcID then return end
+    -- Wing scoping: in a mapped raid, ignore mobs outside the active wing.
+    -- NpcInActiveSection returns true when not in a mapped raid (fallback).
+    if L3F.NpcInActiveSection and not L3F.NpcInActiveSection(npcID) then return end
 
     local cfg = L3F.npcLookup[npcID]
     if not cfg then return end
