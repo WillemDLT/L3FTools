@@ -34,6 +34,46 @@ def clean_end(last):
     if '=' in last and not last.endswith('='): return True
     return False
 
+def lua_block_balance(t):
+    # Strip "..." / '...' strings and -- line comments, then stack-match
+    # Lua block keywords. Catches an orphaned, duplicated or missing
+    # 'end' - a syntax error the brace check above cannot detect.
+    code = []
+    i = 0; q = None
+    while i < len(t):
+        c = t[i]
+        if q:
+            if c == '\\' and i+1 < len(t): code.append('  '); i += 2; continue
+            if c == q: q = None
+            code.append(' '); i += 1; continue
+        if c == '"' or c == "'":
+            q = c; code.append(' '); i += 1; continue
+        if c == '-' and i+1 < len(t) and t[i+1] == '-':
+            while i < len(t) and t[i] != '\n': code.append(' '); i += 1
+            continue
+        code.append(c); i += 1
+    stack = []
+    for m in re.finditer(r"\b(function|if|for|while|do|repeat|end|until)\b", ''.join(code)):
+        k = m.group(1)
+        if k == "function" or k == "if" or k == "repeat":
+            stack.append(k)
+        elif k == "for" or k == "while":
+            stack.append("await")
+        elif k == "do":
+            if stack and stack[-1] == "await": stack[-1] = "loop"
+            else: stack.append("do")
+        elif k == "end":
+            if not stack:
+                return "unexpected 'end' (orphaned - stray or duplicated block)"
+            if stack.pop() == "repeat":
+                return "'end' where 'until' expected (repeat block)"
+        elif k == "until":
+            if not stack or stack.pop() != "repeat":
+                return "'until' with no matching 'repeat'"
+    if stack:
+        return "%d unclosed block(s) - missing 'end'" % len(stack)
+    return None
+
 bad = []
 print("=== Brace/paren balance + truncation checks ===")
 for root, dirs, files in os.walk('.'):
@@ -52,6 +92,9 @@ for root, dirs, files in os.walk('.'):
         if pd != 0: issues.append(f"parens {pd:+d}")
         if not clean_end(last):
             issues.append(f"suspicious last line: {last[:50]}")
+        block_issue = lua_block_balance(t)
+        if block_issue:
+            issues.append(block_issue)
         if issues:
             print(f"  FAIL   {fp[2:]}: " + "; ".join(issues))
             bad.append(fp)
