@@ -10,8 +10,10 @@ Multi-tool successor to AutomarkerL3F for TBC Classic (Interface 20505). Bundles
 ## File layout
 - `Core.lua` — bootstrap, SavedVariables, raid registry, profile API, slash commands
 - `Engine.lua` — Automarker engine (mark assignment, GUID tracking, lock logic)
+- `Mouseover.lua` — hold-keybind that marks the mob under the cursor (registered via `Bindings.xml`)
+- `Bindings.xml` — declares the rebindable "hold to mark" key
 - `Sections.lua` — wing-aware marking engine: instance detection by `instanceMapID`, active-wing scoping, per-wing mark priorities, on-screen switcher, 6h memory
-- `Sections/<Raid>.lua` — spatial wing layout per raid; calls `L3F:RegisterSections{ raid, mapID, sections={...} }`. Build with the `wing-section-raid` skill. Done: Tempest Keep, Serpentshrine Cavern
+- `Sections/<Raid>.lua` — spatial wing layout per raid; calls `L3F:RegisterSections{ raid, mapID, sections={...} }`. Build with the `wing-section-raid` skill (its Progress section tracks which raids are done)
 - `Frame.lua` — main window scaffold, resizable, tab system
 - `Tabs/Automarker.lua` — Automarker tab UI + profile strip
 - `Tabs/Atlas.lua` — Atlas tab UI (raid dropdown, NPC grid, sub-tabs)
