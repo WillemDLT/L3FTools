@@ -59,7 +59,8 @@ local function buildSettings(parent)
 
     local version = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     version:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", 16, 12)
-    version:SetText("L3FTools v0.2.0 - Les Trois Fromages")
+    local getMeta = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
+    version:SetText("L3FTools v" .. ((getMeta and getMeta(addonName, "Version")) or "?") .. " - Les Trois Fromages")
 end
 
 L3F.RegisterTab("settings", "Settings", nil, buildSettings)
