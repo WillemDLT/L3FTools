@@ -154,6 +154,44 @@ if dup == 0:
     print(f"  OK     {len(npc_names)} unique npc ids, no id/name conflicts")
 
 print()
-print(f"Summary: {len(bad)} file failures, {len(miss)} missing functions, {dup} id conflicts")
-sys.exit(1 if (bad or miss or dup or not toc_ok) else 0)
+print("=== Sections cross-check (Sections/ vs Data/) ===")
+sec_bad = 0
+sec_warn = 0
+if os.path.isdir("Sections"):
+    npc_re = re.compile(r'id\s*=\s*(\d+)\s*,\s*name\s*=\s*"([^"]*)"')
+    for fn in sorted(os.listdir("Sections")):
+        if not fn.endswith('.lua'): continue
+        sec_fp = os.path.join("Sections", fn)
+        data_fp = os.path.join("Data", fn)
+        if not os.path.exists(data_fp):
+            print(f"  FAIL   {sec_fp}: no matching Data/{fn} registry")
+            sec_bad += 1; continue
+        data_ids = {}
+        with open(data_fp, encoding='utf-8', errors='replace') as f:
+            for line in f:
+                m = npc_re.search(line)
+                if m: data_ids[m.group(1)] = m.group(2)
+        fails = []; warns = []; checked = 0
+        with open(sec_fp, encoding='utf-8', errors='replace') as f:
+            for ln, line in enumerate(f, 1):
+                m = npc_re.search(line)
+                if not m: continue
+                checked += 1
+                sid, sname = m.group(1), m.group(2)
+                if sid not in data_ids:
+                    warns.append(f'line {ln}: id {sid} ("{sname}") absent from Data/{fn} - will not be auto-marked')
+                elif data_ids[sid] != sname:
+                    fails.append(f'line {ln}: id {sid} name "{sname}" != Data name "{data_ids[sid]}"')
+        for w in warns: print(f"  WARN   {sec_fp}: {w}")
+        for p in fails: print(f"  FAIL   {sec_fp}: {p}")
+        sec_bad += len(fails); sec_warn += len(warns)
+        if not fails and not warns:
+            print(f"  OK     {sec_fp} ({checked} entries match Data/{fn})")
+else:
+    print("  (no Sections/ directory yet)")
+
+print()
+warn_note = f", {sec_warn} section warnings" if sec_warn else ""
+print(f"Summary: {len(bad)} file failures, {len(miss)} missing functions, {dup} id conflicts, {sec_bad} section mismatches{warn_note}")
+sys.exit(1 if (bad or miss or dup or sec_bad or not toc_ok) else 0)
 PYEOF
