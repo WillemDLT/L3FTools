@@ -183,6 +183,23 @@ function L3F.GetProfileNames()
     return names
 end
 
+-- Deep copy of the wing-priority store (sections.marks[mapID][wingIdx][npcID]).
+local function copySectionMarks(src)
+    local out = {}
+    for mapID, byMap in pairs(src or {}) do
+        out[mapID] = {}
+        for wingIdx, byWing in pairs(byMap) do
+            out[mapID][wingIdx] = {}
+            for npcID, list in pairs(byWing) do
+                local c = {}
+                for i, m in ipairs(list) do c[i] = m end
+                out[mapID][wingIdx][npcID] = c
+            end
+        end
+    end
+    return out
+end
+
 function L3F.SaveProfile(name)
     if not name or name == "" then return false, "Empty profile name" end
     local am = L3F.db.automarker
@@ -193,6 +210,7 @@ function L3F.SaveProfile(name)
         for i, m in ipairs(v) do copy[i] = m end
         p.markPriorities[k] = copy
     end
+    p.sectionMarks = copySectionMarks(L3F.db.sections and L3F.db.sections.marks)
     am.profiles[name] = p
     am.activeProfile = name
     return true, "Saved profile '" .. name .. "'"
@@ -208,6 +226,10 @@ function L3F.LoadProfile(name)
         local copy = {}
         for i, m in ipairs(v) do copy[i] = m end
         am.markPriorities[k] = copy
+    end
+    if p.sectionMarks then
+        L3F.db.sections = L3F.db.sections or {}
+        L3F.db.sections.marks = copySectionMarks(p.sectionMarks)
     end
     am.activeProfile = name
     return true, "Loaded profile '" .. name .. "'"
@@ -234,6 +256,7 @@ function L3F.SyncActiveProfile()
         for i, m in ipairs(v) do copy[i] = m end
         p.markPriorities[k] = copy
     end
+    p.sectionMarks = copySectionMarks(L3F.db.sections and L3F.db.sections.marks)
 end
 
 function L3F.SerializeProfile(name, profile)
@@ -248,8 +271,20 @@ function L3F.SerializeProfile(name, profile)
     for _, id in ipairs(keys) do
         table.insert(prios, tostring(id) .. "=" .. table.concat(profile.markPriorities[id], ","))
     end
+    local secs = {}
+    for mapID, byMap in pairs(profile.sectionMarks or {}) do
+        for wingIdx, byWing in pairs(byMap) do
+            for npcID, list in pairs(byWing) do
+                table.insert(secs, mapID .. "." .. wingIdx .. "." .. npcID
+                    .. "=" .. table.concat(list, ","))
+            end
+        end
+    end
+    table.sort(secs)
     local safeName = (name or "Untitled"):gsub(":", "_")
-    return "L3F1:" .. safeName .. ":e" .. table.concat(enabled, ",") .. ":p" .. table.concat(prios, ";")
+    return "L3F1:" .. safeName .. ":e" .. table.concat(enabled, ",")
+        .. ":p" .. table.concat(prios, ";")
+        .. ":s" .. table.concat(secs, ";")
 end
 
 function L3F.DeserializeProfile(str)
@@ -257,8 +292,9 @@ function L3F.DeserializeProfile(str)
     local name, rest = str:match("^L3F1:([^:]+):(.+)$")
     if not name then return nil, "Invalid format (expected L3F1:name:...)" end
     local enabledPart = rest:match(":?e([^:]*)") or ""
-    local prioPart    = rest:match(":?p(.*)$") or ""
-    local profile = { enabledNPCs = {}, markPriorities = {} }
+    local prioPart    = rest:match(":?p([^:]*)") or ""
+    local sectionPart = rest:match(":?s(.*)$") or ""
+    local profile = { enabledNPCs = {}, markPriorities = {}, sectionMarks = {} }
     for id in enabledPart:gmatch("(%d+)") do
         profile.enabledNPCs[tonumber(id)] = true
     end
@@ -268,6 +304,18 @@ function L3F.DeserializeProfile(str)
             local list = {}
             for m in marksStr:gmatch("(%d+)") do table.insert(list, tonumber(m)) end
             profile.markPriorities[tonumber(idStr)] = list
+        end
+    end
+    for entry in sectionPart:gmatch("([^;]+)") do
+        local mapID, wingIdx, npcID, marksStr = entry:match("^(%d+)%.(%d+)%.(%d+)=(.+)$")
+        if mapID then
+            local list = {}
+            for m in marksStr:gmatch("(%d+)") do table.insert(list, tonumber(m)) end
+            mapID, wingIdx, npcID = tonumber(mapID), tonumber(wingIdx), tonumber(npcID)
+            local sm = profile.sectionMarks
+            sm[mapID] = sm[mapID] or {}
+            sm[mapID][wingIdx] = sm[mapID][wingIdx] or {}
+            sm[mapID][wingIdx][npcID] = list
         end
     end
     return name, profile
