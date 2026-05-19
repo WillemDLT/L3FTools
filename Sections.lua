@@ -63,14 +63,12 @@ function L3F.NpcInActiveSection(npcID)
     return sec.npcSet[npcID] == true
 end
 
--- True if the NPC belongs to any wing of the currently active raid.
-local function npcInActiveRaid(npcID)
-    local def = L3F.activeRaidSections
-    if not def then return false end
-    for _, section in ipairs(def.sections) do
-        if section.npcSet[npcID] then return true end
+-- Find a raid's section def by its display name (used by the config UI).
+function L3F.GetRaidSections(raidName)
+    for _, def in pairs(L3F.sectionData) do
+        if def.raid == raidName then return def end
     end
-    return false
+    return nil
 end
 
 
@@ -104,13 +102,25 @@ L3F.effectivePriority = function(npc)
     return L3F.db.automarker.markPriorities[npc.id] or npc.marks
 end
 
--- Called by the config UI when a mark is toggled. Routes to the active
--- wing's store when editing a mob of the current raid; otherwise to the
--- global store, so editing other raids from the menu still works.
-function L3F.SetSectionPriority(npcID, list)
-    if L3F.activeRaidSections and npcInActiveRaid(npcID) then
-        local store = sectionMarkStore(true)
-        store[npcID] = list
+-- Explicit-wing getter/setter for the config UI, which shows every wing
+-- of a raid at once and therefore must address wings directly. With no
+-- mapID/wingIdx these fall back to the global (non-wing) mark store.
+function L3F.GetWingPriority(npc, mapID, wingIdx)
+    if L3F.db and mapID and wingIdx then
+        local sm = L3F.db.sections and L3F.db.sections.marks
+        local bySec = sm and sm[mapID] and sm[mapID][wingIdx]
+        if bySec and bySec[npc.id] then return bySec[npc.id] end
+    end
+    if not L3F.db then return npc.marks end
+    return L3F.db.automarker.markPriorities[npc.id] or npc.marks
+end
+
+function L3F.SetWingPriority(npcID, list, mapID, wingIdx)
+    if mapID and wingIdx then
+        local sdb = sectionDB()
+        sdb.marks[mapID] = sdb.marks[mapID] or {}
+        sdb.marks[mapID][wingIdx] = sdb.marks[mapID][wingIdx] or {}
+        sdb.marks[mapID][wingIdx][npcID] = list
     else
         L3F.db.automarker.markPriorities[npcID] = list
     end

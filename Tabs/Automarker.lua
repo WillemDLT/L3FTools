@@ -27,8 +27,13 @@ local function inList(markIdx, list)
     return false
 end
 
-local function togglePriorityMark(npc, markIdx)
-    local current = L3F.effectivePriority(npc)
+local function togglePriorityMark(npc, markIdx, mapID, wingIdx)
+    local current
+    if mapID and wingIdx and L3F.GetWingPriority then
+        current = L3F.GetWingPriority(npc, mapID, wingIdx)
+    else
+        current = L3F.effectivePriority(npc)
+    end
     local hadIt = inList(markIdx, current)
     local newList = {}
     for _, m in ipairs(MARK_ORDER) do
@@ -36,10 +41,9 @@ local function togglePriorityMark(npc, markIdx)
                         (m ~= markIdx and inList(m, current))
         if include then table.insert(newList, m) end
     end
-    -- Route through the section-aware setter so per-wing overrides are
-    -- written when inside a mapped raid; falls back to the global store.
-    if L3F.SetSectionPriority then
-        L3F.SetSectionPriority(npc.id, newList)
+    -- mapID+wingIdx -> per-wing override store; otherwise the global store.
+    if L3F.SetWingPriority then
+        L3F.SetWingPriority(npc.id, newList, mapID, wingIdx)
     else
         L3F.db.automarker.markPriorities[npc.id] = newList
     end
@@ -296,7 +300,7 @@ local function buildAutomarker(parent)
         local rowIdx, secIdx = 0, 0
         local y = 0
 
-        local function renderRow(npc)
+        local function renderRow(npc, mapID, wingIdx)
             rowIdx = rowIdx + 1
             local row = getRow(rowIdx)
             row:SetWidth(content:GetWidth() - 8)
@@ -309,14 +313,19 @@ local function buildAutomarker(parent)
                 L3F.db.automarker.enabledNPCs[npc.id] = self:GetChecked() and true or nil
                 if L3F.SyncActiveProfile then L3F.SyncActiveProfile() end
             end)
-            local priority = L3F.effectivePriority(npc)
+            local priority
+            if mapID and wingIdx and L3F.GetWingPriority then
+                priority = L3F.GetWingPriority(npc, mapID, wingIdx)
+            else
+                priority = L3F.effectivePriority(npc)
+            end
             for i, markIdx in ipairs(MARK_ORDER) do
                 local btn = row.markIcons[i]
                 btn.tex:SetTexture(string.format(MARK_TEXTURE, markIdx))
                 local isOn = inList(markIdx, priority)
                 btn.tex:SetVertexColor(1, 1, 1, isOn and 1.0 or 0.25)
                 btn:SetScript("OnClick", function()
-                    togglePriorityMark(npc, markIdx)
+                    togglePriorityMark(npc, markIdx, mapID, wingIdx)
                     rebuild()
                 end)
             end
@@ -335,7 +344,16 @@ local function buildAutomarker(parent)
             y = y + SECTION_HEIGHT + SECTION_TOP_GAP
         end
 
-        if raid.sections then
+        local secDef = L3F.GetRaidSections and L3F.GetRaidSections(raid.name)
+        if secDef then
+            for wIdx, wing in ipairs(secDef.sections) do
+                renderSection(wing.name)
+                for _, ref in ipairs(wing.npcs) do
+                    local npc = L3F.npcLookup[ref.id]
+                    if npc then renderRow(npc, secDef.mapID, wIdx) end
+                end
+            end
+        elseif raid.sections then
             for _, sec in ipairs(raid.sections) do
                 renderSection(sec.name)
                 for _, npc in ipairs(sec.npcs) do renderRow(npc) end
@@ -371,9 +389,5 @@ local function buildAutomarker(parent)
 end
 
 L3F.RegisterTab("automarker", "Automarker", nil, buildAutomarker)
-    local found
-    for _, r in ipairs(L3F.raids) do if r.name == initial then found = initial; break end end
-    selectRaid(found or (L3F.raids[1] and L3F.raids[1].name) or "")
-end
 
 L3F.RegisterTab("automarker", "Automarker", nil, buildAutomarker)
