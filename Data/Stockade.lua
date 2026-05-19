@@ -1,3 +1,0 @@
--- Removed. The Stockade preset is no longer part of the addon.
--- This file is not referenced from AutomarkerL3F.toc, so it will
--- not load. You can safely delete it from the folder.
