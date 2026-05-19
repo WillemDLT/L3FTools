@@ -539,20 +539,30 @@ local function buildAutomarker(parent)
 
     local function initDropdown(self, level)
         for _, raid in ipairs(L3F.raids) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = raid.name
-            info.func = function() selectRaid(raid.name) end
-            info.checked = (raid.name == currentRaidName)
-            UIDropDownMenu_AddButton(info, level)
+            -- Automarker tab is raid-only. Heroic dungeons register via the
+            -- same RegisterRaid call but are flat (no `sections` field) and
+            -- belong to the Atlas tab.
+            if raid.sections then
+                local info = UIDropDownMenu_CreateInfo()
+                info.text = raid.name
+                info.func = function() selectRaid(raid.name) end
+                info.checked = (raid.name == currentRaidName)
+                UIDropDownMenu_AddButton(info, level)
+            end
         end
     end
     UIDropDownMenu_Initialize(dropdown, initDropdown)
     UIDropDownMenu_SetWidth(dropdown, 200)
 
     local initial = L3F.db.atlas.lastSelectedRaid
-    local found
-    for _, r in ipairs(L3F.raids) do if r.name == initial then found = initial; break end end
-    selectRaid(found or (L3F.raids[1] and L3F.raids[1].name) or "")
+    local found, firstRaid
+    for _, r in ipairs(L3F.raids) do
+        if r.sections then
+            firstRaid = firstRaid or r.name
+            if r.name == initial then found = initial; break end
+        end
+    end
+    selectRaid(found or firstRaid or "")
 end
 
 L3F.RegisterTab("automarker", "Automarker", nil, buildAutomarker)
