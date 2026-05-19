@@ -316,9 +316,6 @@ L3F:RegisterRaid({
                 { id = 17167, name = "Conjured Elemental",   marks = TRASH,
                   spells = { 37054 },
                   notes = "Aran's elemental phase summons - cast Water Bolt (37054) at random raid members. Spread, AoE/Frost Trap them down before they outrange interrupts; Banish (one) is cleanest CC." },
-                { id = 11859, name = "Doomguard",            marks = TRASH,
-                  spells = { 19474, 89 },
-                  notes = "Optional Aran elemental-phase backup summon - casts Rain of Fire (19474) and Cripple (89) on the tank. Run away on aggro; only kill if a warlock can Enslave Demon." },
             },
         },
         {

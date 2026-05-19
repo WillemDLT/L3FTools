@@ -208,9 +208,6 @@ L3F:RegisterRaid({
         {
             name = "Misc",
             npcs = {
-                { id = 11859, name = "Doomguard", marks = TRASH,
-                  spells = { 89, 19474 },
-                  notes = "Warlock-summoned demon - irrelevant to SSC pulls beyond ambient summons. Cripple (89) and Rain of Fire (19474). Standard banish/enslave handling if it appears uncontrolled." },
             },
         },
     },

@@ -147,9 +147,6 @@ L3F:RegisterRaid({
         {
             name = "Other / Beasts",
             npcs = {
-                { id = 11859, name = "Doomguard",       marks = TRASH,
-                  spells = { 89, 19474 },
-                  notes = "Generic warlock-summoned demon. Cripple (89) movement slow plus Rain of Fire (19474) AoE channel. Not native ZA - treat as standard hostile guardian if it appears uncontrolled." },
             },
         },
     },

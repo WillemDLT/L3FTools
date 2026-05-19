@@ -354,9 +354,6 @@ L3F:RegisterRaid({
         {
             name = "Misc",
             npcs = {
-                { id = 11859, name = "Doomguard", marks = TRASH,
-                  spells = { 89, 19474 },
-                  notes = "Generic warlock-style demon. Cripple (89) tank slow plus Rain of Fire (19474) AoE channel. Tank pickup, watch for Rain of Fire, burn down as single target." },
             },
         },
     },
