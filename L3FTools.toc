@@ -17,6 +17,7 @@ Sections/MagtheridonsLair.lua
 Sections/GruulsLair.lua
 Sections/Karazhan.lua
 Sections/HyjalSummit.lua
+Sections/BlackTemple.lua
 Data/Karazhan.lua
 Data/GruulsLair.lua
 Data/MagtheridonsLair.lua

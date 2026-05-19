@@ -349,6 +349,18 @@ L3F:RegisterRaid({
                 { id = 23226, name = "Illidari Elite",     marks = TRASH,
                   spells = {},
                   notes = "Elite demon hunter melee on the Council approach - no abilities documented on Wowhead. Tank facing away; rotate kicks on any heavy melee abilities." },
+                -- The 3 Council-approach mobs below: NPC IDs verified (2+ sources);
+                -- ability names verified, but their spell IDs are unconfirmed - leaving
+                -- spells = {} until the IDs can be pulled in-game.
+                { id = 23403, name = "Illidari Assassin",   marks = TRASH,
+                  spells = {},
+                  notes = "Stealthing rogue on the approach to the Illidari Council. Opens from stealth, then Vanishes to re-stealth and reset threat, and applies a Paralyzing Poison stun. Flare or Track Hidden before pulling; tag it fast so it cannot restealth and reset." },
+                { id = 23402, name = "Illidari Battle-mage", marks = TRASH,
+                  spells = {},
+                  notes = "Caster trash on the Council approach - single-target Fireball and Frostbolt plus AoE Flamestrike and Blizzard, the latter draining mana. Interrupt-lock or pull it out of line of sight; spread the raid clear of the ground AoE." },
+                { id = 23397, name = "Illidari Blood Lord",  marks = TRASH,
+                  spells = {},
+                  notes = "Paladin-type tank-buster on the Council approach. Casts Divine Shield (~15s immunity - wait it out, do not waste cooldowns), Hammer of Justice (5s tank stun), and Judgement of Command for a heavy Holy hit. Stun-rotate through the Hammer." },
             },
         },
         {
