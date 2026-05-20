@@ -384,6 +384,13 @@ f:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" and arg1 == addonName then
         buildLookup()
         initDB()
+        -- Self-heal: if a previous accidental keybind left a text-editing
+        -- key (Backspace, Delete, Enter, arrows, ...) bound to hold-to-
+        -- mark, that binding wins over EditBox text input on TBC Anniv
+        -- and breaks the search box. Sweep them on every load.
+        if L3F.CleanupBlockedBindings then
+            L3F.CleanupBlockedBindings("L3FTOOLS_MOUSEOVERMARK")
+        end
         if L3F.BuildFrame    then L3F.BuildFrame()    end
         if L3F.BuildMinimap  then L3F.BuildMinimap()  end
         print("|cffffd100L3FTools|r loaded. Type |cffffff00/l3f|r or click the minimap icon.")
