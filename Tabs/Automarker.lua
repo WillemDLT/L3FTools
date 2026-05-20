@@ -566,5 +566,3 @@ local function buildAutomarker(parent)
 end
 
 L3F.RegisterTab("automarker", "Automarker", nil, buildAutomarker)
-
-L3F.RegisterTab("automarker", "Automarker", nil, buildAutomarker)
