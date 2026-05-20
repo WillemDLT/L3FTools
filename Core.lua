@@ -413,7 +413,7 @@ local function handleSlash(msg)
             (L3F.db.minimap.hide and "|cffff5555hidden|r" or "|cff00ff00shown|r"))
     elseif msg == "switcher" or msg == "wing" then
         if L3F.ToggleSwitcher then L3F.ToggleSwitcher() end
-    elseif msg == "automarker" or msg == "atlas" or msg == "settings" then
+    elseif msg == "automarker" or msg == "atlas" or msg == "map" or msg == "guild" or msg == "settings" then
         if not L3F.mainFrame then if L3F.BuildFrame then L3F.BuildFrame() end end
         if L3F.ShowTab then L3F.ShowTab(msg) end
         if L3F.mainFrame and not L3F.mainFrame:IsShown() then L3F.mainFrame:Show() end
@@ -424,6 +424,8 @@ local function handleSlash(msg)
         print("  /l3f                open the window")
         print("  /l3f automarker     open on Automarker tab")
         print("  /l3f atlas          open on Atlas tab")
+        print("  /l3f map            open on Map tab")
+        print("  /l3f guild          open on Guild tab")
         print("  /l3f settings       open on Settings tab")
         print("  /l3f toggle         master Automarker enable on/off")
         print("  /l3f minimap        hide/show the minimap button")

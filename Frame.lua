@@ -22,16 +22,27 @@ local function getMaxSize()
            math.max(MIN_HEIGHT, math.floor((sh or 768)  - 40))
 end
 
--- Tab registry. Each entry: { name, label, icon, builder, frame, built }
+-- Tab registry. Each entry: { name, label, icon, builder, frame, built, parent }
+-- Top-level tabs (parent=nil) render in row 1 (the main tab strip).
+-- Sub-tabs (parent="<top-level-name>") render in row 2 (the brick-wall strip),
+-- only visible when their parent is the active top-level tab.
 L3F.tabs = {}
-L3F.tabOrder = {}
+L3F.tabOrder = {}        -- top-level tabs only, in registration order
+L3F.subTabOrder = {}     -- parentName -> { subTabName, subTabName, ... } in registration order
 
-function L3F.RegisterTab(name, label, icon, builder)
+function L3F.RegisterTab(name, label, icon, builder, opts)
+    local parent = opts and opts.parent or nil
     L3F.tabs[name] = {
         name = name, label = label, icon = icon,
         builder = builder, frame = nil, built = false,
+        parent = parent,
     }
-    table.insert(L3F.tabOrder, name)
+    if parent then
+        L3F.subTabOrder[parent] = L3F.subTabOrder[parent] or {}
+        table.insert(L3F.subTabOrder[parent], name)
+    else
+        table.insert(L3F.tabOrder, name)
+    end
 end
 
 
@@ -39,33 +50,51 @@ end
 -- BuildFrame
 -- =============================================================
 local mainFrame
+local tabStrip
+local subTabStrip
 local tabContentHost
-local tabButtons = {}
+local tabButtons = {}        -- top-level (row 1) buttons by tab name
+local subTabButtons = {}     -- sub-tab (row 2) buttons by tab name
 
-local function showTab(name)
-    if not L3F.tabs[name] then return end
-    -- The hover preview is owned by the Automarker tab. Any tab switch
-    -- (including swap-to-Automarker from elsewhere) should clear it so
-    -- it doesn't linger over an unrelated tab.
-    if L3F.HoverPreview then L3F.HoverPreview:Hide() end
-    L3F.db.window.activeTab = name
-
-    -- Build on first show (lazy load).
-    for tabName, tab in pairs(L3F.tabs) do
-        if tab.frame then tab.frame:Hide() end
-    end
+-- Returns the actual content tab to render for a given clicked name.
+-- If name is a top-level tab WITH sub-tabs, routes to the last-active
+-- sub-tab (or the first if none remembered). If name is a sub-tab,
+-- returns it directly.
+local function resolveContentTab(name)
     local tab = L3F.tabs[name]
-    if not tab.built and tab.builder then
-        tab.frame = CreateFrame("Frame", nil, tabContentHost)
-        tab.frame:SetAllPoints(tabContentHost)
-        tab.builder(tab.frame)
-        tab.built = true
+    if not tab then return nil, nil end
+    if not tab.parent and L3F.subTabOrder[name] then
+        local subs = L3F.subTabOrder[name]
+        local lastSub = (L3F.db.window.activeSubTab or {})[name]
+        local target
+        if lastSub and L3F.tabs[lastSub] and L3F.tabs[lastSub].parent == name then
+            target = lastSub
+        else
+            target = subs[1]
+        end
+        return L3F.tabs[target], target
     end
-    if tab.frame then tab.frame:Show() end
+    return tab, name
+end
 
-    -- Highlight active tab button.
-    for tabName, btn in pairs(tabButtons) do
-        local active = (tabName == name)
+-- Repaint both rows' highlight state from L3F.db.window.
+local function refreshButtonHighlights()
+    local activeTop = L3F.db.window.activeTab
+    local activeSub = (L3F.db.window.activeSubTab or {})[activeTop]
+    for n, btn in pairs(tabButtons) do
+        local active = (n == activeTop)
+        if active then
+            btn.bg:SetColorTexture(1, 1, 1, 0.10)
+            btn.underline:Show()
+            btn.label:SetTextColor(1, 1, 1, 1)
+        else
+            btn.bg:SetColorTexture(0, 0, 0, 0)
+            btn.underline:Hide()
+            btn.label:SetTextColor(0.8, 0.8, 0.8, 1)
+        end
+    end
+    for n, btn in pairs(subTabButtons) do
+        local active = (n == activeSub)
         if active then
             btn.bg:SetColorTexture(1, 1, 1, 0.10)
             btn.underline:Show()
@@ -77,12 +106,82 @@ local function showTab(name)
         end
     end
 end
+
+-- Show/hide row 2 strip + its buttons (only those matching the active top-tab).
+-- Reanchors the content host below row 2 when visible, below row 1 otherwise.
+local function updateStripVisibility()
+    if not subTabStrip or not tabContentHost or not mainFrame then return end
+    local activeTop = L3F.db.window.activeTab
+    local hasSubTabs = L3F.subTabOrder[activeTop] ~= nil
+
+    for _, btn in pairs(subTabButtons) do
+        btn:SetShown(btn._parentName == activeTop)
+    end
+
+    tabContentHost:ClearAllPoints()
+    if hasSubTabs then
+        subTabStrip:Show()
+        tabContentHost:SetPoint("TOPLEFT",     subTabStrip, "BOTTOMLEFT",  0, -2)
+        tabContentHost:SetPoint("BOTTOMRIGHT", mainFrame,   "BOTTOMRIGHT", -8, 8)
+    else
+        subTabStrip:Hide()
+        tabContentHost:SetPoint("TOPLEFT",     tabStrip,    "BOTTOMLEFT",  0, -2)
+        tabContentHost:SetPoint("BOTTOMRIGHT", mainFrame,   "BOTTOMRIGHT", -8, 8)
+    end
+end
+
+local function showTab(name)
+    local tab = L3F.tabs[name]
+    if not tab then return end
+    -- The hover preview is owned by the Automarker tab. Any tab switch
+    -- (including swap-to-Automarker from elsewhere) should clear it so
+    -- it doesn't linger over an unrelated tab.
+    if L3F.HoverPreview then L3F.HoverPreview:Hide() end
+
+    -- Persist the requested tab. Sub-tab clicks also remember themselves
+    -- under their parent so re-opening the parent later restores them.
+    if tab.parent then
+        L3F.db.window.activeTab = tab.parent
+        L3F.db.window.activeSubTab = L3F.db.window.activeSubTab or {}
+        L3F.db.window.activeSubTab[tab.parent] = name
+    else
+        L3F.db.window.activeTab = name
+    end
+
+    -- Resolve which content frame to actually build/show. A click on a
+    -- top-level tab WITH sub-tabs routes to its last-active sub-tab;
+    -- direct sub-tab clicks resolve to themselves; everything else maps 1:1.
+    local contentTab, _
+    if tab.parent then
+        contentTab = tab
+    else
+        contentTab = resolveContentTab(name)
+    end
+
+    -- Hide all built tab frames; build & show the one we need.
+    for _, t in pairs(L3F.tabs) do
+        if t.frame then t.frame:Hide() end
+    end
+    if contentTab and contentTab.builder then
+        if not contentTab.built then
+            contentTab.frame = CreateFrame("Frame", nil, tabContentHost)
+            contentTab.frame:SetAllPoints(tabContentHost)
+            contentTab.builder(contentTab.frame)
+            contentTab.built = true
+        end
+        if contentTab.frame then contentTab.frame:Show() end
+    end
+
+    updateStripVisibility()
+    refreshButtonHighlights()
+end
 L3F.ShowTab = showTab
 
-local function createTabButton(parent, name, label, icon, x)
-    local btn = CreateFrame("Button", nil, parent)
+-- Shared styling for both row 1 and row 2 buttons. isSubTab flips the
+-- OnLeave highlight check to use activeSubTab instead of activeTab so a
+-- sub-tab button knows when it itself is the active one.
+local function styleTabButton(btn, name, label, isSubTab)
     btn:SetSize(120, 28)
-    btn:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", x, 0)
 
     btn.bg = btn:CreateTexture(nil, "BACKGROUND")
     btn.bg:SetAllPoints()
@@ -103,15 +202,35 @@ local function createTabButton(parent, name, label, icon, x)
         if self.bg then self.bg:SetColorTexture(1, 1, 1, 0.06) end
     end)
     btn:SetScript("OnLeave", function(self)
-        if L3F.db.window.activeTab ~= name then
-            self.bg:SetColorTexture(0, 0, 0, 0)
+        local isActive
+        if isSubTab then
+            isActive = ((L3F.db.window.activeSubTab or {})[self._parentName] == name)
         else
+            isActive = (L3F.db.window.activeTab == name)
+        end
+        if isActive then
             self.bg:SetColorTexture(1, 1, 1, 0.10)
+        else
+            self.bg:SetColorTexture(0, 0, 0, 0)
         end
     end)
     btn:SetScript("OnClick", function() showTab(name) end)
+end
 
+local function createTabButton(parent, name, label, icon, x)
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", x, 0)
+    styleTabButton(btn, name, label, false)
     tabButtons[name] = btn
+    return btn
+end
+
+local function createSubTabButton(parent, name, label, x, parentName)
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", x, 0)
+    btn._parentName = parentName
+    styleTabButton(btn, name, label, true)
+    subTabButtons[name] = btn
     return btn
 end
 
@@ -201,8 +320,8 @@ function L3F.BuildFrame()
     logo:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -14, -28)
     mainFrame.logo = logo
 
-    -- Tab strip frame (below the title bar)
-    local tabStrip = CreateFrame("Frame", nil, mainFrame)
+    -- Row 1: top-level tab strip (below the title bar).
+    tabStrip = CreateFrame("Frame", nil, mainFrame)
     tabStrip:SetHeight(28)
     tabStrip:SetPoint("TOPLEFT",  mainFrame, "TOPLEFT",  6, -25)
     tabStrip:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -6, -25)
@@ -211,13 +330,27 @@ function L3F.BuildFrame()
     stripBg:SetColorTexture(0, 0, 0, 0.25)
     mainFrame.tabStrip = tabStrip
 
-    -- Tab content host (everything below the tab strip)
+    -- Row 2: sub-tab strip (brick-wall row below row 1). Hidden by default;
+    -- updateStripVisibility() shows it whenever the active top-level tab
+    -- has any sub-tabs registered against it.
+    subTabStrip = CreateFrame("Frame", nil, mainFrame)
+    subTabStrip:SetHeight(28)
+    subTabStrip:SetPoint("TOPLEFT",  tabStrip, "BOTTOMLEFT",  0, -2)
+    subTabStrip:SetPoint("TOPRIGHT", tabStrip, "BOTTOMRIGHT", 0, -2)
+    local subStripBg = subTabStrip:CreateTexture(nil, "BACKGROUND")
+    subStripBg:SetAllPoints()
+    subStripBg:SetColorTexture(0, 0, 0, 0.15)  -- slightly lighter shelf
+    subTabStrip:Hide()
+    mainFrame.subTabStrip = subTabStrip
+
+    -- Tab content host. Reanchored on every tab switch by updateStripVisibility()
+    -- so it sits below row 2 when row 2 is visible, below row 1 otherwise.
     tabContentHost = CreateFrame("Frame", nil, mainFrame)
     tabContentHost:SetPoint("TOPLEFT",     tabStrip,  "BOTTOMLEFT",  0, -2)
     tabContentHost:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", -8, 8)
     mainFrame.contentHost = tabContentHost
 
-    -- Render tab buttons in registration order
+    -- Render row 1 buttons in registration order. Spacing 124 = 120w + 4 gap.
     local x = 4
     for _, name in ipairs(L3F.tabOrder) do
         local tab = L3F.tabs[name]
@@ -225,11 +358,30 @@ function L3F.BuildFrame()
         x = x + 124
     end
 
+    -- Render row 2 buttons for every parent that has sub-tabs registered.
+    -- Buttons are all anchored to the same subTabStrip; they're shown/hidden
+    -- per-parent by updateStripVisibility() so only the active parent's row
+    -- appears at a time. The 60px x-offset gives the brick-wall feel: row 2
+    -- button centers land between row 1 button edges.
+    local BRICK_OFFSET = 60
+    for parentName, subList in pairs(L3F.subTabOrder) do
+        local sx = 4 + BRICK_OFFSET
+        for _, subName in ipairs(subList) do
+            local subTab = L3F.tabs[subName]
+            createSubTabButton(subTabStrip, subName, subTab.label, sx, parentName)
+            sx = sx + 124
+        end
+    end
+
     buildResizeGrip(mainFrame)
 
-    -- Show initial tab
+    -- Show initial tab. If the saved activeTab no longer exists (e.g. an old
+    -- savedvar from before this build), fall back to the first registered
+    -- top-level tab so the window always opens to *something* sensible.
     local initial = L3F.db.window.activeTab
-    if not L3F.tabs[initial] then initial = L3F.tabOrder[1] end
+    if not L3F.tabs[initial] or L3F.tabs[initial].parent then
+        initial = L3F.tabOrder[1]
+    end
     showTab(initial)
 
     L3F.mainFrame = mainFrame

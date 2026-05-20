@@ -70,5 +70,11 @@ UI/HoverPreview.lua
 Frame.lua
 Tabs/Automarker.lua
 Tabs/Atlas.lua
+Tabs/Map.lua
+Tabs/Guild.lua
+Tabs/Guild/Composer.lua
+Tabs/Guild/Crafts.lua
+Tabs/Guild/RaidPlanner.lua
+Tabs/Guild/Planner.lua
 Tabs/Settings.lua
 Minimap.lua
