@@ -415,38 +415,42 @@ local function buildAutomarker(parent)
 
     -- SEARCH BOX - filters the NPC list by name as you type. Sits to the
     -- right of the raid dropdown so it doesn't push everything down.
-    -- No global name on the EditBox: with an explicit name, the keystroke
-    -- handler intermittently dropped Backspace events under the
-    -- OnTextChanged -> rebuild chain (the Atlas search, identical setup
-    -- but unnamed, has always worked). Saved across loads via Bindings.xml
-    -- ifany; nothing else relies on a stable global name.
+    -- Mirrors the L3FTools Atlas search (which Morphéours confirmed works):
+    -- unnamed EditBox, synchronous rebuild, no OnEditFocus handlers, and
+    -- an explicit X clear button so the user always has a way to empty
+    -- the box even if their keybindings happen to capture Backspace.
     local searchBox = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
-    searchBox:SetSize(180, 22)
+    searchBox:SetSize(160, 22)
     searchBox:SetPoint("LEFT", dropdown, "RIGHT", 8, 2)
     searchBox:SetAutoFocus(false)
     searchBox:SetMaxLetters(40)
     local searchPlaceholder = searchBox:CreateFontString(nil, "OVERLAY", "GameFontDisable")
     searchPlaceholder:SetPoint("LEFT", searchBox, "LEFT", 2, 0)
     searchPlaceholder:SetText("Search NPCs...")
-    -- Defer the rebuild one tick so the EditBox finishes processing the
-    -- keystroke (especially Backspace) before we tear down/rebuild the
-    -- row pool synchronously. Running the rebuild inline on OnTextChanged
-    -- could swallow rapid Backspace presses.
-    local pendingRebuild = false
     searchBox:HookScript("OnTextChanged", function(self)
         searchPlaceholder:SetShown(self:GetText() == "")
-        if pendingRebuild then return end
-        pendingRebuild = true
-        C_Timer.After(0, function()
-            pendingRebuild = false
-            if rebuild then rebuild() end
-        end)
-    end)
-    searchBox:HookScript("OnEditFocusGained", function() searchPlaceholder:SetText("") end)
-    searchBox:HookScript("OnEditFocusLost", function(self)
-        if self:GetText() == "" then searchPlaceholder:SetText("Search NPCs...") end
+        if rebuild then rebuild() end
     end)
     searchBox:SetScript("OnEscapePressed", function(self) self:SetText("") self:ClearFocus() end)
+
+    -- Visible X button to clear the search. Useful as a Backspace fallback
+    -- whenever a player has a global keybind that swallows the Backspace
+    -- key while an EditBox is focused (rare but observed).
+    local clearBtn = CreateFrame("Button", nil, searchBox)
+    clearBtn:SetSize(16, 16)
+    clearBtn:SetPoint("RIGHT", searchBox, "RIGHT", -2, 0)
+    clearBtn:SetNormalTexture("Interface\\FriendsFrame\\ClearBroadcastIcon")
+    clearBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+    clearBtn:SetScript("OnClick", function()
+        searchBox:SetText("")
+        searchBox:ClearFocus()
+    end)
+    clearBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Clear search")
+        GameTooltip:Show()
+    end)
+    clearBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     local scroll = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT",     dropdown, "BOTTOMLEFT", 16, -8)
