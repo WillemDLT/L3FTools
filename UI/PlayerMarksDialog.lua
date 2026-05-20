@@ -35,7 +35,9 @@ local function buildDialog()
     local d = CreateFrame("Frame", "L3FToolsPlayerMarksDialog", UIParent, "BasicFrameTemplateWithInset")
     d:SetSize(460, 380)
     d:SetPoint("CENTER")
-    d:SetFrameStrata("DIALOG")
+    -- FULLSCREEN_DIALOG (one strata above the main window's DIALOG) so
+    -- this manager popup always appears IN FRONT of the main window.
+    d:SetFrameStrata("FULLSCREEN_DIALOG")
     d:SetToplevel(true)
     d:SetClampedToScreen(true)
     d:EnableMouse(true)

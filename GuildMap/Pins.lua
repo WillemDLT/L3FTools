@@ -57,7 +57,10 @@ local function getContextMenu()
     if contextMenu then return contextMenu end
     local m = CreateFrame("Frame", "L3FGuildMapPinMenu", UIParent, "BackdropTemplate")
     m:SetSize(130, 84)
-    m:SetFrameStrata("DIALOG")
+    -- FULLSCREEN_DIALOG (one strata above the main window's DIALOG) so
+    -- the right-click context menu always appears IN FRONT of L3FTools'
+    -- main window if the player has it open underneath the map.
+    m:SetFrameStrata("FULLSCREEN_DIALOG")
     m:SetFrameLevel(99)
     m:SetBackdrop({
         bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",

@@ -62,7 +62,9 @@ local function getStringDialog()
     local d = CreateFrame("Frame", "L3FToolsStringDialog", UIParent, "BasicFrameTemplateWithInset")
     d:SetSize(440, 340)
     d:SetPoint("CENTER")
-    d:SetFrameStrata("DIALOG")
+    -- FULLSCREEN_DIALOG (one strata above the main window's DIALOG) so
+    -- Export/Import popups always appear IN FRONT of the main window.
+    d:SetFrameStrata("FULLSCREEN_DIALOG")
     d:SetToplevel(true)
     d:SetClampedToScreen(true)
     d:EnableMouse(true)
