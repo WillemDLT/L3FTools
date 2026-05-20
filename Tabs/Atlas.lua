@@ -152,11 +152,14 @@ local function buildTreePane(parent)
     bg:SetAllPoints(); bg:SetColorTexture(0, 0, 0, 0.18)
 
     -- SEARCH BOX (global - filters the NPC list across every raid + heroic).
+    -- Right text inset reserves room for the X clear button so long
+    -- queries can't visually slide under it.
     searchBox = CreateFrame("EditBox", nil, treePane, "InputBoxTemplate")
     searchBox:SetSize(176, 22)
     searchBox:SetPoint("TOPLEFT", treePane, "TOPLEFT", 14, -8)
     searchBox:SetAutoFocus(false)
     searchBox:SetMaxLetters(40)
+    searchBox:SetTextInsets(0, 20, 0, 0)
     local placeholder = searchBox:CreateFontString(nil, "OVERLAY", "GameFontDisable")
     placeholder:SetPoint("LEFT", searchBox, "LEFT", 2, 0)
     placeholder:SetText("Search")
@@ -169,6 +172,24 @@ local function buildTreePane(parent)
         if self:GetText() == "" then placeholder:SetText("Search") end
     end)
     searchBox:SetScript("OnEscapePressed", function(self) self:SetText("") self:ClearFocus() end)
+
+    -- X clear button (mirrors the Automarker tab's button so the two
+    -- search boxes feel the same; also serves as a Backspace fallback).
+    local clearBtn = CreateFrame("Button", nil, searchBox)
+    clearBtn:SetSize(16, 16)
+    clearBtn:SetPoint("RIGHT", searchBox, "RIGHT", -2, 0)
+    clearBtn:SetNormalTexture("Interface\\FriendsFrame\\ClearBroadcastIcon")
+    clearBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+    clearBtn:SetScript("OnClick", function()
+        searchBox:SetText("")
+        searchBox:ClearFocus()
+    end)
+    clearBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Clear search")
+        GameTooltip:Show()
+    end)
+    clearBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     local treeScroll = CreateFrame("ScrollFrame", nil, treePane, "UIPanelScrollFrameTemplate")
     treeScroll:SetPoint("TOPLEFT",     searchBox, "BOTTOMLEFT",  0, -6)

@@ -424,6 +424,9 @@ local function buildAutomarker(parent)
     searchBox:SetPoint("LEFT", dropdown, "RIGHT", 8, 2)
     searchBox:SetAutoFocus(false)
     searchBox:SetMaxLetters(40)
+    -- Reserve room on the right for the X clear button so a long query
+    -- can't slide visually under it.
+    searchBox:SetTextInsets(0, 20, 0, 0)
     local searchPlaceholder = searchBox:CreateFontString(nil, "OVERLAY", "GameFontDisable")
     searchPlaceholder:SetPoint("LEFT", searchBox, "LEFT", 2, 0)
     searchPlaceholder:SetText("Search NPCs...")

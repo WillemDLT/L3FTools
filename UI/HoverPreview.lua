@@ -122,19 +122,33 @@ local function build()
     refreshPin()
 
     -- ---------------------------------------------------------
-    -- RESIZE handle (bottom-right corner)
+    -- RESIZE handle (bottom-LEFT corner). The preview sits to the LEFT
+    -- of the main window with its right edge glued to the main frame,
+    -- so the bottom-LEFT corner is the only "free" corner the player
+    -- can grab. Sizing direction matches - dragging here grows the
+    -- preview to the left and down without ungluing it from the main
+    -- frame on the right.
     -- ---------------------------------------------------------
     local resize = CreateFrame("Button", nil, frame)
     resize:SetSize(16, 16)
-    resize:SetPoint("BOTTOMRIGHT", -4, 4)
+    resize:SetPoint("BOTTOMLEFT", 4, 4)
+    -- Mirror the grabber texture horizontally so the diagonal points
+    -- toward the corner it's anchored on (bottom-LEFT).
     resize:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+    resize:GetNormalTexture():SetTexCoord(1, 0, 0, 1)
     resize:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+    resize:GetHighlightTexture():SetTexCoord(1, 0, 0, 1)
     resize:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
-    resize:SetScript("OnMouseDown", function() frame:StartSizing("BOTTOMRIGHT") end)
+    resize:GetPushedTexture():SetTexCoord(1, 0, 0, 1)
+    -- Sizing direction is "LEFT" rather than "BOTTOMLEFT" because the
+    -- preview's height is pinned to the main frame's height by the
+    -- TOPRIGHT + BOTTOMRIGHT anchors set in Show(). Only width is user-
+    -- adjustable; "LEFT" lets the grip drag the left edge horizontally
+    -- while WoW ignores vertical cursor movement.
+    resize:SetScript("OnMouseDown", function() frame:StartSizing("LEFT") end)
     resize:SetScript("OnMouseUp", function()
         frame:StopMovingOrSizing()
         L3F.db.preview.sizeW = frame:GetWidth()
-        L3F.db.preview.sizeH = frame:GetHeight()
     end)
 
     -- ---------------------------------------------------------
@@ -255,12 +269,17 @@ function L3F.HoverPreview:Show(npc, anchorFrame)
     cancelHide()
     refreshContent(npc)
 
-    -- Anchor to the LEFT of the main L3FTools window if available,
-    -- so the preview sits on the same side as AutomarkerL3F's preview.
+    -- Anchor to the LEFT of the main L3FTools window if available.
+    -- Pin BOTH right corners (TOPRIGHT and BOTTOMRIGHT) to the main
+    -- frame's left edge so the preview's height auto-tracks the main
+    -- window - resize the menu vertically and the preview follows
+    -- without ever looking misaligned. Width stays user-controlled
+    -- via the bottom-left resize grip.
     -- Fall back to anchorFrame (the row itself) if mainFrame isn't shown.
     frame:ClearAllPoints()
     if L3F.mainFrame and L3F.mainFrame:IsShown() then
-        frame:SetPoint("TOPRIGHT", L3F.mainFrame, "TOPLEFT", 0, 0)
+        frame:SetPoint("TOPRIGHT",    L3F.mainFrame, "TOPLEFT",    0, 0)
+        frame:SetPoint("BOTTOMRIGHT", L3F.mainFrame, "BOTTOMLEFT", 0, 0)
     elseif anchorFrame then
         frame:SetPoint("TOPRIGHT", anchorFrame, "TOPLEFT", -8, 0)
     else
