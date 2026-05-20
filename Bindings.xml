@@ -1,19 +1,14 @@
 <Bindings>
     <!--
-        BINDING_HEADER_/BINDING_NAME_ globals MUST be set before WoW's
-        Key Bindings UI registers the binding below, or the row falls
-        into the generic "Other" category with the raw label
-        "HEADER_L3FTOOLS". Setting them in Core.lua's top-level was
-        too late on TBC Anniversary - the binding gets categorized
-        at the moment Bindings.xml is parsed, which seems to happen
-        before .toc-listed Lua files run.
-
-        <Script file="..."/> sources BindingHeaders.lua at the exact
-        moment this XML is being parsed - earlier than any other
-        Lua we can run.
+        category="L3FTools" is the attribute working addons (Baganator,
+        WeakAuras, ...) use. Unlike header="..." which needs a matching
+        BINDING_HEADER_<X> global set BEFORE parse time (which doesn't
+        seem to work on TBC Anniversary), category takes the literal
+        attribute value as the display name and slots the binding under
+        WoW's built-in "AddOns" auto-group. header= is kept as a fallback
+        in case some client version ignores category.
     -->
-    <Script file="BindingHeaders.lua"/>
-    <Binding name="L3FTOOLS_MOUSEOVERMARK" runOnUp="true" header="L3FTOOLS">
+    <Binding name="L3FTOOLS_MOUSEOVERMARK" runOnUp="true" header="L3FTOOLS" category="L3FTools">
         if L3FTools then L3FTools.mouseoverHeld = keystate == "down" end
     </Binding>
 </Bindings>
