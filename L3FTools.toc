@@ -55,6 +55,16 @@ Data/Drops/HyjalSummit.lua
 Data/Drops/BlackTemple.lua
 Data/Drops/ZulAman.lua
 Data/Drops/SunwellPlateau.lua
+Data/Consumables/Flasks.lua
+Data/Consumables/BattleElixirs.lua
+Data/Consumables/GuardianElixirs.lua
+Data/Consumables/ZandalarElixirs.lua
+Data/Consumables/UtilityElixirs.lua
+Data/Consumables/Food.lua
+Data/Consumables/ArmorWeaponBuffs.lua
+Data/Consumables/Potions.lua
+Data/Consumables/MiscItems.lua
+Data/Consumables/ProfessionItems.lua
 UI/ModelViewer.lua
 UI/HoverPreview.lua
 Frame.lua
