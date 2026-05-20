@@ -808,6 +808,13 @@ local function buildDetailPane(parent)
     local function fitBody()
         local w = subTabContent:GetWidth()
         if w and w > 1 then subTabContent.body:SetWidth(w) end
+        -- Sub-tabs whose rendered height depends on the new width (e.g.
+        -- the Notes wrapping FontString) register a callback here so
+        -- they re-measure on every window resize. Cleared at the start
+        -- of each RefreshDetailPane so stale callbacks don't leak.
+        if subTabContent.body.onWidthChange then
+            subTabContent.body.onWidthChange()
+        end
     end
     subTabContent:HookScript("OnSizeChanged", fitBody)
     fitBody()
@@ -860,6 +867,9 @@ local function buildDetailPane(parent)
             btn.label:SetTextColor(active and 1 or 0.7, active and 1 or 0.7, active and 1 or 0.7, 1)
             if active then btn.underline:Show() else btn.underline:Hide() end
         end
+        -- Drop any resize callback from the previous sub-tab; the new
+        -- render below installs its own if needed.
+        subTabContent.body.onWidthChange = nil
         -- Clear both child frames AND regions (FontStrings/Textures from prior sub-tab).
         for _, c in ipairs({subTabContent.body:GetChildren()}) do c:Hide(); c:SetParent(nil) end
         if subTabContent.body.GetRegions then
@@ -979,8 +989,15 @@ local function buildDetailPane(parent)
             txt:SetPoint("TOPRIGHT", subTabContent.body, "TOPRIGHT", -4, -4)
             txt:SetJustifyH("LEFT"); txt:SetJustifyV("TOP")
             txt:SetText(npc.notes or "No strategy notes yet.")
-            txt:SetWidth(subTabContent.body:GetWidth() - 8)
-            subTabContent.body:SetHeight(math.max(txt:GetStringHeight() + 8, 1))
+            -- No SetWidth: anchors govern the FontString's width, so the
+            -- text re-flows whenever the body width changes. Re-measure
+            -- and re-set body height now AND on every subsequent resize
+            -- via the onWidthChange callback the scroll runs from fitBody.
+            local function relayoutNotes()
+                subTabContent.body:SetHeight(math.max(txt:GetStringHeight() + 8, 1))
+            end
+            relayoutNotes()
+            subTabContent.body.onWidthChange = relayoutNotes
 
         elseif sub == "drops" then
             if npc.drops and #npc.drops > 0 then
