@@ -81,4 +81,5 @@ Tabs/Guild/RaidPlanner.lua
 Tabs/Guild/Planner.lua
 Tabs/Settings.lua
 GuildMap/Core.lua
+GuildMap/Broadcast.lua
 Minimap.lua

@@ -438,6 +438,25 @@ local function handleSlash(msg)
         if L3F.mainFrame and not L3F.mainFrame:IsShown() then L3F.mainFrame:Show() end
     elseif msg == "reset" or msg == "resetwindow" then
         if L3F.ResetWindow then L3F.ResetWindow() end
+    elseif msg:match("^gm%s") or msg == "gm" then
+        -- /l3f gm <sub> - GuildMap debug commands. Hidden from /l3f help
+        -- until Phase 1 chunks land; intended for in-game verification
+        -- during chunk 3/4 testing.
+        local sub = msg:match("^gm%s+(.+)$") or ""
+        if sub == "dump" then
+            if L3F.GuildMap and L3F.GuildMap.DumpRoster then L3F.GuildMap.DumpRoster() end
+        elseif sub == "send" then
+            if L3F.GuildMap and L3F.GuildMap.BroadcastNow then
+                local ok = L3F.GuildMap.BroadcastNow()
+                print("|cffffd100L3FMap|r send: " .. (ok and "|cff00ff00ok|r" or "|cffff5555blocked|r"))
+            end
+        elseif sub == "privacy" then
+            if L3F.GuildMap and L3F.GuildMap.ShowPrivacyPopup then L3F.GuildMap.ShowPrivacyPopup() end
+        elseif sub == "resetprivacy" then
+            if L3F.GuildMap and L3F.GuildMap.ResetPrivacyAnswer then L3F.GuildMap.ResetPrivacyAnswer() end
+        else
+            print("|cffffd100L3FMap|r commands: dump | send | privacy | resetprivacy")
+        end
     elseif msg == "help" then
         print("|cffffd100L3FTools|r commands:")
         print("  /l3f                open the window")
