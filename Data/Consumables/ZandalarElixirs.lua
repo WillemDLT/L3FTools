@@ -2,7 +2,7 @@
 local _, L3F = ...
 
 L3F.RegisterConsumables({
-    { name = "Spirit of Zanza", nameFR = "Esprit de Zanza", category = "Zandalar Reputation Elixirs", effect = "+25 Sta, +25 Spirit" },
-    { name = "Swiftness of Zanza", nameFR = "Rapidité de Zanza", category = "Zandalar Reputation Elixirs", effect = "+20% movement speed" },
-    { name = "Sheen of Zanza", nameFR = "Brillance de Zanza", category = "Zandalar Reputation Elixirs", effect = "3% spell reflect on incoming spells" },
+    { id = 20079, name = "Spirit of Zanza", nameFR = "Esprit de Zanza", category = "Zandalar Reputation Elixirs", effect = "+25 Sta, +25 Spirit" },
+    { id = 20081, name = "Swiftness of Zanza", nameFR = "Rapidité de Zanza", category = "Zandalar Reputation Elixirs", effect = "+20% movement speed" },
+    { id = 20080, name = "Sheen of Zanza", nameFR = "Brillance de Zanza", category = "Zandalar Reputation Elixirs", effect = "3% spell reflect on incoming spells" },
 })
