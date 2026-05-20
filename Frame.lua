@@ -12,6 +12,16 @@ local addonName, L3F = ...
 
 local MIN_WIDTH, MIN_HEIGHT = 700, 400
 
+-- Max size = UIParent minus a 20px margin on each side, so the resize
+-- grip stays grabbable. Computed dynamically each time it's needed - if
+-- the player resizes the WoW window between sessions, the bound updates
+-- next time they grab the grip.
+local function getMaxSize()
+    local sw, sh = UIParent:GetSize()
+    return math.max(MIN_WIDTH,  math.floor((sw or 1280) - 40)),
+           math.max(MIN_HEIGHT, math.floor((sh or 768)  - 40))
+end
+
 -- Tab registry. Each entry: { name, label, icon, builder, frame, built }
 L3F.tabs = {}
 L3F.tabOrder = {}
@@ -106,14 +116,19 @@ local function createTabButton(parent, name, label, icon, x)
 end
 
 
-local function buildResizeGrip(frame)
-    -- Modern API first, fallback to old API for TBC Anniversary.
-    if frame.SetResizable then frame:SetResizable(true) end
+local function applyResizeBounds(frame)
+    local maxW, maxH = getMaxSize()
     if frame.SetResizeBounds then
-        frame:SetResizeBounds(MIN_WIDTH, MIN_HEIGHT)
+        frame:SetResizeBounds(MIN_WIDTH, MIN_HEIGHT, maxW, maxH)
     elseif frame.SetMinResize then
         frame:SetMinResize(MIN_WIDTH, MIN_HEIGHT)
+        if frame.SetMaxResize then frame:SetMaxResize(maxW, maxH) end
     end
+end
+
+local function buildResizeGrip(frame)
+    if frame.SetResizable then frame:SetResizable(true) end
+    applyResizeBounds(frame)
 
     local grip = CreateFrame("Button", nil, frame)
     grip:SetSize(16, 16)
@@ -123,6 +138,8 @@ local function buildResizeGrip(frame)
     grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
 
     grip:SetScript("OnMouseDown", function(self)
+        -- Refresh bounds in case the WoW window was resized since login.
+        applyResizeBounds(frame)
         frame:StartSizing("BOTTOMRIGHT")
     end)
     grip:SetScript("OnMouseUp", function(self)
@@ -138,7 +155,15 @@ function L3F.BuildFrame()
     if mainFrame then return end
 
     mainFrame = CreateFrame("Frame", "L3FToolsMainFrame", UIParent, "BasicFrameTemplateWithInset")
-    mainFrame:SetSize(L3F.db.window.width or 900, L3F.db.window.height or 560)
+    -- Clamp the saved size against the current screen so an oversize value
+    -- (e.g. the user resized past the screen and then logged in on a
+    -- smaller display) doesn't trap the window with its grip off-screen.
+    -- We don't write the clamped value back to db - if the player later
+    -- comes back on a larger screen, the original size is restored.
+    local maxW, maxH = getMaxSize()
+    local loadW = math.min(L3F.db.window.width or 900, maxW)
+    local loadH = math.min(L3F.db.window.height or 560, maxH)
+    mainFrame:SetSize(loadW, loadH)
     -- DIALOG strata so add-on UI icons (WeakAuras, BigWigs bars, ...) at
     -- HIGH don't draw on top of our menu. The hover preview matches.
     mainFrame:SetFrameStrata("DIALOG")
@@ -218,4 +243,25 @@ function L3F.ToggleFrame()
     else
         mainFrame:Show()
     end
+end
+
+
+-- =============================================================
+-- /l3f reset - recovery for a window that got dragged off-screen
+-- or resized past the screen edge. Wipes the saved geometry and
+-- re-centers at the 900x560 default.
+-- =============================================================
+function L3F.ResetWindow()
+    L3F.db.window.width  = 900
+    L3F.db.window.height = 560
+    L3F.db.window.x      = nil
+    L3F.db.window.y      = nil
+    if mainFrame then
+        local maxW, maxH = getMaxSize()
+        mainFrame:SetSize(math.min(900, maxW), math.min(560, maxH))
+        mainFrame:ClearAllPoints()
+        mainFrame:SetPoint("CENTER")
+        if not mainFrame:IsShown() then mainFrame:Show() end
+    end
+    print("|cffffd100L3FTools|r Window reset to default size and centered.")
 end

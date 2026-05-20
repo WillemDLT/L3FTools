@@ -416,6 +416,8 @@ local function handleSlash(msg)
         if not L3F.mainFrame then if L3F.BuildFrame then L3F.BuildFrame() end end
         if L3F.ShowTab then L3F.ShowTab(msg) end
         if L3F.mainFrame and not L3F.mainFrame:IsShown() then L3F.mainFrame:Show() end
+    elseif msg == "reset" or msg == "resetwindow" then
+        if L3F.ResetWindow then L3F.ResetWindow() end
     elseif msg == "help" then
         print("|cffffd100L3FTools|r commands:")
         print("  /l3f                open the window")
@@ -425,6 +427,7 @@ local function handleSlash(msg)
         print("  /l3f toggle         master Automarker enable on/off")
         print("  /l3f minimap        hide/show the minimap button")
         print("  /l3f switcher       show/hide the wing switcher")
+        print("  /l3f reset          reset window size + position to defaults")
     else
         if L3F.ToggleFrame then L3F.ToggleFrame() end
     end
