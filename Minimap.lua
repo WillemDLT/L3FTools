@@ -37,17 +37,37 @@ function L3F.BuildMinimap()
     btn:SetFrameStrata("MEDIUM")
     btn:SetFrameLevel(8)
 
+    -- Resize each button-state texture to 20x20 centred inside the
+    -- 28x28 button, so the gold tracking-border ring below can sit
+    -- around the icon the way every other addon's minimap button
+    -- looks (LibDBIcon convention).
+    local function shrinkToIconArea(tex)
+        if not tex then return end
+        tex:ClearAllPoints()
+        tex:SetPoint("CENTER", btn, "CENTER", 0, 0)
+        tex:SetSize(20, 20)
+    end
+
     btn:SetNormalTexture("Interface\\AddOns\\L3FTools\\Media\\automarker")
-    local normal = btn:GetNormalTexture()
-    if normal then normal:SetTexCoord(0, 1, 0, 1) end
+    shrinkToIconArea(btn:GetNormalTexture())
 
     btn:SetHighlightTexture("Interface\\AddOns\\L3FTools\\Media\\automarker", "ADD")
     local hl = btn:GetHighlightTexture()
+    shrinkToIconArea(hl)
     if hl then hl:SetAlpha(0.4) end
 
     btn:SetPushedTexture("Interface\\AddOns\\L3FTools\\Media\\automarker")
     local pushed = btn:GetPushedTexture()
+    shrinkToIconArea(pushed)
     if pushed then pushed:SetVertexColor(0.8, 0.8, 0.8) end
+
+    -- Gold tracking-border ring drawn over the icon (Blizzard texture).
+    -- 54x54 centred so it visually surrounds the 20x20 icon - same
+    -- look as every other addon's minimap button.
+    local border = btn:CreateTexture(nil, "OVERLAY")
+    border:SetSize(54, 54)
+    border:SetPoint("CENTER", btn, "CENTER", 0, 0)
+    border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
 
     btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     btn:SetMovable(true)
