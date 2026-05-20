@@ -295,7 +295,13 @@ local function upsertPin(short, entry)
         mf.icon:SetSize(12 * sizeMul, 12 * sizeMul)
 
         HBDPins:RemoveMinimapIcon(REF_NAME, mf)
-        HBDPins:AddMinimapIconMap(REF_NAME, mf, entry.mapID, entry.x, entry.y, true, true)
+        -- showInParentZone=true (let sub-zone pins show on the parent map),
+        -- floatOnEdge=false. floatOnEdge=true made distant guildies render
+        -- at the minimap rim like a direction indicator - Morphéours
+        -- reported pins showing "even at 20km away". With it false, pins
+        -- only render when the guildie is genuinely inside the minimap's
+        -- visible range.
+        HBDPins:AddMinimapIconMap(REF_NAME, mf, entry.mapID, entry.x, entry.y, true, false)
     elseif set.minimap then
         HBDPins:RemoveMinimapIcon(REF_NAME, set.minimap)
         set.minimap:Hide()

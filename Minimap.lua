@@ -48,7 +48,12 @@ function L3F.BuildMinimap()
     local function placeIcon(tex)
         if not tex then return end
         tex:ClearAllPoints()
-        tex:SetPoint("TOPLEFT", btn, "TOPLEFT", 5.5, -5)
+        -- LibDBIcon's canonical anchor is (5.5, -5), centered on a 31x31
+        -- button. Our automarker.tga asset is drawn slightly left of its
+        -- own image center, so applying the convention as-is leaves the
+        -- skull visually 1px to the left inside the ring. Shift right by
+        -- 1px to compensate.
+        tex:SetPoint("TOPLEFT", btn, "TOPLEFT", 6.5, -5)
         tex:SetSize(20, 20)
     end
 
