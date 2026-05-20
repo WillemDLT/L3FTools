@@ -70,6 +70,7 @@ Data/Consumables/MiscItems.lua
 Data/Consumables/ProfessionItems.lua
 UI/ModelViewer.lua
 UI/HoverPreview.lua
+UI/PlayerMarksDialog.lua
 Frame.lua
 Tabs/Automarker.lua
 Tabs/Atlas.lua

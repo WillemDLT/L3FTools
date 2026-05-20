@@ -165,6 +165,14 @@ function L3F.ResetAllMarks()
 
     local watcher = CreateFrame("Frame")
     local done = false
+    local function finishUp()
+        -- Sticky player marks survive Clear All - re-apply them after the
+        -- cycle has actually committed. A small delay gives the server a
+        -- moment to settle so SetRaidTarget calls land cleanly.
+        if L3F.ApplyPlayerMarks then
+            C_Timer.After(0.1, L3F.ApplyPlayerMarks)
+        end
+    end
     watcher:RegisterEvent("RAID_TARGET_UPDATE")
     watcher:SetScript("OnEvent", function(self)
         if done then return end
@@ -173,6 +181,7 @@ function L3F.ResetAllMarks()
             done = true
             self:UnregisterAllEvents()
             self:SetScript("OnEvent", nil)
+            finishUp()
         end
     end)
 
@@ -187,6 +196,7 @@ function L3F.ResetAllMarks()
         done = true
         watcher:UnregisterAllEvents()
         watcher:SetScript("OnEvent", nil)
+        finishUp()
     end)
 
     if L3F.AutomarkerResetGUIDs then L3F.AutomarkerResetGUIDs() end

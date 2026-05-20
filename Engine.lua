@@ -48,6 +48,11 @@ local function findFreeMark(priorityMarks)
     for _, tMark in pairs(assignedGUIDs) do
         used[tMark] = true
     end
+    -- Sticky player marks are reserved - findFreeMark must never return one
+    -- of these, otherwise the auto-marker would steal a mark off a tank/etc.
+    if L3F.db and L3F.db.automarker and L3F.db.automarker.playerMarks then
+        for _, m in pairs(L3F.db.automarker.playerMarks) do used[m] = true end
+    end
     -- Walk the target NPC's priority list and return the first unused mark.
     for _, mark in ipairs(priorityMarks) do
         if not used[mark] then return mark end
@@ -99,6 +104,121 @@ end
 
 L3F.AutomarkerTryMark    = tryMark
 L3F.AutomarkerResetGUIDs = function() wipe(assignedGUIDs) end
+
+
+-- =============================================================
+-- PLAYER MARKS  (sticky per-player marks)
+-- =============================================================
+-- Storage:  L3F.db.automarker.playerMarks[shortName] = markIdx
+-- Behavior: applied on assignment, GROUP_ROSTER_UPDATE, PLAYER_ENTERING_WORLD,
+--           and at the end of ResetAllMarks (so they survive Clear All).
+--           Reserved from findFreeMark so the engine never uses them on NPCs.
+-- =============================================================
+
+-- Walk party/raid units to find which token corresponds to a short name.
+-- Returns the unit token ("player", "raid7", "party2", ...) or nil.
+local function findUnitByName(name)
+    if not name or name == "" then return nil end
+    if UnitName("player") == name then return "player" end
+    if IsInRaid() then
+        for i = 1, 40 do
+            local u = "raid" .. i
+            if UnitExists(u) and UnitName(u) == name then return u end
+        end
+    elseif IsInGroup() then
+        for i = 1, 4 do
+            local u = "party" .. i
+            if UnitExists(u) and UnitName(u) == name then return u end
+        end
+    end
+    return nil
+end
+L3F.FindUnitByName = findUnitByName
+
+-- Apply every saved player mark to its current unit token. Idempotent:
+-- skips units that already hold the right mark.
+function L3F.ApplyPlayerMarks()
+    if not L3F.db or not L3F.db.automarker then return end
+    local marks = L3F.db.automarker.playerMarks
+    if not marks then return end
+    for name, mark in pairs(marks) do
+        local unit = findUnitByName(name)
+        if unit and UnitExists(unit) and GetRaidTargetIndex(unit) ~= mark then
+            SetRaidTarget(unit, mark)
+        end
+    end
+end
+
+-- Assign a sticky mark to a player. Stores in savedvars + applies immediately
+-- if the player is in the current group. Returns true on success, or
+-- (false, errMsg) on validation failure.
+function L3F.SetPlayerMark(name, mark)
+    if not name or name == "" then return false, "No player name" end
+    if type(mark) ~= "number" or mark < 1 or mark > 8 then
+        return false, "Mark must be 1-8"
+    end
+    if not L3F.db or not L3F.db.automarker then return false, "DB not ready" end
+    L3F.db.automarker.playerMarks = L3F.db.automarker.playerMarks or {}
+    -- Strip any earlier holder of this same mark - WoW raid marks are unique,
+    -- so two players cannot hold the same icon. Silent override; the UI
+    -- prevents accidental conflicts by graying out already-held marks.
+    for n, m in pairs(L3F.db.automarker.playerMarks) do
+        if m == mark and n ~= name then
+            L3F.db.automarker.playerMarks[n] = nil
+        end
+    end
+    L3F.db.automarker.playerMarks[name] = mark
+    local unit = findUnitByName(name)
+    if unit and UnitExists(unit) then
+        SetRaidTarget(unit, mark)
+    end
+    return true
+end
+
+function L3F.ClearPlayerMark(name)
+    if not L3F.db or not L3F.db.automarker or not L3F.db.automarker.playerMarks then return end
+    L3F.db.automarker.playerMarks[name] = nil
+    local unit = findUnitByName(name)
+    if unit and UnitExists(unit) then
+        SetRaidTarget(unit, 0)
+    end
+end
+
+-- Re-apply on roster/zone changes. PLAYER_ENTERING_WORLD comes with a brief
+-- delay because units aren't always queryable the moment the event fires.
+local pmFrame = CreateFrame("Frame")
+pmFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
+pmFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+pmFrame:SetScript("OnEvent", function(self, event)
+    if event == "PLAYER_ENTERING_WORLD" then
+        C_Timer.After(1.5, function() L3F.ApplyPlayerMarks() end)
+    else
+        L3F.ApplyPlayerMarks()
+    end
+end)
+
+
+-- =============================================================
+-- CLEU PRUNE: drop dead mobs from the session ledger so their
+-- mark slots free up for the next pack. Without this, after pack
+-- 1 dies the ledger still considers pack 1's marks "in use" and
+-- findFreeMark refuses to mark pack 2 if their priority list
+-- collides. Triggered Morphéours's "have to Clear All between
+-- packs" workaround.
+--
+-- UNIT_DIED covers most mob deaths; UNIT_DESTROYED catches
+-- destructible objects and some pet/vehicle teardowns; PARTY_KILL
+-- is a redundant safety net for player-credited kills.
+-- =============================================================
+local cleu = CreateFrame("Frame")
+cleu:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+cleu:SetScript("OnEvent", function()
+    local _, sub, _, _, _, _, _, destGUID = CombatLogGetCurrentEventInfo()
+    if not destGUID then return end
+    if sub == "UNIT_DIED" or sub == "UNIT_DESTROYED" or sub == "PARTY_KILL" then
+        assignedGUIDs[destGUID] = nil
+    end
+end)
 
 
 -- =============================================================

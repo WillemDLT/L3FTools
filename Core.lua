@@ -129,6 +129,11 @@ local DEFAULTS = {
         profiles        = {},     -- name -> { enabledNPCs={...}, markPriorities={...} }
         activeProfile   = nil,
         _initialized    = false,
+        -- Player marks: sticky per-player mark assignments. Survive Clear All
+        -- (Sections.lua's ResetAllMarks re-applies them after the cycle+clear).
+        -- The engine reserves these mark indices so it never uses them for
+        -- NPCs (findFreeMark in Engine.lua treats them as taken).
+        playerMarks     = {},     -- shortCharName -> markIdx (1..8)
     },
     -- Atlas module
     atlas = {

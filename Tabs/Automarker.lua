@@ -309,10 +309,37 @@ local function buildAutomarker(parent)
     L3F.SetupKeybindButton(kbResetBtn, "L3FTOOLS_RESETMARKS")
 
     -- =========================================================
+    -- PLAYER MARKS row: opens the sticky-mark manager dialog.
+    -- Sticky marks are reserved from the Automarker's NPC pool and
+    -- re-applied after Clear All. The dialog handles the full UI;
+    -- this row is just the entry point.
+    -- =========================================================
+    local pmLabel = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    pmLabel:SetPoint("TOPLEFT", kbLabel, "BOTTOMLEFT", 0, -14)
+    pmLabel:SetText("Player marks:")
+
+    local pmBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    pmBtn:SetSize(180, 22)
+    pmBtn:SetPoint("LEFT", pmLabel, "RIGHT", 8, 0)
+    pmBtn:SetText("Manage player marks...")
+    pmBtn:SetScript("OnClick", function()
+        if L3F.ShowPlayerMarksDialog then L3F.ShowPlayerMarksDialog() end
+    end)
+    pmBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Player marks")
+        GameTooltip:AddLine(
+            "Assign sticky marks to players in your raid/party. They survive Clear All Marks and the Automarker won't use those marks on NPCs.",
+            1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    pmBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    -- =========================================================
     -- PROFILE STRIP: [Profile: dropdown] [Save As] [Delete] [Export] [Import]
     -- =========================================================
     local profLabel = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    profLabel:SetPoint("TOPLEFT", kbLabel, "BOTTOMLEFT", 0, -14)
+    profLabel:SetPoint("TOPLEFT", pmLabel, "BOTTOMLEFT", 0, -14)
     profLabel:SetText("Profile:")
 
     local profDD = CreateFrame("Frame", "L3FToolsAMProfileDD", parent, "UIDropDownMenuTemplate")
