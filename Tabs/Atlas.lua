@@ -452,12 +452,13 @@ local function buildListPane(parent)
             end
 
         elseif sel:sub(1, 5) == "raid:" then
-            -- Raid selected -> every wing's NPCs, with wing headers
-            -- so the user keeps spatial context.
+            -- Raid selected -> a flat list of every NPC in the raid.
+            -- The tree already gives the user the wing breakdown; repeating
+            -- the wing headers here would be redundant. Clicking a wing in
+            -- the tree narrows to that wing only.
             local raid = findRaid(sel:sub(6))
             if raid and raid.sections then
                 for _, sec in ipairs(raid.sections) do
-                    y = addHeader(sec.name, y)
                     for _, npc in ipairs(sec.npcs) do y = addNPC(npc, y, nil) end
                 end
             end
