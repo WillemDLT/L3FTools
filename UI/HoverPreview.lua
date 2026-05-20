@@ -61,7 +61,10 @@ local function build()
     -- Match the main frame's strata so the preview floats over the same
     -- third-party HIGH-strata UI icons.
     frame:SetFrameStrata("DIALOG")
-    frame:SetClampedToScreen(true)
+    -- Intentionally NOT SetClampedToScreen: when the player pushes the
+    -- main window against the left edge of the screen we want the
+    -- preview to spill off-screen, not bounce back and overlap the
+    -- main. Matches the AutomarkerL3F info panel's behaviour.
     frame:EnableMouse(true)
     if frame.TitleText then frame.TitleText:SetText("Preview") end
 
@@ -96,9 +99,6 @@ local function build()
             and "Interface\\Buttons\\LockButton-Locked-Down"
             or  "Interface\\Buttons\\LockButton-Unlocked-Down")
         pin:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
-        if frame.CloseButton then
-            if locked then frame.CloseButton:Show() else frame.CloseButton:Hide() end
-        end
     end
     pin:SetScript("OnClick", function()
         L3F.db.preview.pinned = not L3F.db.preview.pinned
@@ -115,10 +115,10 @@ local function build()
     end)
     pin:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    -- Close button only useful when pinned; otherwise hide it.
-    if frame.CloseButton then
-        frame.CloseButton:SetScript("OnClick", function() frame:Hide() end)
-    end
+    -- The close button is redundant - pinning is the toggle for
+    -- persistence and the panel auto-hides on mouseleave when not
+    -- pinned. Hide it permanently to declutter the chrome.
+    if frame.CloseButton then frame.CloseButton:Hide() end
     refreshPin()
 
     -- ---------------------------------------------------------
@@ -142,10 +142,6 @@ local function build()
     resize:SetScript("OnMouseUp", function()
         frame:StopMovingOrSizing()
         L3F.db.preview.sizeW = frame:GetWidth()
-        -- Update the main frame's clamp insets so the user can't push
-        -- main close enough to the screen edge that the (now wider/
-        -- narrower) preview would overlap it.
-        if L3F.UpdateMainClampInsets then L3F.UpdateMainClampInsets() end
     end)
 
     -- ---------------------------------------------------------

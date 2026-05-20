@@ -130,21 +130,23 @@ end
 -- =============================================================
 -- 4. RESET ALL MARKS  (button + Bindings.xml hotkey)
 -- =============================================================
--- Clears the raid icon from every NPC the client currently sees:
--- visible nameplates, plus target / focus / mouseover for units the
--- player has explicitly engaged. Also wipes the engine's once-placed
--- GUID set so the automarker is free to re-decorate the room on the
--- next wave.
+-- Clears every raid icon currently placed on any unit in the party /
+-- raid's awareness. The trick (credit: Morpheours):
+--   * WoW raid icons are unique - a unit can hold at most one icon
+--     and an icon can be on at most one unit at a time.
+--   * Calling SetRaidTarget("player", N) for N=1..8 forces every
+--     other unit to drop the icon it was carrying, since each icon
+--     ends up on the player instead. Player only ever holds the
+--     LAST icon assigned (8), all earlier ones are released.
+--   * SetRaidTarget("player", 0) then clears the icon left on the
+--     player.
+-- Works for mobs anywhere in the world - no nameplate visibility or
+-- reachable unit-token required, unlike per-unit SetRaidTarget calls.
+-- Also wipes the engine's once-placed GUID set so the automarker is
+-- free to re-decorate the room on the next pull.
 function L3F.ResetAllMarks()
-    if C_NamePlate and C_NamePlate.GetNamePlates then
-        for _, plate in ipairs(C_NamePlate.GetNamePlates()) do
-            local unit = plate.namePlateUnitToken
-            if unit and UnitExists(unit) then SetRaidTarget(unit, 0) end
-        end
-    end
-    for _, unit in ipairs({"target", "focus", "mouseover"}) do
-        if UnitExists(unit) then SetRaidTarget(unit, 0) end
-    end
+    for i = 1, 8 do SetRaidTarget("player", i) end
+    SetRaidTarget("player", 0)
     if L3F.AutomarkerResetGUIDs then L3F.AutomarkerResetGUIDs() end
 end
 
