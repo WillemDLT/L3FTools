@@ -147,20 +147,51 @@ end
 function L3F.SetupKeybindButton(btn, command)
     local listening = false
 
+    -- Defensive: ensure the button never sits in a keyboard-enabled
+    -- state at rest. The Automarker tab's sibling search EditBox needs
+    -- Backspace to reach it; an idle picker with EnableKeyboard(true)
+    -- (or with an OnKeyDown still attached after one listening session)
+    -- has been observed to silently eat keys from the EditBox.
+    btn:EnableKeyboard(false)
+
     local function refresh()
         if listening then return end
         local k = GetBindingKey(command)
         btn:SetText(k and (GetBindingText(k, "KEY_") or k) or "Not bound")
     end
 
-    local function stop()
+    -- Forward-declared so the handler closures below can call them.
+    local apply, stop
+
+    -- Listener bodies. Attached ONLY while actively capturing a key
+    -- (in OnClick), and detached on stop(). Keeping the OnKeyDown
+    -- handler attached at rest is the suspected cause of the
+    -- Automarker-only Backspace bug - the EditBox never sees the
+    -- keystroke because the picker frame consumes it first.
+    local function onKeyDown(self, key)
+        if not listening then return end
+        if key == "ESCAPE" then apply(nil) return end
+        local k = kbModified(key)
+        if k then apply(k) end
+    end
+    local function onMouseDown(self, mb)
+        if listening and KB_MOUSE[mb] then apply(kbModified(KB_MOUSE[mb])) end
+    end
+    local function onMouseWheel(self, delta)
+        if listening then apply(kbModified(delta > 0 and "MOUSEWHEELUP" or "MOUSEWHEELDOWN")) end
+    end
+
+    stop = function()
         listening = false
         btn:EnableKeyboard(false)
         btn:UnlockHighlight()
+        btn:SetScript("OnKeyDown",    nil)
+        btn:SetScript("OnMouseDown",  nil)
+        btn:SetScript("OnMouseWheel", nil)
         refresh()
     end
 
-    local function apply(key)
+    apply = function(key)
         local existing = GetBindingKey(command)
         while existing do
             SetBinding(existing)
@@ -182,18 +213,9 @@ function L3F.SetupKeybindButton(btn, command)
         self:EnableKeyboard(true)
         self:LockHighlight()
         self:SetText("Press a key  (Esc = clear)")
-    end)
-    btn:SetScript("OnKeyDown", function(self, key)
-        if not listening then return end
-        if key == "ESCAPE" then apply(nil) return end
-        local k = kbModified(key)
-        if k then apply(k) end
-    end)
-    btn:SetScript("OnMouseDown", function(self, mb)
-        if listening and KB_MOUSE[mb] then apply(kbModified(KB_MOUSE[mb])) end
-    end)
-    btn:SetScript("OnMouseWheel", function(self, delta)
-        if listening then apply(kbModified(delta > 0 and "MOUSEWHEELUP" or "MOUSEWHEELDOWN")) end
+        self:SetScript("OnKeyDown",    onKeyDown)
+        self:SetScript("OnMouseDown",  onMouseDown)
+        self:SetScript("OnMouseWheel", onMouseWheel)
     end)
     btn:SetScript("OnShow", refresh)
     btn:SetScript("OnEnter", function(self)
