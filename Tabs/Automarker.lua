@@ -296,6 +296,18 @@ local function buildAutomarker(parent)
     kbBtn:SetPoint("LEFT", kbLabel, "RIGHT", 8, 0)
     L3F.SetupKeybindButton(kbBtn, "L3FTOOLS_MOUSEOVERMARK")
 
+    -- Second picker on the same row: clear-all-marks hotkey. Fires
+    -- the same SetRaidTarget('player', 1..8) -> 150ms -> 0 sequence
+    -- L3F.ResetAllMarks does when clicked from the wing widget.
+    local kbResetLabel = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    kbResetLabel:SetPoint("LEFT", kbBtn, "RIGHT", 24, 0)
+    kbResetLabel:SetText("Clear-marks key:")
+
+    local kbResetBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    kbResetBtn:SetSize(150, 22)
+    kbResetBtn:SetPoint("LEFT", kbResetLabel, "RIGHT", 8, 0)
+    L3F.SetupKeybindButton(kbResetBtn, "L3FTOOLS_RESETMARKS")
+
     -- =========================================================
     -- PROFILE STRIP: [Profile: dropdown] [Save As] [Delete] [Export] [Import]
     -- =========================================================

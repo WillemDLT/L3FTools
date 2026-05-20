@@ -30,6 +30,14 @@ local SUB_TAB_LABELS = {
     location = "Location", lore = "Lore",
 }
 
+-- Consumable-specific sub-tab strip (a separate strip, shown when a
+-- consumable is selected; the NPC strip stays hidden in that case).
+local CONSUMABLE_SUB_TABS = { "effects", "obtain" }
+local CONSUMABLE_SUB_TAB_LABELS = {
+    effects = "Effects",
+    obtain  = "How to obtain",
+}
+
 local CAT_RAIDS       = "Raids"
 local CAT_HEROICS     = "Heroic Dungeons"
 local CAT_CONSUMABLES = "Consumables"
@@ -38,7 +46,9 @@ local treePane, listPane, detailPane
 local treeList, npcList, searchBox
 local currentNPC, currentConsumable
 local subTabButtons = {}
+local consumableSubTabButtons = {}
 local subTabContent
+local consumableSubStrip
 local viewer, npcTitle, npcMeta
 
 
@@ -367,42 +377,27 @@ local function buildTreePane(parent)
         y = y + 20
 
         if consExpanded then
+            -- Categories are clickable LEAVES - no further sub-expansion.
+            -- Clicking a category selects it and the middle list pane
+            -- shows the items it contains (handled in RefreshNPCList).
+            -- Mirrors how Heroic Dungeons leaves work.
             for _, catName in ipairs(L3F.consumableCategoryOrder) do
-                local subKey      = "consumable-cat:" .. catName
-                local subExpanded = isExpanded(subKey)
+                local subKey = "consumable-cat:" .. catName
                 addRow{
                     indent = 16, y = y,
                     key = subKey, label = catName,
                     font = "GameFontNormalSmall",
-                    hasArrow = true, expanded = subExpanded,
+                    hasArrow = false,
                     onClickRow = function()
-                        setExpanded(subKey, not subExpanded)
+                        selectKey(subKey)
+                        currentConsumable = nil
+                        currentNPC = nil
                         L3F.RefreshTree()
+                        L3F.RefreshNPCList()
+                        L3F.RefreshDetailPane()
                     end,
                 }
                 y = y + 20
-
-                if subExpanded then
-                    local items = L3F.consumables[catName] or {}
-                    for _, item in ipairs(items) do
-                        local itemKey = "consumable:" .. tostring(item.id or item.name)
-                        addRow{
-                            indent = 32, y = y,
-                            key = itemKey, label = item.name,
-                            font = "GameFontHighlightSmall",
-                            hasArrow = false,
-                            onClickRow = function()
-                                selectKey(itemKey)
-                                currentConsumable = item
-                                currentNPC = nil
-                                L3F.RefreshTree()
-                                L3F.RefreshNPCList()
-                                L3F.RefreshDetailPane()
-                            end,
-                        }
-                        y = y + 18
-                    end
-                end
             end
         end
 
@@ -481,6 +476,61 @@ local function buildListPane(parent)
         row:SetScript("OnLeave", function()
             if currentNPC and currentNPC.id == npc.id then rbg:SetColorTexture(0.30, 0.65, 1.0, 0.25)
             else rbg:SetColorTexture(0, 0, 0, 0) end
+        end)
+        return y + rowH + 2
+    end
+
+    -- Consumable list row. Used when a consumable-cat: node is selected
+    -- in the tree. Each row gets the item's icon (async via queueItemUI),
+    -- the name (quality-coloured once the item info caches), and a
+    -- mouseover that shows the in-game item tooltip - the player can
+    -- read effect + source straight from WoW.
+    local function addConsumableRow(item, y)
+        local rowH = 24
+        local row = CreateFrame("Button", nil, npcList)
+        row:SetSize(170, rowH)
+        row:SetPoint("TOPLEFT", npcList, "TOPLEFT", 0, -y)
+        local rbg = row:CreateTexture(nil, "BACKGROUND")
+        rbg:SetAllPoints()
+        local active = currentConsumable and currentConsumable == item
+        rbg:SetColorTexture(active and 0.30 or 0, active and 0.65 or 0, active and 1 or 0, active and 0.25 or 0)
+
+        local icon = row:CreateTexture(nil, "ARTWORK")
+        icon:SetSize(18, 18)
+        icon:SetPoint("LEFT", row, "LEFT", 4, 0)
+        icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+
+        local txt = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        txt:SetPoint("LEFT", icon, "RIGHT", 6, 0)
+        txt:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+        txt:SetJustifyH("LEFT")
+        txt:SetWordWrap(false)
+        txt:SetText(item.name or "")
+        if item.id then
+            queueItemUI(item.id, txt, icon)
+        else
+            txt:SetTextColor(active and 1 or 0.85, active and 1 or 0.85, active and 1 or 0.85, 1)
+        end
+
+        row:SetScript("OnClick", function()
+            currentConsumable = item
+            currentNPC = nil
+            if L3F.RefreshNPCList then L3F.RefreshNPCList() end
+            if L3F.RefreshDetailPane then L3F.RefreshDetailPane() end
+        end)
+        row:SetScript("OnEnter", function(self)
+            if not active then rbg:SetColorTexture(1, 1, 1, 0.07) end
+            if item.id then
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                if GameTooltip.SetItemByID then GameTooltip:SetItemByID(item.id)
+                else GameTooltip:SetHyperlink("item:" .. item.id) end
+                GameTooltip:Show()
+            end
+        end)
+        row:SetScript("OnLeave", function()
+            if active then rbg:SetColorTexture(0.30, 0.65, 1.0, 0.25)
+            else rbg:SetColorTexture(0, 0, 0, 0) end
+            GameTooltip:Hide()
         end)
         return y + rowH + 2
     end
@@ -738,6 +788,16 @@ local function buildListPane(parent)
             if heroic and heroic.npcs then
                 renderBossTrash(heroic.npcs)
             end
+
+        elseif sel:sub(1, 15) == "consumable-cat:" then
+            -- Consumable category selected -> list the items in that
+            -- category. Each row mouseover triggers the in-game item
+            -- tooltip; clicking selects the item for the detail pane.
+            local catName = sel:sub(16)
+            local items = L3F.consumables[catName] or {}
+            for _, item in ipairs(items) do
+                y = addConsumableRow(item, y)
+            end
         end
 
         npcList:SetHeight(math.max(y, 1))
@@ -859,6 +919,55 @@ local function buildDetailPane(parent)
     subStrip:SetScript("OnSizeChanged", layoutSubTabs)
     layoutSubTabs()
 
+    -- Consumable sub-tab strip - identical chrome to the NPC strip but
+    -- with its own buttons (Effects, How to obtain). Shown when a
+    -- consumable is selected; hidden otherwise (the NPC strip takes
+    -- the same screen position when NPCs are shown).
+    consumableSubStrip = CreateFrame("Frame", nil, infoHost)
+    consumableSubStrip:SetHeight(22)
+    consumableSubStrip:SetPoint("TOPLEFT",  infoHost, "TOPLEFT",  0, 0)
+    consumableSubStrip:SetPoint("TOPRIGHT", infoHost, "TOPRIGHT", -60, 0)
+    local consStripLine = consumableSubStrip:CreateTexture(nil, "OVERLAY")
+    consStripLine:SetColorTexture(1, 1, 1, 0.15); consStripLine:SetHeight(1)
+    consStripLine:SetPoint("BOTTOMLEFT",  consumableSubStrip, "BOTTOMLEFT",  0, 0)
+    consStripLine:SetPoint("BOTTOMRIGHT", consumableSubStrip, "BOTTOMRIGHT", 0, 0)
+    consumableSubStrip:Hide()
+
+    for _, key in ipairs(CONSUMABLE_SUB_TABS) do
+        local btn = CreateFrame("Button", nil, consumableSubStrip)
+        btn:SetSize(120, 22)
+        local lbl = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetPoint("CENTER"); lbl:SetText(CONSUMABLE_SUB_TAB_LABELS[key])
+        btn.label = lbl
+        local under = btn:CreateTexture(nil, "OVERLAY")
+        under:SetColorTexture(0.30, 0.65, 1.0, 1); under:SetHeight(2)
+        under:SetPoint("BOTTOMLEFT"); under:SetPoint("BOTTOMRIGHT"); under:Hide()
+        btn.underline = under
+        btn:SetScript("OnClick", function()
+            L3F.db.atlas.lastActiveConsumableSubTab = key
+            if L3F.RefreshDetailPane then L3F.RefreshDetailPane() end
+        end)
+        consumableSubTabButtons[key] = btn
+    end
+
+    local function layoutConsumableSubTabs()
+        local w = consumableSubStrip:GetWidth()
+        if not w or w <= 1 then return end
+        local n = #CONSUMABLE_SUB_TABS
+        local gap = 4
+        local bw = math.max(40, math.floor((w - gap * (n - 1)) / n))
+        for i, key in ipairs(CONSUMABLE_SUB_TABS) do
+            local btn = consumableSubTabButtons[key]
+            if btn then
+                btn:SetSize(bw, 22)
+                btn:ClearAllPoints()
+                btn:SetPoint("BOTTOMLEFT", consumableSubStrip, "BOTTOMLEFT", (i - 1) * (bw + gap), 0)
+            end
+        end
+    end
+    consumableSubStrip:SetScript("OnSizeChanged", layoutConsumableSubTabs)
+    layoutConsumableSubTabs()
+
     L3F.RefreshDetailPane = function()
         local npc = currentNPC
         local item = currentConsumable
@@ -880,12 +989,14 @@ local function buildDetailPane(parent)
         end
 
         -- ---------------------------------------------------------
-        -- CONSUMABLE PATH - no 3D model, no spells/drops sub-tabs,
-        -- just icon + name + category + effect + notes.
+        -- CONSUMABLE PATH - no 3D model, no NPC sub-tabs. Icon + name
+        -- + category on the left; consumable sub-tab strip on the
+        -- right (Effects / How to obtain).
         -- ---------------------------------------------------------
         if item then
             viewer.frame:Hide()
             subStrip:Hide()
+            consumableSubStrip:Show()
             detailPane.consumableIcon:Show()
             detailPane.consumableIcon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
             npcTitle:SetText(item.name or "")
@@ -895,6 +1006,16 @@ local function buildDetailPane(parent)
             else
                 npcTitle:SetTextColor(1, 1, 1, 1)
             end
+
+            -- Highlight the active consumable sub-tab.
+            local activeKey = L3F.db.atlas.lastActiveConsumableSubTab or "effects"
+            L3F.db.atlas.lastActiveConsumableSubTab = activeKey
+            for k, btn in pairs(consumableSubTabButtons) do
+                local on = (k == activeKey)
+                btn.label:SetTextColor(on and 1 or 0.7, on and 1 or 0.7, on and 1 or 0.7, 1)
+                if on then btn.underline:Show() else btn.underline:Hide() end
+            end
+
             local y = 4
             local function addLine(label, value, fontObj)
                 if not value or value == "" then return end
@@ -906,9 +1027,30 @@ local function buildDetailPane(parent)
                 fs:SetText(label and (label .. ": " .. value) or value)
                 y = y + math.max(fs:GetStringHeight() + 6, 18)
             end
-            addLine("Effect",   item.effect, "GameFontHighlight")
-            addLine("Duration", item.duration)
-            addLine(nil,        item.notes)
+
+            if activeKey == "effects" then
+                addLine("Effect",   item.effect, "GameFontHighlight")
+                addLine("Duration", item.duration)
+                -- Rule/usage notes (e.g. "Classified as a Potion for
+                -- Alchemy Masteries but acts like a Guardian Elixir")
+                -- come last as a dim aside.
+                addLine(nil,        item.notes)
+            else  -- "obtain"
+                local placeholder = "Source info not yet entered in the addon. "
+                    .. "Hover the item in the list on the left for the in-game "
+                    .. "tooltip - it shows where the item drops / who sells / "
+                    .. "how it's crafted."
+                addLine(nil, placeholder)
+                -- Re-flow on resize: the placeholder is a single
+                -- wrapping FontString; same callback pattern Notes uses.
+                local txt = subTabContent.body:GetRegions and ({subTabContent.body:GetRegions()})[1]
+                if txt then
+                    subTabContent.body.onWidthChange = function()
+                        subTabContent.body:SetHeight(math.max(txt:GetStringHeight() + 8, 1))
+                    end
+                end
+            end
+
             subTabContent.body:SetHeight(math.max(y, 1))
             return
         end
@@ -916,6 +1058,7 @@ local function buildDetailPane(parent)
         -- NPC / empty paths re-show the widgets the consumable path hid.
         viewer.frame:Show()
         subStrip:Show()
+        consumableSubStrip:Hide()
         detailPane.consumableIcon:Hide()
 
         if not npc then
