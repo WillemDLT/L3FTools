@@ -233,6 +233,39 @@ function L3F.BuildFrame()
     showTab(initial)
 
     L3F.mainFrame = mainFrame
+    -- Reserve preview-width space on the left edge of the screen so the
+    -- hover preview always has room and never overlaps the main window.
+    if L3F.UpdateMainClampInsets then L3F.UpdateMainClampInsets() end
+end
+
+
+-- =============================================================
+-- ClampRectInsets reserves preview-width worth of space along the
+-- left edge of the screen. The hover preview anchors to the main
+-- frame's left edge, so without this the player could drag the
+-- main against the screen-left and the preview would spill off
+-- screen / overlap the main window. Re-applied whenever the
+-- preview width changes (from its grip).
+-- =============================================================
+local function getPreviewWidth()
+    return (L3F.db and L3F.db.preview and L3F.db.preview.sizeW) or 280
+end
+
+function L3F.UpdateMainClampInsets()
+    if not mainFrame then return end
+    local pw = getPreviewWidth()
+    mainFrame:SetClampRectInsets(pw, 0, 0, 0)
+    -- Nudge the main back into the clamp area if a saved position
+    -- (from before this fix shipped) puts its left edge below pw.
+    local left = mainFrame:GetLeft()
+    if left and left < pw then
+        local x, y = mainFrame:GetCenter()
+        if x then
+            mainFrame:ClearAllPoints()
+            mainFrame:SetPoint("CENTER", UIParent, "BOTTOMLEFT",
+                pw + mainFrame:GetWidth() / 2, y)
+        end
+    end
 end
 
 

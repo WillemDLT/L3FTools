@@ -34,9 +34,6 @@ local pendingHide = false
 local hideTimer   = 0
 local fadeElapsed = 0
 local currentNPC
--- Forward declared so build() can assign it and Show() can call it
--- without making it a frame member.
-local setSide
 
 local function isPinned()
     return L3F.db and L3F.db.preview and L3F.db.preview.pinned
@@ -125,47 +122,31 @@ local function build()
     refreshPin()
 
     -- ---------------------------------------------------------
-    -- RESIZE handle. Lives in whichever bottom corner is "outer" -
-    -- away from the main frame. Show() picks left or right based on
-    -- which side of the main frame the preview is on; setSide() below
-    -- moves the grip and flips its texture + sizing direction. The
-    -- preview's height is pinned to the main frame's height via the
-    -- two anchors set in Show(), so the grip only changes width.
+    -- RESIZE handle (bottom-LEFT corner). Preview always sits to the
+    -- LEFT of the main window with its right edge glued there, so the
+    -- bottom-LEFT corner is the only "free" corner the player can
+    -- grab. Texture is mirrored horizontally so the diagonal points
+    -- outward. Height is pinned by the anchors set in Show(); only
+    -- width is user-adjustable (StartSizing("LEFT") ignores cursor Y).
     -- ---------------------------------------------------------
     local resize = CreateFrame("Button", nil, frame)
     resize:SetSize(16, 16)
+    resize:SetPoint("BOTTOMLEFT", 4, 4)
     resize:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+    resize:GetNormalTexture():SetTexCoord(1, 0, 0, 1)
     resize:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+    resize:GetHighlightTexture():SetTexCoord(1, 0, 0, 1)
     resize:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+    resize:GetPushedTexture():SetTexCoord(1, 0, 0, 1)
+    resize:SetScript("OnMouseDown", function() frame:StartSizing("LEFT") end)
     resize:SetScript("OnMouseUp", function()
         frame:StopMovingOrSizing()
         L3F.db.preview.sizeW = frame:GetWidth()
+        -- Update the main frame's clamp insets so the user can't push
+        -- main close enough to the screen edge that the (now wider/
+        -- narrower) preview would overlap it.
+        if L3F.UpdateMainClampInsets then L3F.UpdateMainClampInsets() end
     end)
-
-    setSide = function(side)
-        frame.side = side
-        resize:ClearAllPoints()
-        if side == "left" then
-            -- Preview is to the LEFT of the main frame; grip on bottom-
-            -- LEFT (outer). Mirror the texture so the diagonal points
-            -- outward.
-            resize:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 4, 4)
-            resize:GetNormalTexture():SetTexCoord(1, 0, 0, 1)
-            resize:GetHighlightTexture():SetTexCoord(1, 0, 0, 1)
-            resize:GetPushedTexture():SetTexCoord(1, 0, 0, 1)
-            resize:SetScript("OnMouseDown", function() frame:StartSizing("LEFT") end)
-        else
-            -- Preview is to the RIGHT of the main frame; grip on bottom-
-            -- RIGHT (outer). Default texture orientation already points
-            -- there.
-            resize:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -4, 4)
-            resize:GetNormalTexture():SetTexCoord(0, 1, 0, 1)
-            resize:GetHighlightTexture():SetTexCoord(0, 1, 0, 1)
-            resize:GetPushedTexture():SetTexCoord(0, 1, 0, 1)
-            resize:SetScript("OnMouseDown", function() frame:StartSizing("RIGHT") end)
-        end
-    end
-    setSide("left")  -- default; Show() may flip it
 
     -- ---------------------------------------------------------
     -- MODEL VIEWER at the top - no popout button (this IS a popup)
@@ -285,38 +266,21 @@ function L3F.HoverPreview:Show(npc, anchorFrame)
     cancelHide()
     refreshContent(npc)
 
-    -- Decide which side of the main window the preview goes on. The
-    -- preferred side is LEFT, but if the player has pushed the main
-    -- window against the left edge of the screen we'd have nowhere
-    -- to put the preview - it would overlap the main window. Detect
-    -- that case and flip to the RIGHT side.
-    --
-    -- Anchors pin BOTH top and bottom of the preview's outer-facing
-    -- side to the main frame's matching edge, so the preview's height
-    -- auto-tracks the main window however you resize it.
+    -- Always anchor on the LEFT side of the main window. Pin BOTH
+    -- right corners so the preview's height auto-tracks the main
+    -- window however the player resizes it. Overlap on screen-edge
+    -- is prevented by the main frame's ClampRectInsets (applied in
+    -- Frame.lua) - the main is kept >= preview width from the left
+    -- edge of the screen, so the preview always has room here.
     -- Fall back to anchorFrame (the row itself) if mainFrame isn't shown.
     frame:ClearAllPoints()
     if L3F.mainFrame and L3F.mainFrame:IsShown() then
-        local mainLeft = L3F.mainFrame:GetLeft() or 0
-        local previewW = frame:GetWidth() or DEFAULT_WIDTH
-        if mainLeft >= previewW then
-            -- Room on the left; anchor preview's right edge to main's left.
-            frame:SetPoint("TOPRIGHT",    L3F.mainFrame, "TOPLEFT",    0, 0)
-            frame:SetPoint("BOTTOMRIGHT", L3F.mainFrame, "BOTTOMLEFT", 0, 0)
-            setSide("left")
-        else
-            -- Not enough room on the left; anchor preview's left edge to
-            -- main's right so it spills outward instead of overlapping.
-            frame:SetPoint("TOPLEFT",    L3F.mainFrame, "TOPRIGHT",    0, 0)
-            frame:SetPoint("BOTTOMLEFT", L3F.mainFrame, "BOTTOMRIGHT", 0, 0)
-            setSide("right")
-        end
+        frame:SetPoint("TOPRIGHT",    L3F.mainFrame, "TOPLEFT",    0, 0)
+        frame:SetPoint("BOTTOMRIGHT", L3F.mainFrame, "BOTTOMLEFT", 0, 0)
     elseif anchorFrame then
         frame:SetPoint("TOPRIGHT", anchorFrame, "TOPLEFT", -8, 0)
-        setSide("left")
     else
         frame:SetPoint("CENTER")
-        setSide("left")
     end
     frame:Show()
 end
