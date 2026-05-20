@@ -49,11 +49,13 @@ function L3F.BuildMinimap()
         if not tex then return end
         tex:ClearAllPoints()
         -- LibDBIcon's canonical anchor is (5.5, -5), centered on a 31x31
-        -- button. Our automarker.tga asset is drawn slightly left of its
-        -- own image center, so applying the convention as-is leaves the
-        -- skull visually off-center inside the ring. Shift right by half
-        -- a pixel to compensate (1px overshot, 0.5px is the sweet spot).
-        tex:SetPoint("TOPLEFT", btn, "TOPLEFT", 6.0, -5)
+        -- button. AutomarkerL3F's identical icon code looks centered at
+        -- 6.0; L3FTools' rendered slightly-right of center at the same
+        -- offset (side-by-side comparison confirmed by Morphéours). The
+        -- two addons use byte-identical TGA assets, so the discrepancy
+        -- is suspected sub-pixel rendering driven by the button's
+        -- absolute screen position. A quarter-pixel shift left compensates.
+        tex:SetPoint("TOPLEFT", btn, "TOPLEFT", 5.75, -5)
         tex:SetSize(20, 20)
     end
 
