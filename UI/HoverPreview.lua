@@ -58,7 +58,9 @@ local function build()
 
     frame = CreateFrame("Frame", "L3FToolsHoverPreview", UIParent, "BasicFrameTemplateWithInset")
     frame:SetSize(sw, sh)
-    frame:SetFrameStrata("HIGH")
+    -- Match the main frame's strata so the preview floats over the same
+    -- third-party HIGH-strata UI icons.
+    frame:SetFrameStrata("DIALOG")
     frame:SetClampedToScreen(true)
     frame:EnableMouse(true)
     if frame.TitleText then frame.TitleText:SetText("Preview") end

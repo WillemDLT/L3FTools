@@ -34,6 +34,10 @@ local tabButtons = {}
 
 local function showTab(name)
     if not L3F.tabs[name] then return end
+    -- The hover preview is owned by the Automarker tab. Any tab switch
+    -- (including swap-to-Automarker from elsewhere) should clear it so
+    -- it doesn't linger over an unrelated tab.
+    if L3F.HoverPreview then L3F.HoverPreview:Hide() end
     L3F.db.window.activeTab = name
 
     -- Build on first show (lazy load).
@@ -135,6 +139,9 @@ function L3F.BuildFrame()
 
     mainFrame = CreateFrame("Frame", "L3FToolsMainFrame", UIParent, "BasicFrameTemplateWithInset")
     mainFrame:SetSize(L3F.db.window.width or 900, L3F.db.window.height or 560)
+    -- DIALOG strata so add-on UI icons (WeakAuras, BigWigs bars, ...) at
+    -- HIGH don't draw on top of our menu. The hover preview matches.
+    mainFrame:SetFrameStrata("DIALOG")
 
     if L3F.db.window.x and L3F.db.window.y then
         mainFrame:SetPoint("CENTER", UIParent, "CENTER", L3F.db.window.x, L3F.db.window.y)

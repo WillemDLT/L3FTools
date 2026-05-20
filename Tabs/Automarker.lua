@@ -415,7 +415,12 @@ local function buildAutomarker(parent)
 
     -- SEARCH BOX - filters the NPC list by name as you type. Sits to the
     -- right of the raid dropdown so it doesn't push everything down.
-    local searchBox = CreateFrame("EditBox", "L3FToolsAutomarkerSearchBox", parent, "InputBoxTemplate")
+    -- No global name on the EditBox: with an explicit name, the keystroke
+    -- handler intermittently dropped Backspace events under the
+    -- OnTextChanged -> rebuild chain (the Atlas search, identical setup
+    -- but unnamed, has always worked). Saved across loads via Bindings.xml
+    -- ifany; nothing else relies on a stable global name.
+    local searchBox = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
     searchBox:SetSize(180, 22)
     searchBox:SetPoint("LEFT", dropdown, "RIGHT", 8, 2)
     searchBox:SetAutoFocus(false)
@@ -423,9 +428,19 @@ local function buildAutomarker(parent)
     local searchPlaceholder = searchBox:CreateFontString(nil, "OVERLAY", "GameFontDisable")
     searchPlaceholder:SetPoint("LEFT", searchBox, "LEFT", 2, 0)
     searchPlaceholder:SetText("Search NPCs...")
+    -- Defer the rebuild one tick so the EditBox finishes processing the
+    -- keystroke (especially Backspace) before we tear down/rebuild the
+    -- row pool synchronously. Running the rebuild inline on OnTextChanged
+    -- could swallow rapid Backspace presses.
+    local pendingRebuild = false
     searchBox:HookScript("OnTextChanged", function(self)
         searchPlaceholder:SetShown(self:GetText() == "")
-        if rebuild then rebuild() end
+        if pendingRebuild then return end
+        pendingRebuild = true
+        C_Timer.After(0, function()
+            pendingRebuild = false
+            if rebuild then rebuild() end
+        end)
     end)
     searchBox:HookScript("OnEditFocusGained", function() searchPlaceholder:SetText("") end)
     searchBox:HookScript("OnEditFocusLost", function(self)

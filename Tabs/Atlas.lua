@@ -405,6 +405,14 @@ local function buildListPane(parent)
 
     L3F.RefreshNPCList = function()
         for _, c in ipairs({npcList:GetChildren()}) do c:Hide(); c:SetParent(nil) end
+        -- FontStrings created directly on npcList (the "No matches." and
+        -- "Pick a raid..." placeholders below) are REGIONS, not children,
+        -- so the loop above doesn't catch them. Without this they linger
+        -- when the user clears the search.
+        for _, r in ipairs({npcList:GetRegions()}) do
+            r:Hide(); r:ClearAllPoints()
+            if r.SetText then r:SetText("") end
+        end
         local y = 0
 
         local search = (searchBox and searchBox:GetText() or "")
