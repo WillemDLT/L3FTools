@@ -30,12 +30,13 @@ local SUB_TAB_LABELS = {
     location = "Location", lore = "Lore",
 }
 
-local CAT_RAIDS   = "Raids"
-local CAT_HEROICS = "Heroic Dungeons"
+local CAT_RAIDS       = "Raids"
+local CAT_HEROICS     = "Heroic Dungeons"
+local CAT_CONSUMABLES = "Consumables"
 
 local treePane, listPane, detailPane
 local treeList, npcList, searchBox
-local currentNPC
+local currentNPC, currentConsumable
 local subTabButtons = {}
 local subTabContent
 local viewer, npcTitle, npcMeta
@@ -158,14 +159,14 @@ local function buildTreePane(parent)
     searchBox:SetMaxLetters(40)
     local placeholder = searchBox:CreateFontString(nil, "OVERLAY", "GameFontDisable")
     placeholder:SetPoint("LEFT", searchBox, "LEFT", 2, 0)
-    placeholder:SetText("Search NPCs, drops, spells...")
+    placeholder:SetText("Search")
     searchBox:HookScript("OnTextChanged", function(self)
         placeholder:SetShown(self:GetText() == "")
         if L3F.RefreshNPCList then L3F.RefreshNPCList() end
     end)
     searchBox:HookScript("OnEditFocusGained", function() placeholder:SetText("") end)
     searchBox:HookScript("OnEditFocusLost", function(self)
-        if self:GetText() == "" then placeholder:SetText("Search NPCs, drops, spells...") end
+        if self:GetText() == "" then placeholder:SetText("Search") end
     end)
     searchBox:SetScript("OnEscapePressed", function(self) self:SetText("") self:ClearFocus() end)
 
@@ -325,6 +326,65 @@ local function buildTreePane(parent)
             end
         end
 
+        -- CONSUMABLES category ---------------------------------
+        -- Atlas-only; the Automarker never sees these. The tree is empty
+        -- until Data/Consumables/*.lua files (loaded via the .toc) call
+        -- L3F.RegisterConsumables - this scaffolding lights up the moment
+        -- the data populate task runs.
+        local catConsKey   = "cat:" .. CAT_CONSUMABLES
+        local consExpanded = isExpanded(catConsKey)
+        addRow{
+            indent = 0, y = y,
+            key = catConsKey, label = CAT_CONSUMABLES,
+            font = "GameFontNormal",
+            hasArrow = true, expanded = consExpanded,
+            onClickRow = function()
+                setExpanded(catConsKey, not consExpanded)
+                L3F.RefreshTree()
+            end,
+        }
+        y = y + 20
+
+        if consExpanded then
+            for _, catName in ipairs(L3F.consumableCategoryOrder) do
+                local subKey      = "consumable-cat:" .. catName
+                local subExpanded = isExpanded(subKey)
+                addRow{
+                    indent = 16, y = y,
+                    key = subKey, label = catName,
+                    font = "GameFontNormalSmall",
+                    hasArrow = true, expanded = subExpanded,
+                    onClickRow = function()
+                        setExpanded(subKey, not subExpanded)
+                        L3F.RefreshTree()
+                    end,
+                }
+                y = y + 20
+
+                if subExpanded then
+                    local items = L3F.consumables[catName] or {}
+                    for _, item in ipairs(items) do
+                        local itemKey = "consumable:" .. tostring(item.id or item.name)
+                        addRow{
+                            indent = 32, y = y,
+                            key = itemKey, label = item.name,
+                            font = "GameFontHighlightSmall",
+                            hasArrow = false,
+                            onClickRow = function()
+                                selectKey(itemKey)
+                                currentConsumable = item
+                                currentNPC = nil
+                                L3F.RefreshTree()
+                                L3F.RefreshNPCList()
+                                L3F.RefreshDetailPane()
+                            end,
+                        }
+                        y = y + 18
+                    end
+                end
+            end
+        end
+
         treeList:SetHeight(math.max(y, 1))
     end
 end
@@ -389,6 +449,7 @@ local function buildListPane(parent)
 
         row:SetScript("OnClick", function()
             currentNPC = npc
+            currentConsumable = nil
             L3F.db.atlas.lastSelectedNPC = npc.id
             if L3F.RefreshNPCList then L3F.RefreshNPCList() end
             if L3F.RefreshDetailPane then L3F.RefreshDetailPane() end
@@ -403,13 +464,14 @@ local function buildListPane(parent)
         return y + rowH + 2
     end
 
-    -- Search-result row. Renders three kinds of hits in a unified layout:
-    --   kind = "npc"   -> bare NPC name (with location subtitle)
-    --   kind = "drop"  -> item icon + drop name + "from NPC" subtitle
-    --   kind = "spell" -> spell icon + spell name + "from NPC" subtitle
+    -- Search-result row. Renders four kinds of hits in a unified layout:
+    --   kind = "npc"        -> bare NPC name (with location subtitle)
+    --   kind = "drop"       -> item icon + drop name + "from NPC"
+    --   kind = "spell"      -> spell icon + spell name + "by NPC"
+    --   kind = "consumable" -> item icon + name + "Consumable - <category>"
     -- Clicking a drop/spell result selects the underlying NPC AND switches
-    -- the detail pane to the matching sub-tab, so the player lands on the
-    -- exact info they searched for.
+    -- the detail pane to the matching sub-tab. Clicking a consumable
+    -- selects it (clears the current NPC) and renders the consumable card.
     local function addSearchHit(hit, y)
         local rowH = 30
         local row = CreateFrame("Button", nil, npcList)
@@ -417,20 +479,27 @@ local function buildListPane(parent)
         row:SetPoint("TOPLEFT", npcList, "TOPLEFT", 0, -y)
         local rbg = row:CreateTexture(nil, "BACKGROUND")
         rbg:SetAllPoints()
-        local active = currentNPC and currentNPC.id == hit.npc.id
+        local active = false
+        if hit.kind == "consumable" then
+            active = currentConsumable and currentConsumable == hit.consumable
+        else
+            active = currentNPC and currentNPC.id == hit.npc.id
+        end
         rbg:SetColorTexture(active and 0.30 or 0, active and 0.65 or 0, active and 1 or 0, active and 0.25 or 0)
 
         local textX = 6
-        if hit.kind == "drop" or hit.kind == "spell" then
+        if hit.kind ~= "npc" then
             local icon = row:CreateTexture(nil, "ARTWORK")
             icon:SetSize(16, 16)
             icon:SetPoint("TOPLEFT", row, "TOPLEFT", 4, -2)
             icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
             if hit.kind == "drop" then
                 queueItemUI(hit.drop.id, nil, icon)
-            else
+            elseif hit.kind == "spell" then
                 local _, _, tex = GetSpellInfo(hit.spellID)
                 if tex then icon:SetTexture(tex) end
+            elseif hit.kind == "consumable" and hit.consumable.id then
+                queueItemUI(hit.consumable.id, nil, icon)
             end
             textX = 24
         end
@@ -445,6 +514,8 @@ local function buildListPane(parent)
             title:SetTextColor(active and 1 or 1, active and 1 or 0.82, active and 1 or 0, 1)
         elseif hit.kind == "drop" then
             queueItemUI(hit.drop.id, title, nil)
+        elseif hit.kind == "consumable" and hit.consumable.id then
+            queueItemUI(hit.consumable.id, title, nil)
         else
             title:SetTextColor(active and 1 or 0.85, active and 1 or 0.85, active and 1 or 0.85, 1)
         end
@@ -457,23 +528,29 @@ local function buildListPane(parent)
         sub:SetText(hit.subtitle or "")
 
         row:SetScript("OnClick", function()
-            currentNPC = hit.npc
-            L3F.db.atlas.lastSelectedNPC = hit.npc.id
-            -- Land on the sub-tab that contains the matched item so the
-            -- player sees the drop / spell they searched for immediately.
-            if hit.kind == "drop" then
-                L3F.db.atlas.lastActiveSubTab = "drops"
-            elseif hit.kind == "spell" then
-                L3F.db.atlas.lastActiveSubTab = "spells"
+            if hit.kind == "consumable" then
+                currentConsumable = hit.consumable
+                currentNPC = nil
+            else
+                currentNPC = hit.npc
+                currentConsumable = nil
+                L3F.db.atlas.lastSelectedNPC = hit.npc.id
+                -- Land on the sub-tab that contains the matched item so
+                -- the player sees the drop / spell they searched for.
+                if hit.kind == "drop" then
+                    L3F.db.atlas.lastActiveSubTab = "drops"
+                elseif hit.kind == "spell" then
+                    L3F.db.atlas.lastActiveSubTab = "spells"
+                end
             end
             if L3F.RefreshNPCList then L3F.RefreshNPCList() end
             if L3F.RefreshDetailPane then L3F.RefreshDetailPane() end
         end)
         row:SetScript("OnEnter", function()
-            if not currentNPC or currentNPC.id ~= hit.npc.id then rbg:SetColorTexture(1, 1, 1, 0.07) end
+            if not active then rbg:SetColorTexture(1, 1, 1, 0.07) end
         end)
         row:SetScript("OnLeave", function()
-            if currentNPC and currentNPC.id == hit.npc.id then rbg:SetColorTexture(0.30, 0.65, 1.0, 0.25)
+            if active then rbg:SetColorTexture(0.30, 0.65, 1.0, 0.25)
             else rbg:SetColorTexture(0, 0, 0, 0) end
         end)
         return y + rowH + 2
@@ -547,6 +624,26 @@ local function buildListPane(parent)
                     end
                 end)
             end
+
+            -- 4. Consumable matches (Atlas-only). Matches the English name
+            -- and the optional French name (nameFR) so the L3F guild can
+            -- find an item by either label.
+            for _, catName in ipairs(L3F.consumableCategoryOrder) do
+                for _, item in ipairs(L3F.consumables[catName] or {}) do
+                    local match = item.name and item.name:lower():find(search, 1, true)
+                    if not match and item.nameFR then
+                        match = item.nameFR:lower():find(search, 1, true)
+                    end
+                    if match then
+                        table.insert(hits, {
+                            kind = "consumable", consumable = item,
+                            label = item.name,
+                            subtitle = "Consumable - " .. catName,
+                        })
+                    end
+                end
+            end
+
             if #hits == 0 then
                 local txt = npcList:CreateFontString(nil, "OVERLAY", "GameFontDisable")
                 txt:SetPoint("TOPLEFT", npcList, "TOPLEFT", 8, -8)
@@ -646,6 +743,15 @@ local function buildDetailPane(parent)
     viewer = L3F.CreateModelViewer(modelHost, 224, 240)
     viewer.frame:SetPoint("TOP", modelHost, "TOP", 0, -8)
 
+    -- Consumable icon. Hidden by default; takes the model viewer's spot
+    -- when a consumable (no 3D model) is selected. queueItemUI populates
+    -- its texture from GetItemInfo asynchronously.
+    local consumableIcon = modelHost:CreateTexture(nil, "ARTWORK")
+    consumableIcon:SetSize(96, 96)
+    consumableIcon:SetPoint("TOP", modelHost, "TOP", 0, -32)
+    consumableIcon:Hide()
+    detailPane.consumableIcon = consumableIcon
+
     npcTitle = modelHost:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     npcTitle:SetPoint("TOP", viewer.frame, "BOTTOM", 0, -8)
     npcTitle:SetWidth(220)
@@ -727,6 +833,7 @@ local function buildDetailPane(parent)
 
     L3F.RefreshDetailPane = function()
         local npc = currentNPC
+        local item = currentConsumable
         for k, btn in pairs(subTabButtons) do
             local active = (k == L3F.db.atlas.lastActiveSubTab)
             btn.label:SetTextColor(active and 1 or 0.7, active and 1 or 0.7, active and 1 or 0.7, 1)
@@ -741,9 +848,49 @@ local function buildDetailPane(parent)
             end
         end
 
+        -- ---------------------------------------------------------
+        -- CONSUMABLE PATH - no 3D model, no spells/drops sub-tabs,
+        -- just icon + name + category + effect + notes.
+        -- ---------------------------------------------------------
+        if item then
+            viewer.frame:Hide()
+            subStrip:Hide()
+            detailPane.consumableIcon:Show()
+            detailPane.consumableIcon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+            npcTitle:SetText(item.name or "")
+            npcMeta:SetText(item.category or "")
+            if item.id then
+                queueItemUI(item.id, npcTitle, detailPane.consumableIcon)
+            else
+                npcTitle:SetTextColor(1, 1, 1, 1)
+            end
+            local y = 4
+            local function addLine(label, value, fontObj)
+                if not value or value == "" then return end
+                local fs = subTabContent.body:CreateFontString(nil, "OVERLAY", fontObj or "GameFontNormal")
+                fs:SetPoint("TOPLEFT",  subTabContent.body, "TOPLEFT",  4, -y)
+                fs:SetPoint("TOPRIGHT", subTabContent.body, "TOPRIGHT", -4, -y)
+                fs:SetJustifyH("LEFT")
+                fs:SetWordWrap(true)
+                fs:SetText(label and (label .. ": " .. value) or value)
+                y = y + math.max(fs:GetStringHeight() + 6, 18)
+            end
+            addLine("Effect",   item.effect, "GameFontHighlight")
+            addLine("Duration", item.duration)
+            addLine(nil,        item.notes)
+            subTabContent.body:SetHeight(math.max(y, 1))
+            return
+        end
+
+        -- NPC / empty paths re-show the widgets the consumable path hid.
+        viewer.frame:Show()
+        subStrip:Show()
+        detailPane.consumableIcon:Hide()
+
         if not npc then
             viewer:Clear()
             npcTitle:SetText("Select an NPC")
+            npcTitle:SetTextColor(1, 0.82, 0, 1)
             npcMeta:SetText("")
             return
         end

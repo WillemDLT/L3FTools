@@ -56,6 +56,30 @@ end
 -- Built after npcLookup so a future Atlas search bar can do reverse-lookup.
 L3F.itemLookup = nil
 
+-- =============================================================
+-- CONSUMABLES REGISTRY (Atlas-only - the Automarker never reads these)
+-- =============================================================
+-- Each consumable is a record { id, name, category, effect, notes, [nameFR] }.
+-- The category groups it under the Consumables tree node (e.g. "Flasks",
+-- "Battle Elixirs"). consumableCategoryOrder preserves registration order
+-- so Data/Consumables/Flasks.lua appears before Data/Consumables/Food.lua
+-- if listed that way in the .toc.
+L3F.consumables = {}              -- categoryName -> { item, item, ... }
+L3F.consumableLookup = {}         -- itemID -> item
+L3F.consumableCategoryOrder = {}  -- ordered list of category names
+
+function L3F.RegisterConsumables(items)
+    for _, item in ipairs(items) do
+        local cat = item.category or "Other"
+        if not L3F.consumables[cat] then
+            L3F.consumables[cat] = {}
+            table.insert(L3F.consumableCategoryOrder, cat)
+        end
+        table.insert(L3F.consumables[cat], item)
+        if item.id then L3F.consumableLookup[item.id] = item end
+    end
+end
+
 local function buildLookup()
     L3F.npcLookup = {}
     L3F.itemLookup = {}
