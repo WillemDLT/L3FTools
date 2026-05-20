@@ -99,3 +99,26 @@ end
 
 L3F.AutomarkerTryMark    = tryMark
 L3F.AutomarkerResetGUIDs = function() wipe(assignedGUIDs) end
+
+
+-- =============================================================
+-- CLEU PRUNE: drop dead mobs from the session ledger so their
+-- mark slots free up for the next pack. Without this, after pack
+-- 1 dies the ledger still considers pack 1's marks "in use" and
+-- findFreeMark refuses to mark pack 2 if their priority list
+-- collides. Triggered Morphéours's "have to Clear All between
+-- packs" workaround.
+--
+-- UNIT_DIED covers most mob deaths; UNIT_DESTROYED catches
+-- destructible objects and some pet/vehicle teardowns; PARTY_KILL
+-- is a redundant safety net for player-credited kills.
+-- =============================================================
+local cleu = CreateFrame("Frame")
+cleu:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+cleu:SetScript("OnEvent", function()
+    local _, sub, _, _, _, _, _, destGUID = CombatLogGetCurrentEventInfo()
+    if not destGUID then return end
+    if sub == "UNIT_DIED" or sub == "UNIT_DESTROYED" or sub == "PARTY_KILL" then
+        assignedGUIDs[destGUID] = nil
+    end
+end)
