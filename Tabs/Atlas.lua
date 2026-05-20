@@ -253,6 +253,15 @@ local function buildDetailPane(parent)
     subTabContent.body = CreateFrame("Frame", nil, subTabContent)
     subTabContent.body:SetSize(400, 1)
     subTabContent:SetScrollChild(subTabContent.body)
+    -- Keep the scroll child as wide as the visible scroll area, so notes wrap
+    -- (and drops / other sub-tabs lay out) to the real width rather than the
+    -- hardcoded 400. Height stays under per-sub-tab control.
+    local function fitBody()
+        local w = subTabContent:GetWidth()
+        if w and w > 1 then subTabContent.body:SetWidth(w) end
+    end
+    subTabContent:HookScript("OnSizeChanged", fitBody)
+    fitBody()
 
     local x = 0
     for _, key in ipairs(SUB_TABS) do
