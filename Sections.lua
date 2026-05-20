@@ -128,15 +128,38 @@ end
 
 
 -- =============================================================
--- 4. THE WING SWITCHER  (movable on-screen prev / next)
+-- 4. RESET ALL MARKS  (button + Bindings.xml hotkey)
+-- =============================================================
+-- Clears the raid icon from every NPC the client currently sees:
+-- visible nameplates, plus target / focus / mouseover for units the
+-- player has explicitly engaged. Also wipes the engine's once-placed
+-- GUID set so the automarker is free to re-decorate the room on the
+-- next wave.
+function L3F.ResetAllMarks()
+    if C_NamePlate and C_NamePlate.GetNamePlates then
+        for _, plate in ipairs(C_NamePlate.GetNamePlates()) do
+            local unit = plate.namePlateUnitToken
+            if unit and UnitExists(unit) then SetRaidTarget(unit, 0) end
+        end
+    end
+    for _, unit in ipairs({"target", "focus", "mouseover"}) do
+        if UnitExists(unit) then SetRaidTarget(unit, 0) end
+    end
+    if L3F.AutomarkerResetGUIDs then L3F.AutomarkerResetGUIDs() end
+end
+
+
+-- =============================================================
+-- 5. THE WING SWITCHER  (movable on-screen prev / next + clear)
 -- =============================================================
 local switcher
 
 local function buildSwitcher()
     if switcher then return switcher end
 
+    -- Height 56 (was 40) to fit the new Clear-marks button at the bottom.
     local f = CreateFrame("Frame", "L3FToolsSwitcher", UIParent, "BackdropTemplate")
-    f:SetSize(280, 40)
+    f:SetSize(280, 56)
     f:SetFrameStrata("MEDIUM")
     f:SetMovable(true)
     f:EnableMouse(true)
@@ -162,9 +185,13 @@ local function buildSwitcher()
         f:SetPoint("TOP", UIParent, "TOP", 0, -140)
     end
 
+    -- prev/next buttons + raid/wing labels live in the upper area
+    -- (~40px). The Y offset 8 raises them above the new frame center
+    -- so they keep their original visual position relative to the
+    -- raid/wing labels.
     local prev = CreateFrame("Button", nil, f)
     prev:SetSize(26, 26)
-    prev:SetPoint("LEFT", f, "LEFT", 8, 0)
+    prev:SetPoint("LEFT", f, "LEFT", 8, 8)
     prev:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Up")
     prev:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Down")
     prev:SetDisabledTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Disabled")
@@ -173,7 +200,7 @@ local function buildSwitcher()
 
     local nextb = CreateFrame("Button", nil, f)
     nextb:SetSize(26, 26)
-    nextb:SetPoint("RIGHT", f, "RIGHT", -8, 0)
+    nextb:SetPoint("RIGHT", f, "RIGHT", -8, 8)
     nextb:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Up")
     nextb:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Down")
     nextb:SetDisabledTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Disabled")
@@ -188,14 +215,30 @@ local function buildSwitcher()
     raidText:SetWordWrap(false)
 
     local label = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    label:SetPoint("BOTTOM", f, "BOTTOM", 0, 7)
+    label:SetPoint("TOP", raidText, "BOTTOM", 0, -2)
     label:SetPoint("LEFT", prev, "RIGHT", 2, 0)
     label:SetPoint("RIGHT", nextb, "LEFT", -2, 0)
     label:SetJustifyH("CENTER")
     label:SetWordWrap(false)
     label:SetTextColor(1, 0.82, 0)
 
-    f.prev, f.next, f.label, f.raidText = prev, nextb, label, raidText
+    -- Clear-marks button: centred in the bottom strip. Same action
+    -- the L3FTOOLS_RESETMARKS keybind fires.
+    local clearBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    clearBtn:SetSize(120, 18)
+    clearBtn:SetPoint("BOTTOM", f, "BOTTOM", 0, 5)
+    clearBtn:SetText("Clear marks")
+    clearBtn:SetScript("OnClick", function() L3F.ResetAllMarks() end)
+    clearBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Clear all marks")
+        GameTooltip:AddLine("Removes the raid icon from every NPC the client currently sees, and resets the once-placed-lock so the addon is free to re-mark them on the next wave.", 1, 1, 1, true)
+        GameTooltip:AddLine("Also bindable as a hotkey under Esc - Key Bindings - L3FTools.", 0.7, 0.7, 0.7, true)
+        GameTooltip:Show()
+    end)
+    clearBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    f.prev, f.next, f.label, f.raidText, f.clearBtn = prev, nextb, label, raidText, clearBtn
     f:Hide()
     switcher = f
     return f

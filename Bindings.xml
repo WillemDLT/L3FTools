@@ -1,15 +1,8 @@
 <Bindings>
-    <!--
-        Category="BINDING_HEADER_L3FTOOLS" - resolved by the Key Bindings
-        UI at draw time (not at XML parse time), so the corresponding
-        BINDING_HEADER_L3FTOOLS global set in Core.lua is available when
-        the lookup happens. Blizzard broke the older header="..." path
-        in Dragonflight (10.x, Oct 2023); the WeakAuras fix migrated to
-        this exact attribute and value form. Capital C in Category
-        matches WeakAuras's current production source - WoW's XML parser
-        is case-sensitive on attributes.
-    -->
     <Binding name="L3FTOOLS_MOUSEOVERMARK" runOnUp="true" Category="BINDING_HEADER_L3FTOOLS">
         if L3FTools then L3FTools.mouseoverHeld = keystate == "down" end
+    </Binding>
+    <Binding name="L3FTOOLS_RESETMARKS" Category="BINDING_HEADER_L3FTOOLS">
+        if L3FTools and L3FTools.ResetAllMarks then L3FTools.ResetAllMarks() end
     </Binding>
 </Bindings>
