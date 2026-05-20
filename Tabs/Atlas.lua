@@ -129,6 +129,15 @@ local function findRaid(name)
     end
 end
 
+-- Boss heuristic: raid data files use TRASH (the 8-entry {8,7,6,5,4,3,2,1}
+-- priority list) for filler mobs and a short specific mark list ({8}, {7},
+-- {8,7,6,5,4}, ...) for named encounters. Anything shorter than 8 marks
+-- is a boss / named NPC. Players hunt bosses far more than trash, so this
+-- is what powers the BOSSES/TRASH split + gold tint in the list pane.
+local function isBoss(npc)
+    return npc.marks and #npc.marks > 0 and #npc.marks < 8
+end
+
 
 -- =============================================================
 -- TREE PANE
@@ -364,7 +373,13 @@ local function buildListPane(parent)
         local txt = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         txt:SetPoint("TOPLEFT", row, "TOPLEFT", 8, -1)
         txt:SetText(npc.name)
-        txt:SetTextColor(active and 1 or 0.85, active and 1 or 0.85, active and 1 or 0.85, 1)
+        -- Boss names get a subtle gold tint so they pop in flat raid
+        -- views and in global search results.
+        if isBoss(npc) then
+            txt:SetTextColor(active and 1 or 1, active and 1 or 0.82, active and 1 or 0, 1)
+        else
+            txt:SetTextColor(active and 1 or 0.85, active and 1 or 0.85, active and 1 or 0.85, 1)
+        end
 
         if location then
             local loc = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -439,34 +454,52 @@ local function buildListPane(parent)
             return
         end
 
+        -- Split an NPC list into bosses/trash and render with headers,
+        -- so the bosses players actually hunt are always at the top.
+        -- If a group is empty its header is skipped (a trash-only wing
+        -- doesn't get a "BOSSES" placeholder).
+        local function renderBossTrash(npcs)
+            local bosses, trash = {}, {}
+            for _, npc in ipairs(npcs) do
+                if isBoss(npc) then table.insert(bosses, npc)
+                else table.insert(trash, npc) end
+            end
+            if #bosses > 0 then
+                y = addHeader("Bosses", y)
+                for _, npc in ipairs(bosses) do y = addNPC(npc, y, nil) end
+            end
+            if #trash > 0 then
+                y = addHeader("Trash", y)
+                for _, npc in ipairs(trash) do y = addNPC(npc, y, nil) end
+            end
+        end
+
         if sel:sub(1, 5) == "wing:" then
-            -- Wing selected -> just this wing's NPCs (the wing name is
-            -- already in the tree, so don't repeat it as a header here).
+            -- Wing selected -> just this wing's NPCs, bosses first.
             local raidName, wIdxStr = sel:sub(6):match("^(.+)/(%d+)$")
             local wIdx = tonumber(wIdxStr or "")
             local raid = raidName and findRaid(raidName)
             if raid and raid.sections and raid.sections[wIdx] then
-                for _, npc in ipairs(raid.sections[wIdx].npcs) do
-                    y = addNPC(npc, y, nil)
-                end
+                renderBossTrash(raid.sections[wIdx].npcs)
             end
 
         elseif sel:sub(1, 5) == "raid:" then
-            -- Raid selected -> a flat list of every NPC in the raid.
-            -- The tree already gives the user the wing breakdown; repeating
-            -- the wing headers here would be redundant. Clicking a wing in
-            -- the tree narrows to that wing only.
+            -- Raid selected -> flat list of every NPC in the raid,
+            -- grouped by Bosses then Trash (the wing breakdown stays
+            -- visible in the tree on the left).
             local raid = findRaid(sel:sub(6))
             if raid and raid.sections then
+                local all = {}
                 for _, sec in ipairs(raid.sections) do
-                    for _, npc in ipairs(sec.npcs) do y = addNPC(npc, y, nil) end
+                    for _, npc in ipairs(sec.npcs) do table.insert(all, npc) end
                 end
+                renderBossTrash(all)
             end
 
         elseif sel:sub(1, 7) == "heroic:" then
             local heroic = findRaid(sel:sub(8))
             if heroic and heroic.npcs then
-                for _, npc in ipairs(heroic.npcs) do y = addNPC(npc, y, nil) end
+                renderBossTrash(heroic.npcs)
             end
         end
 
