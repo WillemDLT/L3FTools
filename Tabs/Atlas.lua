@@ -158,14 +158,14 @@ local function buildTreePane(parent)
     searchBox:SetMaxLetters(40)
     local placeholder = searchBox:CreateFontString(nil, "OVERLAY", "GameFontDisable")
     placeholder:SetPoint("LEFT", searchBox, "LEFT", 2, 0)
-    placeholder:SetText("Search all NPCs...")
+    placeholder:SetText("Search NPCs, drops, spells...")
     searchBox:HookScript("OnTextChanged", function(self)
         placeholder:SetShown(self:GetText() == "")
         if L3F.RefreshNPCList then L3F.RefreshNPCList() end
     end)
     searchBox:HookScript("OnEditFocusGained", function() placeholder:SetText("") end)
     searchBox:HookScript("OnEditFocusLost", function(self)
-        if self:GetText() == "" then placeholder:SetText("Search all NPCs...") end
+        if self:GetText() == "" then placeholder:SetText("Search NPCs, drops, spells...") end
     end)
     searchBox:SetScript("OnEscapePressed", function(self) self:SetText("") self:ClearFocus() end)
 
@@ -403,6 +403,82 @@ local function buildListPane(parent)
         return y + rowH + 2
     end
 
+    -- Search-result row. Renders three kinds of hits in a unified layout:
+    --   kind = "npc"   -> bare NPC name (with location subtitle)
+    --   kind = "drop"  -> item icon + drop name + "from NPC" subtitle
+    --   kind = "spell" -> spell icon + spell name + "from NPC" subtitle
+    -- Clicking a drop/spell result selects the underlying NPC AND switches
+    -- the detail pane to the matching sub-tab, so the player lands on the
+    -- exact info they searched for.
+    local function addSearchHit(hit, y)
+        local rowH = 30
+        local row = CreateFrame("Button", nil, npcList)
+        row:SetSize(170, rowH)
+        row:SetPoint("TOPLEFT", npcList, "TOPLEFT", 0, -y)
+        local rbg = row:CreateTexture(nil, "BACKGROUND")
+        rbg:SetAllPoints()
+        local active = currentNPC and currentNPC.id == hit.npc.id
+        rbg:SetColorTexture(active and 0.30 or 0, active and 0.65 or 0, active and 1 or 0, active and 0.25 or 0)
+
+        local textX = 6
+        if hit.kind == "drop" or hit.kind == "spell" then
+            local icon = row:CreateTexture(nil, "ARTWORK")
+            icon:SetSize(16, 16)
+            icon:SetPoint("TOPLEFT", row, "TOPLEFT", 4, -2)
+            icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+            if hit.kind == "drop" then
+                queueItemUI(hit.drop.id, nil, icon)
+            else
+                local _, _, tex = GetSpellInfo(hit.spellID)
+                if tex then icon:SetTexture(tex) end
+            end
+            textX = 24
+        end
+
+        local title = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        title:SetPoint("TOPLEFT", row, "TOPLEFT", textX, -1)
+        title:SetPoint("TOPRIGHT", row, "TOPRIGHT", -4, -1)
+        title:SetJustifyH("LEFT")
+        title:SetWordWrap(false)
+        title:SetText(hit.label)
+        if hit.kind == "npc" and isBoss(hit.npc) then
+            title:SetTextColor(active and 1 or 1, active and 1 or 0.82, active and 1 or 0, 1)
+        elseif hit.kind == "drop" then
+            queueItemUI(hit.drop.id, title, nil)
+        else
+            title:SetTextColor(active and 1 or 0.85, active and 1 or 0.85, active and 1 or 0.85, 1)
+        end
+
+        local sub = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        sub:SetPoint("TOPLEFT", row, "TOPLEFT", textX + 4, -14)
+        sub:SetPoint("TOPRIGHT", row, "TOPRIGHT", -4, -14)
+        sub:SetJustifyH("LEFT")
+        sub:SetWordWrap(false)
+        sub:SetText(hit.subtitle or "")
+
+        row:SetScript("OnClick", function()
+            currentNPC = hit.npc
+            L3F.db.atlas.lastSelectedNPC = hit.npc.id
+            -- Land on the sub-tab that contains the matched item so the
+            -- player sees the drop / spell they searched for immediately.
+            if hit.kind == "drop" then
+                L3F.db.atlas.lastActiveSubTab = "drops"
+            elseif hit.kind == "spell" then
+                L3F.db.atlas.lastActiveSubTab = "spells"
+            end
+            if L3F.RefreshNPCList then L3F.RefreshNPCList() end
+            if L3F.RefreshDetailPane then L3F.RefreshDetailPane() end
+        end)
+        row:SetScript("OnEnter", function()
+            if not currentNPC or currentNPC.id ~= hit.npc.id then rbg:SetColorTexture(1, 1, 1, 0.07) end
+        end)
+        row:SetScript("OnLeave", function()
+            if currentNPC and currentNPC.id == hit.npc.id then rbg:SetColorTexture(0.30, 0.65, 1.0, 0.25)
+            else rbg:SetColorTexture(0, 0, 0, 0) end
+        end)
+        return y + rowH + 2
+    end
+
     L3F.RefreshNPCList = function()
         for _, c in ipairs({npcList:GetChildren()}) do c:Hide(); c:SetParent(nil) end
         -- FontStrings created directly on npcList (the "No matches." and
@@ -419,20 +495,55 @@ local function buildListPane(parent)
             :lower():gsub("^%s+", ""):gsub("%s+$", "")
 
         -- ---------------------------------------------------------
-        -- GLOBAL SEARCH MODE - flat list across every raid + heroic.
+        -- GLOBAL SEARCH MODE - matches NPC names, drop item names, and
+        -- spell names across every raid + heroic. The "I know what drops
+        -- this item but not who drops it" case: typing the item name lands
+        -- the player on the right NPC's Drops tab in one click.
         -- ---------------------------------------------------------
         if search ~= "" then
             local hits = {}
             for _, raid in ipairs(L3F.raids) do
                 L3F.iterNPCs(raid, function(npc, sectionName)
+                    local loc = sectionName and (sectionName .. " - " .. raid.name) or raid.name
+
+                    -- 1. NPC name match
                     if npc.name:lower():find(search, 1, true) then
-                        local loc
-                        if sectionName then
-                            loc = sectionName .. " - " .. raid.name
-                        else
-                            loc = raid.name
+                        table.insert(hits, {
+                            kind = "npc", npc = npc,
+                            label = npc.name, subtitle = loc,
+                        })
+                    end
+
+                    -- 2. Drop name matches. drop.name is bundled in the
+                    -- Data/Drops files so we can match without waiting on
+                    -- GetItemInfo to cache.
+                    if npc.drops then
+                        for _, drop in ipairs(npc.drops) do
+                            local dropName = drop.name or ("Item #" .. drop.id)
+                            if dropName:lower():find(search, 1, true) then
+                                table.insert(hits, {
+                                    kind = "drop", npc = npc, drop = drop,
+                                    label = dropName,
+                                    subtitle = "from " .. npc.name,
+                                })
+                            end
                         end
-                        table.insert(hits, { npc = npc, location = loc })
+                    end
+
+                    -- 3. Spell name matches. GetSpellInfo returns the
+                    -- localized name; uncached spells return nil and are
+                    -- skipped (subsequent searches once cached will match).
+                    if npc.spells then
+                        for _, spellID in ipairs(npc.spells) do
+                            local spellName = GetSpellInfo(spellID)
+                            if spellName and spellName:lower():find(search, 1, true) then
+                                table.insert(hits, {
+                                    kind = "spell", npc = npc, spellID = spellID,
+                                    label = spellName,
+                                    subtitle = "by " .. npc.name,
+                                })
+                            end
+                        end
                     end
                 end)
             end
@@ -444,7 +555,7 @@ local function buildListPane(parent)
                 return
             end
             for _, h in ipairs(hits) do
-                y = addNPC(h.npc, y, h.location)
+                y = addSearchHit(h, y)
             end
             npcList:SetHeight(math.max(y, 1))
             return
