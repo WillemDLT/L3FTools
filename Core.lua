@@ -150,6 +150,25 @@ local DEFAULTS = {
         hide  = false,
         angle = 200,
     },
+    -- Guild Map module (live position sharing on world map + minimap)
+    guildMap = {
+        privacyAnswered     = false,  -- set true after the user has answered the first-run popup
+        shareWithGuild      = false,  -- broadcast position to guild members with L3FTools
+        shareWithGroup      = false,  -- broadcast position to group/raid members (Phase 1.5)
+        shareWithFriends    = false,  -- whisper-broadcast position to char-friends (Phase 1.5)
+        pauseInRaidInstance = true,   -- pause broadcasting while inside a raid instance
+        blockedPlayers      = {},     -- characters this client refuses to share with
+        -- Display preferences (used by chunks 4-5; saved here so the panel
+        -- can reach them through a single namespace).
+        showOnWorldMap   = true,
+        showOnMinimap    = true,
+        iconStyle        = "class",   -- "class" | "dot"
+        worldPinSize     = 1.0,
+        minimapPinSize   = 1.0,
+        showName         = true,
+        showLevel        = true,
+        showHP           = true,
+    },
 }
 
 local function deepCopyDefaults(target, defaults)
