@@ -33,40 +33,43 @@ function L3F.BuildMinimap()
     if L3F.minimapButton then return L3F.minimapButton end
 
     local btn = CreateFrame("Button", "L3FToolsMinimapButton", Minimap)
-    btn:SetSize(28, 28)
+    btn:SetSize(31, 31)
     btn:SetFrameStrata("MEDIUM")
     btn:SetFrameLevel(8)
 
-    -- Resize each button-state texture to 20x20 centred inside the
-    -- 28x28 button, so the gold tracking-border ring below can sit
-    -- around the icon the way every other addon's minimap button
-    -- looks (LibDBIcon convention).
-    local function shrinkToIconArea(tex)
+    -- Geometry matches LibDBIcon-1.0 convention so the gold tracking-
+    -- border ring lines up around our icon the way every other addon's
+    -- minimap button looks. The MiniMap-TrackingBorder texture is NOT
+    -- symmetric around its own image center - it is drawn to be placed
+    -- at TOPLEFT(0, 0) of a 31x31 button, with the icon TOPLEFT-anchored
+    -- at (5.5, -5) size 20x20. Centering the texture (our prior code)
+    -- lands the ring off-center because we were assuming a symmetry
+    -- the asset does not have.
+    local function placeIcon(tex)
         if not tex then return end
         tex:ClearAllPoints()
-        tex:SetPoint("CENTER", btn, "CENTER", 0, 0)
+        tex:SetPoint("TOPLEFT", btn, "TOPLEFT", 5.5, -5)
         tex:SetSize(20, 20)
     end
 
     btn:SetNormalTexture("Interface\\AddOns\\L3FTools\\Media\\automarker")
-    shrinkToIconArea(btn:GetNormalTexture())
+    placeIcon(btn:GetNormalTexture())
 
     btn:SetHighlightTexture("Interface\\AddOns\\L3FTools\\Media\\automarker", "ADD")
     local hl = btn:GetHighlightTexture()
-    shrinkToIconArea(hl)
+    placeIcon(hl)
     if hl then hl:SetAlpha(0.4) end
 
     btn:SetPushedTexture("Interface\\AddOns\\L3FTools\\Media\\automarker")
     local pushed = btn:GetPushedTexture()
-    shrinkToIconArea(pushed)
+    placeIcon(pushed)
     if pushed then pushed:SetVertexColor(0.8, 0.8, 0.8) end
 
     -- Gold tracking-border ring drawn over the icon (Blizzard texture).
-    -- 54x54 centred so it visually surrounds the 20x20 icon - same
-    -- look as every other addon's minimap button.
+    -- TOPLEFT 0,0 size 53x53 - LibDBIcon-1.0 convention.
     local border = btn:CreateTexture(nil, "OVERLAY")
-    border:SetSize(54, 54)
-    border:SetPoint("CENTER", btn, "CENTER", 0, 0)
+    border:SetSize(53, 53)
+    border:SetPoint("TOPLEFT", btn, "TOPLEFT", 0, 0)
     border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
 
     btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")

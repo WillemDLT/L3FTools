@@ -145,17 +145,50 @@ end
 -- Also wipes the engine's once-placed GUID set so the automarker is
 -- free to re-decorate the room on the next pull.
 function L3F.ResetAllMarks()
-    -- Two-phase sequence (credit: Morpheours, empirically verified in
-    -- raid context):
-    --   1. Fire SetRaidTarget('player', 1..8) in a tight loop. Raid
-    --      icons are unique per group so each call forces whoever
-    --      else was holding that icon to drop it onto the player.
-    --   2. Wait 150 ms, then SetRaidTarget('player', 0) to clear the
-    --      skull left on the player. The gap matters: inside a raid
-    --      the server batches the 1..8 burst and was dropping a
-    --      same-frame trailing 0, leaving the skull stuck.
+    -- Two-phase sequence:
+    --   1. Cycle SetRaidTarget("player", 1..8). Raid icons are unique
+    --      per group so each call dislodges whoever was holding that
+    --      icon; player ends up holding the skull (the final 8).
+    --   2. Wait for RAID_TARGET_UPDATE to CONFIRM the skull has actually
+    --      committed to the player, then SetRaidTarget("player", 0) to
+    --      clear it. Reacting to the event survives raid-load batching
+    --      where the prior fixed 150ms timer was racing the server -
+    --      the timer's 0 was firing before the skull arrived, so it
+    --      cleared nothing and the skull stuck.
+    --
+    -- Pattern lifted from MRT (Method Raid Tools), MarksSimple.lua:
+    --   if GetRaidTargetIndex("player") == 8 then
+    --       SetRaidTarget("player", 0)
+    --       module:UnregisterEvents('RAID_TARGET_UPDATE')
+    --   end
     for i = 1, 8 do SetRaidTarget("player", i) end
-    C_Timer.After(0.15, function() SetRaidTarget("player", 0) end)
+
+    local watcher = CreateFrame("Frame")
+    local done = false
+    watcher:RegisterEvent("RAID_TARGET_UPDATE")
+    watcher:SetScript("OnEvent", function(self)
+        if done then return end
+        if GetRaidTargetIndex("player") == 8 then
+            SetRaidTarget("player", 0)
+            done = true
+            self:UnregisterAllEvents()
+            self:SetScript("OnEvent", nil)
+        end
+    end)
+
+    -- Safety net: if RAID_TARGET_UPDATE never fires (solo testing, the
+    -- icon was cleared by something else mid-flight, etc.), unhook
+    -- after 2 seconds and fire a final clear so we never leak a watcher.
+    C_Timer.After(2.0, function()
+        if done then return end
+        if GetRaidTargetIndex("player") == 8 then
+            SetRaidTarget("player", 0)
+        end
+        done = true
+        watcher:UnregisterAllEvents()
+        watcher:SetScript("OnEvent", nil)
+    end)
+
     if L3F.AutomarkerResetGUIDs then L3F.AutomarkerResetGUIDs() end
 end
 
