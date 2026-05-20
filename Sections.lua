@@ -145,8 +145,18 @@ end
 -- Also wipes the engine's once-placed GUID set so the automarker is
 -- free to re-decorate the room on the next pull.
 function L3F.ResetAllMarks()
-    for i = 1, 8 do SetRaidTarget("player", i) end
-    SetRaidTarget("player", 0)
+    -- WoW collapses repeated SetRaidTarget calls on the same unit
+    -- within a single frame: only the LAST value persists at end of
+    -- tick, and the intermediate 1..7 transfers never fire (other
+    -- units keep their icons). On top of that the final 0 was getting
+    -- dropped by the throttle, leaving the player wearing the skull
+    -- icon. Spreading the calls across separate frames via
+    -- C_Timer.After makes each step land cleanly and the final 0
+    -- properly clears the icon left on the player.
+    for i = 1, 8 do
+        C_Timer.After(0.05 * (i - 1), function() SetRaidTarget("player", i) end)
+    end
+    C_Timer.After(0.05 * 8, function() SetRaidTarget("player", 0) end)
     if L3F.AutomarkerResetGUIDs then L3F.AutomarkerResetGUIDs() end
 end
 
