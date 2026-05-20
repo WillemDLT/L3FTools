@@ -132,22 +132,6 @@ end
 -- =============================================================
 local KB_MOUSE = { MiddleButton = "BUTTON3", Button4 = "BUTTON4", Button5 = "BUTTON5" }
 
--- Text-editing keys must never be bound to the hold-to-mark command:
--- on TBC Anniversary an active global binding on these keys silently
--- wins over EditBox text input, so binding e.g. BACKSPACE here breaks
--- backspace in EVERY edit box in the game (the Automarker search,
--- chat, /run, ...). The keybind picker rejects them; the addon also
--- self-heals on load by unbinding any blocked key already assigned.
-L3F.BLOCKED_BIND_KEYS = {
-    BACKSPACE   = true, DELETE      = true,
-    ENTER       = true, NUMPADENTER = true,
-    TAB         = true,
-    LEFT        = true, RIGHT       = true,
-    UP          = true, DOWN        = true,
-    HOME        = true, ["END"]     = true,
-    INSERT      = true, PAGEUP      = true, PAGEDOWN = true,
-}
-
 local function kbModified(key)
     if key == "LSHIFT" or key == "RSHIFT" or key == "LCTRL" or key == "RCTRL"
        or key == "LALT" or key == "RALT" or key == "UNKNOWN" then
@@ -158,28 +142,6 @@ local function kbModified(key)
     if IsControlKeyDown() then p = "CTRL-" .. p end
     if IsShiftKeyDown()   then p = "SHIFT-" .. p end
     return p .. key
-end
-
--- Sweep any text-editing keys currently bound to `command` and unbind
--- them. Called once on ADDON_LOADED so a player who already typed a
--- bad key into the picker isn't stuck without backspace in chat etc.
-function L3F.CleanupBlockedBindings(command)
-    local changed = false
-    while true do
-        local key = GetBindingKey(command)
-        if not key then break end
-        local rootKey = key:gsub("^.*%-", "")  -- strip ALT-/CTRL-/SHIFT- prefix
-        if L3F.BLOCKED_BIND_KEYS[rootKey] then
-            SetBinding(key)
-            changed = true
-            print("|cffffd100L3FTools|r Unbound '" .. key
-                .. "' from hold-to-mark - that key is reserved for text editing.")
-        else
-            -- Not blocked; nothing left to clean for this command.
-            break
-        end
-    end
-    if changed then SaveBindings(GetCurrentBindingSet()) end
 end
 
 function L3F.SetupKeybindButton(btn, command)
@@ -224,12 +186,6 @@ function L3F.SetupKeybindButton(btn, command)
     btn:SetScript("OnKeyDown", function(self, key)
         if not listening then return end
         if key == "ESCAPE" then apply(nil) return end
-        if L3F.BLOCKED_BIND_KEYS[key] then
-            print("|cffff5555L3FTools|r '" .. key
-                .. "' is reserved for text editing - pick a different key.")
-            stop()
-            return
-        end
         local k = kbModified(key)
         if k then apply(k) end
     end)
