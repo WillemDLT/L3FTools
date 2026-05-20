@@ -5,7 +5,7 @@ L3F.RegisterConsumables({
     { id = 33052, name = "Fisherman's Feast", nameFR = "Festin du pêcheur", category = "Food", effect = "+30 Sta, +20 Spirit" },
     { id = 27667, name = "Spicy Crawdad", nameFR = "Ecrevisse épicée", category = "Food", effect = "+30 Sta, +20 Spirit" },
     { id = 27663, name = "Blackened Sporefish", nameFR = "Poisson-spore noirci", category = "Food", effect = "+20 Sta, +8 MP/5sec" },
-    { name = "Grilled Bloodfin", nameFR = "Aileron-de-sang grillé", category = "Food", effect = "+8 to all magic resistances — verify name", notes = "Needs in-game / Wowhead confirmation" },
+    { id = 33867, name = "Broiled Bloodfin", nameFR = "Aileron-de-sang grillé", category = "Food", effect = "+8 to all magic resistances" },
     { id = 33872, name = "Spicy Hot Talbuk", nameFR = "Talbuk extra piquant", category = "Food", effect = "+20 Hit, +20 Spirit" },
     { id = 27655, name = "Ravager Dog", nameFR = "Croque-ravageur", category = "Food", effect = "+40 AP, +20 Spirit" },
     { id = 27658, name = "Roasted Clefthoof", nameFR = "Sabot-fourchu rôti", category = "Food", effect = "+20 Str, +20 Spirit" },
@@ -18,6 +18,6 @@ L3F.RegisterConsumables({
     { id = 27666, name = "Golden Fish Sticks", nameFR = "Bâtonnets de poisson doré", category = "Food", effect = "+44 healing, +20 Spirit" },
     { id = 33866, name = "Stormchops", nameFR = "Côtelettes foudroyantes", category = "Food", effect = "Random lightning discharge" },
     { id = 33874, name = "Kibler's Bits", nameFR = "Croquettes de Kibler", category = "Food", effect = "+20 Str, +20 Spirit (pet food)" },
-    { id = 6657, name = "Deviate Delight", nameFR = "Délice de déviant", category = "Food", effect = "Transform into ninja or pirate (60min)" },
-    { name = "Mingo's Fortune Generator", nameFR = "Entrailles divinatoires de Mingo", category = "Food", effect = "Random fortune (1 of 20)" },
+    { id = 6657, name = "Savory Deviate Delight", nameFR = "Délice de déviant", category = "Food", effect = "Transform into ninja or pirate (60min)" },
+    { id = 32686, name = "Mingo's Fortune Giblets", nameFR = "Entrailles divinatoires de Mingo", category = "Food", effect = "Random fortune (1 of 20)" },
 })

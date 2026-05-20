@@ -3,10 +3,10 @@ local _, L3F = ...
 
 L3F.RegisterConsumables({
     { id = 28104, name = "Elixir of Mastery", nameFR = "Elixir de maîtrise", category = "Battle Elixirs", effect = "+15 all stats" },
-    { name = "Adept's Elixir / Sun-blessed elixir variant", nameFR = "Elixir de sangrelle", category = "Battle Elixirs", effect = "+15 all stats, Sunwell Isle only (daily quest)", notes = "Needs in-game / Wowhead confirmation" },
+    { id = 34537, name = "Bloodberry Elixir", nameFR = "Elixir de sangrelle", category = "Battle Elixirs", effect = "+15 all stats, Sunwell Isle only (daily quest)" },
     { id = 9224, name = "Elixir of Demonslaying", nameFR = "Elixir de tueur de démon", category = "Battle Elixirs", effect = "+265 AP vs demons (5min)" },
     { id = 31679, name = "Fel Strength Elixir", nameFR = "Elixir de force gangrené", category = "Battle Elixirs", effect = "+90 AP, -10 Sta" },
-    { name = "Elixir of Major Strength", nameFR = "Elixir d'assaut", category = "Battle Elixirs", effect = "+60 AP equivalent — verify, may be a specific 60 AP elixir [?]" },
+    { id = 28102, name = "Onslaught Elixir", nameFR = "Elixir d'assaut", category = "Battle Elixirs", effect = "+60 AP equivalent" },
     { id = 22824, name = "Elixir of Major Strength", nameFR = "Elixir de force majeure", category = "Battle Elixirs", effect = "+35 Strength" },
     { id = 13453, name = "Elixir of Brute Force", nameFR = "Elixir de force de brute", category = "Battle Elixirs", effect = "+18 Str, +18 Sta" },
     { id = 22831, name = "Elixir of Major Agility", nameFR = "Elixir d'agilité majeure", category = "Battle Elixirs", effect = "+35 Agi, +20 crit" },
