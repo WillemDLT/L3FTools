@@ -82,4 +82,5 @@ Tabs/Guild/Planner.lua
 Tabs/Settings.lua
 GuildMap/Core.lua
 GuildMap/Broadcast.lua
+GuildMap/Pins.lua
 Minimap.lua
