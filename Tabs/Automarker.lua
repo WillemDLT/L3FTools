@@ -713,6 +713,19 @@ local function buildAutomarker(parent)
         end
     end
     selectRaid(found or firstRaid or "")
+
+    -- Auto-select the current raid when this tab becomes visible. If the
+    -- player is inside a mapped raid (Sections/<Raid>.lua match), the
+    -- dropdown snaps to it. Outside a mapped raid (open world, heroic
+    -- dungeon, BG, etc.), the previously-selected raid stays.
+    -- L3F.activeRaidSections is maintained by Sections.lua off
+    -- PLAYER_ENTERING_WORLD / ZONE_CHANGED_NEW_AREA.
+    parent:HookScript("OnShow", function()
+        if L3F.activeRaidSections and L3F.activeRaidSections.raid then
+            local r = L3F.activeRaidSections.raid
+            if r ~= currentRaidName then selectRaid(r) end
+        end
+    end)
 end
 
 L3F.RegisterTab("automarker", "Automarker", nil, buildAutomarker)
