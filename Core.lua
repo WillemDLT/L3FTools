@@ -111,10 +111,14 @@ local DEFAULTS = {
         lastSelectedNPC  = nil,
         lastActiveSubTab = "spells",
     },
-    -- Preview (shared by Automarker and Atlas tabs)
+    -- Preview (the hover popup next to the Automarker tab; also shared
+    -- state for Atlas's embedded model viewer where applicable).
     preview = {
         zoom       = 1.0,
         autoRotate = true,
+        pinned     = false,
+        sizeW      = 280,
+        sizeH      = 540,
     },
     -- Minimap button
     minimap = {
