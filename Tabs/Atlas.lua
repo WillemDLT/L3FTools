@@ -241,7 +241,7 @@ local function buildDetailPane(parent)
     local subStrip = CreateFrame("Frame", nil, infoHost)
     subStrip:SetHeight(22)
     subStrip:SetPoint("TOPLEFT",  infoHost, "TOPLEFT",  0, 0)
-    subStrip:SetPoint("TOPRIGHT", infoHost, "TOPRIGHT", 0, 0)
+    subStrip:SetPoint("TOPRIGHT", infoHost, "TOPRIGHT", -60, 0)  -- clear the top-right guild logo
     local stripLine = subStrip:CreateTexture(nil, "OVERLAY")
     stripLine:SetColorTexture(1, 1, 1, 0.15); stripLine:SetHeight(1)
     stripLine:SetPoint("BOTTOMLEFT",  subStrip, "BOTTOMLEFT",  0, 0)
@@ -273,6 +273,26 @@ local function buildDetailPane(parent)
         subTabButtons[key] = btn
         x = x + 84
     end
+
+    -- Distribute the sub-tab buttons across the strip width so they always fit,
+    -- whatever size the user resizes the window to.
+    local function layoutSubTabs()
+        local w = subStrip:GetWidth()
+        if not w or w <= 1 then return end
+        local n = #SUB_TABS
+        local gap = 4
+        local bw = math.max(40, math.floor((w - gap * (n - 1)) / n))
+        for i, key in ipairs(SUB_TABS) do
+            local btn = subTabButtons[key]
+            if btn then
+                btn:SetSize(bw, 22)
+                btn:ClearAllPoints()
+                btn:SetPoint("BOTTOMLEFT", subStrip, "BOTTOMLEFT", (i - 1) * (bw + gap), 0)
+            end
+        end
+    end
+    subStrip:SetScript("OnSizeChanged", layoutSubTabs)
+    layoutSubTabs()
 
     L3F.RefreshDetailPane = function()
         local npc = currentNPC
