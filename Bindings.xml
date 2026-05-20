@@ -1,4 +1,16 @@
 <Bindings>
+    <!--
+        BINDING_HEADER_/BINDING_NAME_ globals MUST be set before WoW's
+        Key Bindings UI registers the binding below, or the row falls
+        under the generic "Other" category instead of "L3FTools".
+        Setting them in Core.lua's top-level was insufficient on TBC
+        Anniversary - the XML appears to be parsed earlier than that.
+        Setting them in this <Script> here guarantees parse-time order.
+    -->
+    <Script>
+        BINDING_HEADER_L3FTOOLS = "L3FTools";
+        BINDING_NAME_L3FTOOLS_MOUSEOVERMARK = "Hold to mark mob under cursor";
+    </Script>
     <Binding name="L3FTOOLS_MOUSEOVERMARK" runOnUp="true" header="L3FTOOLS">
         if L3FTools then L3FTools.mouseoverHeld = keystate == "down" end
     </Binding>
