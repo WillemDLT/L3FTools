@@ -291,13 +291,17 @@ local function buildRosterPanel(parent)
     end
 
     refresh = function()
-        local roster = (L3F.GuildMap and L3F.GuildMap.GetRoster and L3F.GuildMap.GetRoster()) or {}
+        local roster  = (L3F.GuildMap and L3F.GuildMap.GetRoster         and L3F.GuildMap.GetRoster())         or {}
         local onlineG = (L3F.GuildMap and L3F.GuildMap.GetOnlineGuildies and L3F.GuildMap.GetOnlineGuildies()) or {}
+        local onlineF = (L3F.GuildMap and L3F.GuildMap.GetOnlineFriends  and L3F.GuildMap.GetOnlineFriends())  or {}
 
         -- Build the unified entry list. Broadcasters come from the roster
         -- (we know their live x/y/mapID/HP). Non-broadcasting guildies
         -- come from the guild roster snapshot - we know their name +
-        -- level + class but they have no pin.
+        -- level + class but they have no pin. isGuildie / isFriend are
+        -- looked up from the online sets, NOT from entry.source - source
+        -- only records which CHANNEL carried the most recent broadcast,
+        -- not the actual relationship(s).
         local entries = {}
         for short, entry in pairs(roster) do
             table.insert(entries, {
@@ -307,6 +311,8 @@ local function buildRosterPanel(parent)
                 source       = entry.source,
                 broadcasting = true,
                 mapID        = entry.mapID,
+                isGuildie    = onlineG[short] ~= nil,
+                isFriend     = onlineF[short] ~= nil,
             })
         end
         for short, info in pairs(onlineG) do
@@ -317,6 +323,8 @@ local function buildRosterPanel(parent)
                     class        = info.class,
                     source       = "guild",
                     broadcasting = false,
+                    isGuildie    = true,
+                    isFriend     = onlineF[short] ~= nil,
                 })
             end
         end
@@ -370,7 +378,22 @@ local function buildRosterPanel(parent)
             if e.broadcasting then
                 nameStr  = string.format("|cff%s%s|r", hex, e.name or "?")
                 levelStr = string.format("|cff888888L%d|r", e.level or 0)
-                suffix   = (e.source == "friend") and "  |cff9966ff(friend)|r" or ""
+                -- Membership-based tag, NOT broadcast-channel based. A
+                -- player who is both a guildy and a friend gets the
+                -- combined tag with each label in its own color (gold
+                -- for guild, purple for friend, mirroring the world-map
+                -- ring colors in SOURCE_BORDER).
+                local GUILD_TAG  = "|cffffd100(Guildy)|r"
+                local FRIEND_TAG = "|cff9966ff(Friend)|r"
+                if e.isGuildie and e.isFriend then
+                    suffix = "  " .. GUILD_TAG .. " & " .. FRIEND_TAG
+                elseif e.isFriend then
+                    suffix = "  " .. FRIEND_TAG
+                elseif e.isGuildie then
+                    suffix = "  " .. GUILD_TAG
+                else
+                    suffix = ""
+                end
             else
                 -- Greyed: online guildie not running L3FTools.
                 nameStr  = string.format("|cff666666%s|r", e.name or "?")

@@ -384,6 +384,15 @@ end
 -- next ticker before the first WHISPER fan-out.
 GM.RequestFriendList = requestFriendList
 
+-- Expose the online-friend snapshot for the Map-tab roster panel. The
+-- panel uses this (alongside the guildie snapshot) to decide whether a
+-- broadcasting player is also a friend, so it can render the right
+-- combined tag ("Guildy", "Friend", or "Guildy & Friend") regardless
+-- of which channel (GUILD vs WHISPER) we actually received from.
+function GM.GetOnlineFriends()
+    return snapshotOnlineFriends()  -- returns {short = fullName, ...}
+end
+
 -- Expose the online-guildie snapshot for the Map-tab roster panel. The
 -- panel needs to render guildies who are online but NOT broadcasting
 -- (i.e. they don't run L3FTools) as greyed entries so the user can see

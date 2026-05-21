@@ -193,68 +193,106 @@ end
 -- =============================================================
 -- Smooth movement: linear lerp between samples
 -- =============================================================
--- Each world-map pin owns its own OnUpdate. Between broadcasts it
--- slides from the previous sample toward the latest one - reaching
--- the new position by the time we'd expect the NEXT broadcast (sized
--- to the gap between the last two we received). When a broadcast is
--- overdue past LERP_STALL the pin freezes at the last known position.
--- The OnUpdate is throttled to LERP_TICK so we're not pushing HBD
--- recalcs every render frame.
+-- Lerp state lives on pins[short].lerp (set-level) so the world pin
+-- and the minimap pin for the same broadcaster share it. Each frame
+-- has its own OnUpdate that looks up the set via self._short and
+-- applies the lerped position through its own HBD surface call.
 local LERP_TICK  = 0.1     -- 10 Hz HBD re-position cadence
 local LERP_STALL = 6.0     -- after this long with no new sample, snap and stop animating
 
 local function lerp(a, b, t) return a + (b - a) * t end
 
-local function computeLerped(f)
-    if not f._prevX or not f._nextX then
-        return f._nextX or f._prevX, f._nextY or f._prevY
+local function computeLerp(L, now)
+    if not L.prevX or not L.nextX then
+        return L.nextX or L.prevX, L.nextY or L.prevY
     end
-    local dt = (f._nextT or 0) - (f._prevT or 0)
-    if dt <= 0.05 then return f._nextX, f._nextY end
-    local t = (GetTime() - f._prevT) / dt
+    local dt = (L.nextT or 0) - (L.prevT or 0)
+    if dt <= 0.05 then return L.nextX, L.nextY end
+    local t = (now - L.prevT) / dt
     if t < 0 then t = 0 elseif t > 1 then t = 1 end
-    return lerp(f._prevX, f._nextX, t), lerp(f._prevY, f._nextY, t)
+    return lerp(L.prevX, L.nextX, t), lerp(L.prevY, L.nextY, t)
 end
 
-local function pinOnUpdate(self, elapsed)
+-- Called once per broadcast (from upsertPin) to advance the lerp:
+-- "prev" becomes the currently-rendered position, "next" is what we
+-- just received, and the animation is sized to the gap since the last
+-- broadcast. Returns the starting position so the initial paint can
+-- use it.
+local function updateLerpState(set, entry)
+    set.lerp = set.lerp or {}
+    local L = set.lerp
+    local now = GetTime()
+    local mapChanged = L.mapID and (L.mapID ~= entry.mapID)
+    local curX, curY
+    if mapChanged or not L.nextX then
+        curX, curY = entry.x, entry.y
+    else
+        curX, curY = computeLerp(L, now)
+    end
+    local dtEstimate = L.lastBroadcast and (now - L.lastBroadcast) or nil
+    if not dtEstimate or dtEstimate < 0.2 or dtEstimate > LERP_STALL then
+        dtEstimate = 1.5
+    end
+    L.prevX, L.prevY, L.prevT = curX,    curY,    now
+    L.nextX, L.nextY, L.nextT = entry.x, entry.y, now + dtEstimate
+    L.lastBroadcast = now
+    L.mapID = entry.mapID
+    return curX, curY
+end
+
+-- Shared OnUpdate logic. Caller passes an applyPosition function that
+-- knows how to push the lerped (mapID, x, y) into its HBD surface.
+-- World pin uses Remove+Add (canvas pool would otherwise leak); minimap
+-- pin just uses Add (HBD's minimap path reuses minimapPins[icon] in
+-- place, so Add alone is idempotent).
+local function pinTick(self, elapsed, applyPosition)
     self._lerpAcc = (self._lerpAcc or 0) + elapsed
     if self._lerpAcc < LERP_TICK then return end
     self._lerpAcc = 0
 
-    if not self._nextX or not self._mapID then return end
-    -- No point burning HBD work while the world map is closed.
-    if not WorldMapFrame or not WorldMapFrame:IsShown() then return end
+    if not self._short then return end
+    local set = pins[self._short]
+    if not set then return end
+    local L = set.lerp
+    if not L or not L.nextX or not L.mapID then return end
 
+    local now = GetTime()
     local renderX, renderY
-    if not self._prevX
-       or (self._lastBroadcast and GetTime() - self._lastBroadcast > LERP_STALL) then
-        renderX, renderY = self._nextX, self._nextY
+    if not L.prevX or (L.lastBroadcast and now - L.lastBroadcast > LERP_STALL) then
+        renderX, renderY = L.nextX, L.nextY
     else
-        renderX, renderY = computeLerped(self)
+        renderX, renderY = computeLerp(L, now)
     end
 
-    -- Skip the HBD call if the rendered position hasn't moved enough to
-    -- be visible. Cuts the canvas-pool churn while a broadcaster is
-    -- standing still (the lerp clamps to nextPos and stays there).
-    if self._lastRenderedX and self._lastRenderedY
+    if self._lastRenderedX
        and math.abs(renderX - self._lastRenderedX) < 0.0005
        and math.abs(renderY - self._lastRenderedY) < 0.0005 then
         return
     end
     self._lastRenderedX, self._lastRenderedY = renderX, renderY
 
-    -- CRITICAL: Remove before Add. HBD's AddWorldMapIconMap goes
-    -- through worldmapProvider:HandlePin -> canvas:AcquirePin, which
-    -- pulls a fresh providerPin from the pool each call. Without a
-    -- preceding Remove, the previous providerPin is never released,
-    -- so it leaks one pin per OnUpdate tick into the canvas pool AND
-    -- the brief re-parent + canvas zoom-scale re-animation flashes
-    -- the icon larger (visible as Morphéours' "flashing larger" bug,
-    -- worse when zoomed in because the scale delta is bigger).
-    HBDPins:RemoveWorldMapIcon(REF_NAME, self)
-    HBDPins:AddWorldMapIconMap(REF_NAME, self, self._mapID, renderX, renderY,
-        HBD_PINS_WORLDMAP_SHOW_WORLD)
+    applyPosition(self, L.mapID, renderX, renderY)
 end
+
+local function applyWorldPinPosition(self, mapID, x, y)
+    if not WorldMapFrame or not WorldMapFrame:IsShown() then return end
+    -- Remove before Add: HBD's worldmap path pulls a fresh providerPin
+    -- from the canvas pool each Add. Without the Remove the previous
+    -- providerPin is never released, leaking + briefly resetting the
+    -- canvas zoom-scale animation (the "flashing larger" bug).
+    HBDPins:RemoveWorldMapIcon(REF_NAME, self)
+    HBDPins:AddWorldMapIconMap(REF_NAME, self, mapID, x, y, HBD_PINS_WORLDMAP_SHOW_WORLD)
+end
+
+local function applyMinimapPinPosition(self, mapID, x, y)
+    -- HBD's minimap path mutates minimapPins[icon] in place and
+    -- queues a redraw - no canvas pool involved, so calling Add
+    -- repeatedly is safe and cheap.
+    HBDPins:AddMinimapIconMap(REF_NAME, self, mapID, x, y, true, false)
+end
+
+local function worldPinOnUpdate(self, elapsed)   pinTick(self, elapsed, applyWorldPinPosition)   end
+local function minimapPinOnUpdate(self, elapsed) pinTick(self, elapsed, applyMinimapPinPosition) end
 
 local function buildWorldPinFrame()
     local f = CreateFrame("Frame", nil, UIParent)
@@ -305,7 +343,7 @@ local function buildWorldPinFrame()
     end)
 
     -- Per-pin smooth-movement ticker (linear lerp).
-    f:SetScript("OnUpdate", pinOnUpdate)
+    f:SetScript("OnUpdate", worldPinOnUpdate)
 
     return f
 end
@@ -346,6 +384,10 @@ local function buildMinimapPinFrame()
             showContextMenu(self._name, self._class)
         end
     end)
+
+    -- Per-pin smooth-movement ticker (linear lerp); reads shared state
+    -- from pins[self._short].lerp.
+    f:SetScript("OnUpdate", minimapPinOnUpdate)
 
     return f
 end
@@ -400,6 +442,9 @@ local function upsertPin(short, entry)
         return
     end
 
+    -- Advance the lerp state once; shared by world + minimap pins below.
+    local curX, curY = updateLerpState(set, entry)
+
     -- WORLD MAP PIN
     if gm.showOnWorldMap ~= false then
         if not set.world then set.world = buildWorldPinFrame() end
@@ -413,7 +458,11 @@ local function upsertPin(short, entry)
 
         local sizeMul = gm.worldPinSize or 1.0
         wf:SetSize(22 * sizeMul, 22 * sizeMul)
-        wf.icon:SetSize(18 * sizeMul, 18 * sizeMul)
+        -- Dead broadcasters get a bigger skull so it reads as "dead" at a
+        -- glance instead of just "icon swap". Skull overflows the source
+        -- ring by a few px on each side - deliberate emphasis.
+        local iconBase = (entry.hp == 0) and 28 or 18
+        wf.icon:SetSize(iconBase * sizeMul, iconBase * sizeMul)
         wf.hpBg:SetSize(20 * sizeMul, 3 * sizeMul)
 
         if gm.showName then
@@ -435,47 +484,25 @@ local function upsertPin(short, entry)
             wf.hpBg:Hide(); wf.hpFill:Hide()
         end
 
-        -- Smooth movement: capture the current rendered position as the
-        -- new "previous" sample and queue entry.x/y as "next". The pin's
-        -- own OnUpdate handler does the actual HBD positioning every
-        -- LERP_TICK, sliding from prev to next over an estimated gap
-        -- equal to the time since the last broadcast (so the pin reaches
-        -- the new position just as we'd expect the next broadcast).
-        local now = GetTime()
-        local mapChanged = wf._mapID and (wf._mapID ~= entry.mapID)
-        local curX, curY
-        if mapChanged or not wf._nextX then
-            curX, curY = entry.x, entry.y
-        else
-            curX, curY = computeLerped(wf)
-        end
-
-        local dtEstimate
-        if wf._lastBroadcast then
-            dtEstimate = now - wf._lastBroadcast
-        end
-        if not dtEstimate or dtEstimate < 0.2 or dtEstimate > LERP_STALL then
-            dtEstimate = 1.5  -- middle of [TICK_INTERVAL, MAX_INTERVAL]
-        end
-
-        wf._prevX, wf._prevY, wf._prevT = curX,    curY,    now
-        wf._nextX, wf._nextY, wf._nextT = entry.x, entry.y, now + dtEstimate
-        wf._lastBroadcast = now
+        wf._short = short
+        -- Frame-level "is this pin currently live?" markers. Cluster
+        -- code reads these to decide whether to consider the pin.
         wf._mapID = entry.mapID
+        wf._nextX = entry.x
 
         -- Initial paint so the pin appears immediately on first registration
         -- or after a hide; OnUpdate (10 Hz) takes over from here. Don't
         -- unconditionally Show() - that would un-hide a pin we deliberately
         -- hid as part of a cluster (until the next 0.3s cluster tick rehides).
         if not wf._isClusterMember then wf:Show() end
-        -- Remove first - see same comment in pinOnUpdate. Calling Add alone
-        -- leaks a providerPin into HBD's canvas pool every invocation.
+        -- Remove first - see comment in applyWorldPinPosition. Calling Add
+        -- alone leaks a providerPin into HBD's canvas pool every invocation.
         HBDPins:RemoveWorldMapIcon(REF_NAME, wf)
         HBDPins:AddWorldMapIconMap(REF_NAME, wf, entry.mapID, curX, curY,
             HBD_PINS_WORLDMAP_SHOW_WORLD)
         wf._lastRenderedX, wf._lastRenderedY = curX, curY
     elseif set.world then
-        set.world._nextX = nil  -- stop the lerp OnUpdate from re-adding
+        set.world._nextX = nil  -- cluster code's "is live" check sees this and skips
         HBDPins:RemoveWorldMapIcon(REF_NAME, set.world)
         set.world:Hide()
     end
@@ -487,20 +514,23 @@ local function upsertPin(short, entry)
         mf._name  = entry.name or short
         mf._level = entry.level
         mf._class = entry.class
+        mf._short = short
 
         applyMinimapPin(mf)
 
-        local sizeMul = gm.minimapPinSize or 0.8
+        local sizeMul = gm.minimapPinSize or 1.0
         mf:SetSize(16 * sizeMul, 16 * sizeMul)
 
-        HBDPins:RemoveMinimapIcon(REF_NAME, mf)
+        -- Initial paint at the lerp's current start; OnUpdate slides it.
         -- showInParentZone=true (let sub-zone pins show on the parent map),
         -- floatOnEdge=false. floatOnEdge=true made distant guildies render
         -- at the minimap rim like a direction indicator - Morphéours
         -- reported pins showing "even at 20km away". With it false, pins
         -- only render when the guildie is genuinely inside the minimap's
         -- visible range.
-        HBDPins:AddMinimapIconMap(REF_NAME, mf, entry.mapID, entry.x, entry.y, true, false)
+        mf:Show()
+        HBDPins:AddMinimapIconMap(REF_NAME, mf, entry.mapID, curX, curY, true, false)
+        mf._lastRenderedX, mf._lastRenderedY = curX, curY
     elseif set.minimap then
         HBDPins:RemoveMinimapIcon(REF_NAME, set.minimap)
         set.minimap:Hide()
