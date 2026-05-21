@@ -81,14 +81,15 @@ local function buildMinimapButton()
     if L3FToolsDB.guildMap.pinsButton.hide then LDBIcon:Hide(LDB_NAME)
     else                                        LDBIcon:Show(LDB_NAME) end
 
-    -- LibDBIcon anchors the icon at TOPLEFT (5.5, -5) but the disc
-    -- background sits at TOPLEFT (7, -5). The default offset compensates
-    -- for the tracking-ring's own asymmetry, but it leaves CheesePin
-    -- looking 1.5 px left of the disc center. Re-anchor to the disc.
+    -- LibDBIcon anchors the icon at TOPLEFT (5.5, -5); the disc
+    -- background sits at TOPLEFT (7, -5). Re-anchor to (7, -7) so the
+    -- icon (a) shares the x of the disc and (b) sits ~2 px below the
+    -- disc top - the cheese-pin's heavy "head" then lands over the
+    -- disc center instead of riding above it.
     local btn = _G["LibDBIcon10_" .. LDB_NAME]
     if btn and btn.icon then
         btn.icon:ClearAllPoints()
-        btn.icon:SetPoint("TOPLEFT", btn, "TOPLEFT", 7, -5)
+        btn.icon:SetPoint("TOPLEFT", btn, "TOPLEFT", 7, -7)
     end
 
     minimapRegistered = true
@@ -131,15 +132,14 @@ local function buildWorldMapButton()
     b.Background:SetPoint("TOPLEFT", b, "TOPLEFT", 2, -4)
     b.Background:SetVertexColor(1, 1, 1, 1)
 
-    -- Icon. RareScanner's template uses (7.2, -6) which centers their
-    -- OriginalSkull glyph on the disc; CheesePin is centered differently
-    -- in its own canvas, so we anchor it on the disc CENTER instead:
-    -- background is 25x25 at (2, -4) -> center (14.5, -16.5), so a 20x20
-    -- icon centered on the disc lands at TOPLEFT (4.5, -6.5).
+    -- Icon. (4.5, -6.5) put us "even more off to the left" per Morphéours,
+    -- so we drift back toward RareScanner's (7.2, -6). Settled on (6, -6.5)
+    -- which sits visually mid-disc with the cheese-pin's head over the
+    -- center.
     b.Icon = b:CreateTexture(nil, "ARTWORK")
     b.Icon:SetTexture(ICON_PATH)
     b.Icon:SetSize(20, 20)
-    b.Icon:SetPoint("TOPLEFT", b, "TOPLEFT", 4.5, -6.5)
+    b.Icon:SetPoint("TOPLEFT", b, "TOPLEFT", 6, -6.5)
 
     -- Tracking-border ring (slightly larger than the button itself).
     b.Border = b:CreateTexture(nil, "OVERLAY", nil, 1)
