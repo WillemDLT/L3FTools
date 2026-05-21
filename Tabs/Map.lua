@@ -250,7 +250,20 @@ local function buildMap(parent)
         function() return db().shareWithGuild end,
         function(v)
             db().shareWithGuild = v
-            print("|cffffd100L3FTools|r position sharing "
+            print("|cffffd100L3FTools|r guild position sharing "
+                .. (v and "|cff00ff00enabled|r" or "|cffff5555disabled|r"))
+        end)
+    S:checkbox(
+        "Share my position with friends",
+        function() return db().shareWithFriends end,
+        function(v)
+            db().shareWithFriends = v
+            -- Kick the friend list right away so the first WHISPER fan-out
+            -- doesn't wait up to 15s for the periodic refresh.
+            if v and L3F.GuildMap and L3F.GuildMap.RequestFriendList then
+                L3F.GuildMap.RequestFriendList()
+            end
+            print("|cffffd100L3FTools|r friend position sharing "
                 .. (v and "|cff00ff00enabled|r" or "|cffff5555disabled|r"))
         end)
     S:checkbox(

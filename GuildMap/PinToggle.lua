@@ -32,16 +32,42 @@ local function isPinsHidden()
     return L3FToolsDB and L3FToolsDB.guildMap and L3FToolsDB.guildMap.pinsHidden
 end
 
-local function applyToWorldMapButton()
-    local b = _G.L3FToolsMapPinWorldMapButton
-    if b and b.RefreshVisual then b:RefreshVisual() end
+local function applyVisualState()
+    -- World map button: has its own RefreshVisual that dims the icon.
+    local wm = _G.L3FToolsMapPinWorldMapButton
+    if wm and wm.RefreshVisual then wm:RefreshVisual() end
+    -- Minimap (LibDBIcon) button: dim its icon the same way.
+    local mm = _G["LibDBIcon10_" .. LDB_NAME]
+    if mm and mm.icon then
+        mm.icon:SetVertexColor(1, 1, 1, isPinsHidden() and 0.35 or 1.0)
+    end
+end
+
+-- If GameTooltip is currently anchored to either toggle button, re-fire
+-- that button's OnEnter so the "Currently: shown/hidden" line updates
+-- without the user having to mouse out and back in. (LibDBIcon's tooltip
+-- comes from the same OnEnter path.)
+local function refreshToggleTooltipIfShown()
+    if not GameTooltip or not GameTooltip:IsShown() then return end
+    local candidates = {
+        _G.L3FToolsMapPinWorldMapButton,
+        _G["LibDBIcon10_" .. LDB_NAME],
+    }
+    for _, btn in ipairs(candidates) do
+        if btn and GameTooltip:IsOwned(btn) then
+            local onEnter = btn:GetScript("OnEnter")
+            if onEnter then onEnter(btn) end
+            return
+        end
+    end
 end
 
 local function togglePinsHidden()
     if not L3FToolsDB or not L3FToolsDB.guildMap then return end
     L3FToolsDB.guildMap.pinsHidden = not L3FToolsDB.guildMap.pinsHidden
     if GM.RefreshAll then GM.RefreshAll() end
-    applyToWorldMapButton()
+    applyVisualState()
+    refreshToggleTooltipIfShown()
     print("|cffffd100L3FTools|r map pins "
         .. (L3FToolsDB.guildMap.pinsHidden and "|cffff5555hidden|r" or "|cff00ff00shown|r"))
 end
@@ -93,6 +119,10 @@ local function buildMinimapButton()
     end
 
     minimapRegistered = true
+
+    -- If the user previously toggled pins hidden, restore the dim state
+    -- on the icon (LibDBIcon doesn't persist vertex color across reloads).
+    applyVisualState()
 end
 
 

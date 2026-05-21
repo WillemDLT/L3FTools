@@ -1,28 +1,33 @@
 -- =============================================================
 -- L3FTools - GuildMap/Broadcast.lua
 -- =============================================================
--- Position broadcast + receive over the GUILD addon channel.
+-- Position broadcast + receive over two channels:
+--   * GUILD   - one fan-out packet per send for every L3FTools guildie
+--   * WHISPER - one targeted packet per online friend with L3FTools
 --
 -- Wire format (CSV, single packet, well under the 255-byte limit):
 --   name,level,class,x,y,mapID,hp%
 -- e.g.  "Willem,70,WARLOCK,0.412,0.587,84,98"
 --
--- Send conditions (all must hold):
---   * L3FToolsDB.guildMap.shareWithGuild == true
---   * IsInGuild()
---   * not (pauseInInstance is on AND we are inside a raid instance or BG)
+-- Send conditions (the master gate + each channel independently):
+--   * not (pauseInInstance AND we are inside a raid instance or BG)
 --     - Morphéours: pause inside BGs too; teammates are stacked anyway and
 --       BG positions leak useful intel to whoever runs L3FTools cross-faction
 --   * we have moved more than MOVE_THRESHOLD since the last send
 --     OR MAX_INTERVAL seconds have elapsed (heartbeat)
+-- Per-channel:
+--   * GUILD: shareWithGuild AND IsInGuild()
+--   * WHISPER: shareWithFriends AND at least one online friend
 --
 -- Receive:
---   * incoming "L3FMap" packets on GUILD update L3F.GuildMap.roster[short]
+--   * incoming GUILD packets -> roster entry source=guild
+--   * incoming WHISPER packets -> roster entry source=friend (but never
+--     downgrade an existing guild entry to friend - guild label wins so
+--     the world-map ring color stays consistent)
 --   * GUILD_ROSTER_UPDATE removes entries for guildies who went offline
+--   * FRIENDLIST_UPDATE removes entries for friends who went offline
+--     (same safeguards as the guild path - empty-cache + heartbeat grace)
 --   * a periodic TTL sweep removes entries whose lastSeen is > TTL old
---     (catches "guildie disabled the toggle" silently)
---
--- No pins or UI yet - that's chunk 4. Verify in-game with /l3f gm dump.
 -- =============================================================
 
 local addonName, L3F = ...
@@ -32,9 +37,9 @@ GM.roster = GM.roster or {}
 local roster = GM.roster
 
 local PREFIX         = "L3FMap"
-local TICK_INTERVAL  = 2.0        -- check broadcast eligibility this often
-local MAX_INTERVAL   = 5.0        -- always send at least this often when eligible
-local MOVE_THRESHOLD = 0.01       -- 1% of map width/height
+local TICK_INTERVAL  = 1.0        -- check broadcast eligibility this often
+local MAX_INTERVAL   = 3.0        -- always send at least this often when eligible
+local MOVE_THRESHOLD = 0.005      -- 0.5% of map width/height (was 1%; pin lag was painful)
 local TTL            = 30         -- drop roster entries unseen for this many seconds
 
 C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
@@ -51,13 +56,45 @@ local function inSuppressedInstance()
     return instanceType == "raid" or instanceType == "pvp"
 end
 
+-- Online friends from the local friend list. The list is the same one
+-- C_FriendList.ShowFriends() refreshes; we just iterate it.
+local function snapshotOnlineFriends()
+    local set = {}
+    if not C_FriendList then return set end
+    local n = (C_FriendList.GetNumFriends and C_FriendList.GetNumFriends()) or 0
+    for i = 1, n do
+        local info = C_FriendList.GetFriendInfoByIndex
+            and C_FriendList.GetFriendInfoByIndex(i)
+        if info and info.connected and info.name then
+            -- info.name on TBC Classic is "Player" (no realm on a single-
+            -- realm friend list). Ambiguate is a no-op there but keeps us
+            -- safe if the client ever hands us a fully-qualified name.
+            set[Ambiguate(info.name, "short")] = info.name
+        end
+    end
+    return set
+end
+
+local function requestFriendList()
+    if C_FriendList and C_FriendList.ShowFriends then
+        C_FriendList.ShowFriends()  -- in modern TBC client this just refreshes the cache
+    end
+end
+
+local function guildChannelEligible(gm)
+    return gm.shareWithGuild and IsInGuild()
+end
+
+local function friendChannelEligible(gm)
+    if not gm.shareWithFriends then return false end
+    return next(snapshotOnlineFriends()) ~= nil
+end
+
 local function shouldBroadcast()
     if not L3FToolsDB or not L3FToolsDB.guildMap then return false end
     local gm = L3FToolsDB.guildMap
-    if not gm.shareWithGuild then return false end
-    if not IsInGuild() then return false end
     if gm.pauseInInstance and inSuppressedInstance() then return false end
-    return true
+    return guildChannelEligible(gm) or friendChannelEligible(gm)
 end
 
 local function sendNow()
@@ -77,9 +114,25 @@ local function sendNow()
 
     local msg = string.format("%s,%d,%s,%.3f,%.3f,%d,%d",
         name, level, class, x, y, mapID, hp)
-    C_ChatInfo.SendAddonMessage(PREFIX, msg, "GUILD")
-    lastX, lastY, lastMap = x, y, mapID
-    return true
+
+    local gm = L3FToolsDB.guildMap
+    local sent = false
+    if guildChannelEligible(gm) then
+        C_ChatInfo.SendAddonMessage(PREFIX, msg, "GUILD")
+        sent = true
+    end
+    if gm.shareWithFriends then
+        for _, fullName in pairs(snapshotOnlineFriends()) do
+            C_ChatInfo.SendAddonMessage(PREFIX, msg, "WHISPER", fullName)
+            sent = true
+        end
+    end
+
+    if sent then
+        lastX, lastY, lastMap = x, y, mapID
+        return true
+    end
+    return false
 end
 
 local function tick()
@@ -115,11 +168,19 @@ local function isSelf(sender)
     return short == UnitName("player")
 end
 
-local function ingest(senderShort, name, level, class, x, y, mapID, hp)
+local function ingest(senderShort, name, level, class, x, y, mapID, hp, source)
     local nx = tonumber(x) or 0
     local ny = tonumber(y) or 0
     if nx < 0 or nx > 1 then nx = 0 end
     if ny < 0 or ny > 1 then ny = 0 end
+    -- Never downgrade an existing guild entry to friend. If we already
+    -- saw a GUILD packet from this player, keep them tagged as guild
+    -- so the world-map ring color stays consistent across reloads.
+    local existing = roster[senderShort]
+    local effectiveSource = source
+    if existing and existing.source == "guild" and source == "friend" then
+        effectiveSource = "guild"
+    end
     roster[senderShort] = {
         name     = name or senderShort,
         level    = tonumber(level) or 0,
@@ -129,7 +190,7 @@ local function ingest(senderShort, name, level, class, x, y, mapID, hp)
         mapID    = tonumber(mapID) or 0,
         hp       = tonumber(hp) or 100,
         lastSeen = GetTime(),
-        source   = "guild",
+        source   = effectiveSource,
     }
     if GM.OnRosterUpdated then GM.OnRosterUpdated(senderShort) end
 end
@@ -138,13 +199,20 @@ local recvFrame = CreateFrame("Frame")
 recvFrame:RegisterEvent("CHAT_MSG_ADDON")
 recvFrame:SetScript("OnEvent", function(self, event, prefix, text, channel, sender)
     if prefix ~= PREFIX then return end
-    if channel ~= "GUILD" then return end
     if isSelf(sender) then return end
     if not text then return end
+    local source
+    if channel == "GUILD" then
+        source = "guild"
+    elseif channel == "WHISPER" then
+        source = "friend"
+    else
+        return
+    end
     local name, level, class, x, y, mapID, hp = strsplit(",", text)
     if not name then return end
     local short = Ambiguate(sender, "short")
-    ingest(short, name, level, class, x, y, mapID, hp)
+    ingest(short, name, level, class, x, y, mapID, hp, source)
 end)
 
 
@@ -210,6 +278,39 @@ end)
 
 
 -- =============================================================
+-- Friend list cleanup: drop pins for friends who went offline
+-- =============================================================
+-- Same two safeguards as the guild path: empty cache = skip the sweep,
+-- and a recent heartbeat (< OFFLINE_GRACE seconds) trumps a "not online"
+-- friend-list snapshot.
+local friendFrame = CreateFrame("Frame")
+friendFrame:RegisterEvent("FRIENDLIST_UPDATE")
+friendFrame:SetScript("OnEvent", function()
+    local gm = L3FToolsDB and L3FToolsDB.guildMap
+    if not gm or not gm.shareWithFriends then return end
+    local online = snapshotOnlineFriends()
+    if not next(online) then return end
+    local now = GetTime()
+    for short, entry in pairs(roster) do
+        if entry.source == "friend"
+           and not online[short]
+           and now - (entry.lastSeen or 0) > OFFLINE_GRACE then
+            roster[short] = nil
+            if GM.OnRosterRemoved then GM.OnRosterRemoved(short) end
+        end
+    end
+end)
+
+-- Kick the friend list once at load and periodically afterwards so the
+-- send-side snapshot is fresh.
+requestFriendList()
+C_Timer.NewTicker(15, function()
+    local gm = L3FToolsDB and L3FToolsDB.guildMap
+    if gm and gm.shareWithFriends then requestFriendList() end
+end)
+
+
+-- =============================================================
 -- TTL sweep: drop entries we have not seen in TTL seconds
 -- =============================================================
 C_Timer.NewTicker(5, function()
@@ -240,6 +341,11 @@ function GM.BroadcastNow()
     end
     return false
 end
+
+-- Expose for the Map tab: kicks the friend list cache. Useful right after
+-- the user enables shareWithFriends so we don't wait up to 15s for the
+-- next ticker before the first WHISPER fan-out.
+GM.RequestFriendList = requestFriendList
 
 -- Console dump of the current roster, useful while there is no Map tab UI.
 function GM.DumpRoster()

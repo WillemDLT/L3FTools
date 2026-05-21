@@ -221,26 +221,28 @@ local function buildWorldPinFrame()
     return f
 end
 
--- Minimap pin: a single source-tinted dot, no class icon. Morphéours
--- wants minimap pins clearly readable at small size — the class icon
--- gets crammed/blurred at 12px, so we trade per-class info for a clean
--- gold/green/purple dot indicating which source the broadcast came from.
-local DOT_TEXTURE = "Interface\\AddOns\\L3FTools\\Media\\Dot"
+-- Minimap pin: the CheesePin icon (same one as the toggle buttons), no
+-- per-source tint. Morphéours' explicit ask - the source distinction
+-- lives on the WORLD map ring color; the minimap is just "a player is
+-- here" and the tooltip carries name/class/level if you want details.
+-- 16x16 base size gives the tall cheese-pin shape enough room to read
+-- (frame is square; the pin's natural aspect ratio is ~0.66:1, so it
+-- renders as a narrow tall pin with horizontal padding).
+local MINI_PIN_TEXTURE = "Interface\\AddOns\\L3FTools\\Media\\CheesePin"
 
-local function applyDotForSource(frame, source)
-    local c = SOURCE_BORDER[source] or SOURCE_BORDER.guild
-    if frame.dot then
-        frame.dot:SetTexture(DOT_TEXTURE)
-        frame.dot:SetVertexColor(c[1], c[2], c[3], 1)
+local function applyMinimapPin(frame)
+    if frame.icon then
+        frame.icon:SetTexture(MINI_PIN_TEXTURE)
+        frame.icon:SetVertexColor(1, 1, 1, 1)
     end
 end
 
 local function buildMinimapPinFrame()
     local f = CreateFrame("Frame", nil, UIParent)
-    f:SetSize(12, 12)
+    f:SetSize(16, 16)
 
-    f.dot = f:CreateTexture(nil, "ARTWORK")
-    f.dot:SetAllPoints()
+    f.icon = f:CreateTexture(nil, "ARTWORK")
+    f.icon:SetAllPoints()
 
     f:SetScript("OnEnter", function(self)
         if not self._name then return end
@@ -367,10 +369,10 @@ local function upsertPin(short, entry)
         mf._level = entry.level
         mf._class = entry.class
 
-        applyDotForSource(mf, entry.source or "guild")
+        applyMinimapPin(mf)
 
-        local sizeMul = gm.minimapPinSize or 1.0
-        mf:SetSize(12 * sizeMul, 12 * sizeMul)
+        local sizeMul = gm.minimapPinSize or 0.8
+        mf:SetSize(16 * sizeMul, 16 * sizeMul)
 
         HBDPins:RemoveMinimapIcon(REF_NAME, mf)
         -- showInParentZone=true (let sub-zone pins show on the parent map),
