@@ -230,7 +230,7 @@ local TRAIL_DEDUP_EPS        = 0.001  -- treat dots within this normalized dista
 -- 0.015 normalized was undersized at full zoom-out and oversized
 -- when zoomed in).
 local TRAIL_HEAD_AGE_GAP     = 3.0    -- skip dots younger than this (moving-broadcaster case)
-local TRAIL_HEAD_BUFFER_PX   = 25     -- desired clear gap from pin in screen pixels
+local TRAIL_HEAD_BUFFER_PX   = 15     -- desired clear gap from pin in screen pixels
 local TRAIL_REF              = "L3FToolsTrail"
 local TRAIL_TEXTURE          = "Interface\\AddOns\\L3FTools\\Media\\Dot"
 
