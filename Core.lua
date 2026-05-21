@@ -139,7 +139,10 @@ local DEFAULTS = {
     atlas = {
         lastSelectedRaid = "Karazhan",
         lastSelectedNPC  = nil,
-        lastActiveSubTab = "spells",
+        -- Default lands new installs on Drops - it's the first tab in the
+        -- 0.13.1 sub-tab strip order (Drops / Spells / Notes). Existing
+        -- users keep whatever they had saved.
+        lastActiveSubTab = "drops",
     },
     -- Preview (the hover popup next to the Automarker tab; also shared
     -- state for Atlas's embedded model viewer where applicable).

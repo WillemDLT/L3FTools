@@ -25,9 +25,11 @@
 
 local addonName, L3F = ...
 
-local SUB_TABS = { "spells", "notes", "drops" }
+-- Strip order per Morphéours: Drops first (the thing players check most),
+-- Spells second, Notes third. Existing players keep their saved active key.
+local SUB_TABS = { "drops", "spells", "notes" }
 local SUB_TAB_LABELS = {
-    spells = "Spells", notes = "Notes", drops = "Drops",
+    drops = "Drops", spells = "Spells", notes = "Notes",
 }
 
 -- Consumable-specific sub-tab strip (a separate strip, shown when a
@@ -99,7 +101,24 @@ local function ensureState()
     -- Migrate the older single-raid selection into the new node-key model.
     if not L3F.db.atlas.selected then
         if L3F.db.atlas.lastSelectedRaid then
-            L3F.db.atlas.selected = "raid:" .. L3F.db.atlas.lastSelectedRaid
+            L3F.db.atlas.selected = "raid-bosses:" .. L3F.db.atlas.lastSelectedRaid
+        end
+    end
+    -- 0.13.1 tree restructure: wings are gone from the Atlas; each raid /
+    -- heroic now expands to Bosses + Trash sub-leaves. Coerce any saved
+    -- selection that pointed at the old keys so the user lands somewhere
+    -- sensible instead of a blank middle pane.
+    local sel = L3F.db.atlas.selected
+    if sel then
+        if sel:sub(1, 5) == "raid:" then
+            L3F.db.atlas.selected = "raid-bosses:" .. sel:sub(6)
+        elseif sel:sub(1, 5) == "wing:" then
+            local raidName = sel:sub(6):match("^(.+)/%d+$")
+            if raidName then
+                L3F.db.atlas.selected = "raid-bosses:" .. raidName
+            end
+        elseif sel:sub(1, 7) == "heroic:" then
+            L3F.db.atlas.selected = "heroic-bosses:" .. sel:sub(8)
         end
     end
 end
@@ -140,12 +159,15 @@ local function findRaid(name)
     end
 end
 
--- Boss heuristic: raid data files use TRASH (the 8-entry {8,7,6,5,4,3,2,1}
--- priority list) for filler mobs and a short specific mark list ({8}, {7},
--- {8,7,6,5,4}, ...) for named encounters. Anything shorter than 8 marks
--- is a boss / named NPC. Players hunt bosses far more than trash, so this
--- is what powers the BOSSES/TRASH split + gold tint in the list pane.
+-- Boss classifier. Primary source: the `kind` field stamped onto every NPC
+-- entry by phase_a_kind_enrich.py (sourced from the JSON; "boss"/"trash").
+-- Fallback for any unenriched NPC: the marks-count heuristic - raid data
+-- files use the 8-entry TRASH constant for filler mobs and a shorter mark
+-- list ({8}, {7}, {8,7,6,5,4}, ...) for named encounters. The fallback
+-- mis-classifies elite-trash in SlavePens/Steamvault/Underbog (those use
+-- marks={N} too), which is exactly what the `kind` field was added to fix.
 local function isBoss(npc)
+    if npc.kind then return npc.kind == "boss" end
     return npc.marks and #npc.marks > 0 and #npc.marks < 8
 end
 
@@ -286,10 +308,48 @@ local function buildTreePane(parent)
         }
         y = y + 20
 
+        -- Renders the "Bosses" + "Trash" sub-leaves under a raid or heroic
+        -- parent row. Used for both categories below. `prefix` is the
+        -- selection key prefix - "raid" or "heroic" - which RefreshNPCList
+        -- dispatches on. `parentName` is the raid / heroic display name.
+        local function addBossTrashLeaves(prefix, parentName)
+            local bossKey  = prefix .. "-bosses:" .. parentName
+            local trashKey = prefix .. "-trash:"  .. parentName
+            addRow{
+                indent = 32, y = y,
+                key = bossKey, label = "Bosses",
+                font = "GameFontHighlightSmall",
+                hasArrow = false,
+                onClickRow = function()
+                    selectKey(bossKey)
+                    L3F.RefreshTree()
+                    L3F.RefreshNPCList()
+                end,
+            }
+            y = y + 18
+            addRow{
+                indent = 32, y = y,
+                key = trashKey, label = "Trash",
+                font = "GameFontHighlightSmall",
+                hasArrow = false,
+                onClickRow = function()
+                    selectKey(trashKey)
+                    L3F.RefreshTree()
+                    L3F.RefreshNPCList()
+                end,
+            }
+            y = y + 18
+        end
+
         if raidsExpanded then
             for _, raid in ipairs(raids) do
                 local raidKey = "raid:" .. raid.name
                 local raidExpanded = isExpanded(raidKey)
+                -- Raid row is a pure expand toggle - no selection. The two
+                -- meaningful selections sit under it. This is the Morphéours
+                -- 0.13.1 restructure: wings are gone from the Atlas, replaced
+                -- by Bosses / Trash sub-leaves so each list pane shows only
+                -- one of the two, never mixed.
                 addRow{
                     indent = 16, y = y,
                     key = raidKey, label = raid.name,
@@ -297,29 +357,13 @@ local function buildTreePane(parent)
                     hasArrow = true, expanded = raidExpanded,
                     onClickRow = function()
                         setExpanded(raidKey, not raidExpanded)
-                        selectKey(raidKey)
                         L3F.RefreshTree()
-                        L3F.RefreshNPCList()
                     end,
                 }
                 y = y + 20
 
                 if raidExpanded then
-                    for wIdx, wing in ipairs(raid.sections) do
-                        local wingKey = "wing:" .. raid.name .. "/" .. wIdx
-                        addRow{
-                            indent = 32, y = y,
-                            key = wingKey, label = wing.name,
-                            font = "GameFontHighlightSmall",
-                            hasArrow = false,
-                            onClickRow = function()
-                                selectKey(wingKey)
-                                L3F.RefreshTree()
-                                L3F.RefreshNPCList()
-                            end,
-                        }
-                        y = y + 18
-                    end
+                    addBossTrashLeaves("raid", raid.name)
                 end
             end
         end
@@ -342,18 +386,27 @@ local function buildTreePane(parent)
         if heroExpanded then
             for _, heroic in ipairs(heroics) do
                 local heroicKey = "heroic:" .. heroic.name
+                local heroicExpanded = isExpanded(heroicKey)
+                -- Heroic row, like the raid row above, is now an expand
+                -- toggle that opens Bosses / Trash leaves. Trash will be
+                -- empty for most heroics (HFR/BF/etc. only have boss entries
+                -- in the Lua); SlavePens / Steamvault / Underbog have real
+                -- elite-trash there.
                 addRow{
                     indent = 16, y = y,
                     key = heroicKey, label = heroic.name,
                     font = "GameFontNormalSmall",
-                    hasArrow = false,
+                    hasArrow = true, expanded = heroicExpanded,
                     onClickRow = function()
-                        selectKey(heroicKey)
+                        setExpanded(heroicKey, not heroicExpanded)
                         L3F.RefreshTree()
-                        L3F.RefreshNPCList()
                     end,
                 }
                 y = y + 20
+
+                if heroicExpanded then
+                    addBossTrashLeaves("heroic", heroic.name)
+                end
             end
         end
 
@@ -421,17 +474,6 @@ local function buildListPane(parent)
     npcList = CreateFrame("Frame", nil, npcScroll)
     npcList:SetSize(170, 1)
     npcScroll:SetScrollChild(npcList)
-
-    -- Section sub-header (e.g. wing name when "raid" is selected).
-    local function addHeader(name, y)
-        local sec = CreateFrame("Frame", nil, npcList)
-        sec:SetSize(170, 16)
-        sec:SetPoint("TOPLEFT", npcList, "TOPLEFT", 0, -y)
-        local t = sec:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        t:SetPoint("LEFT", sec, "LEFT", 4, 0)
-        t:SetText(name:upper())
-        return y + 18
-    end
 
     -- NPC row. `location` is shown as a smaller dim line below the name
     -- in global-search results, so the user knows which raid each hit
@@ -736,58 +778,59 @@ local function buildListPane(parent)
         if not sel then
             local txt = npcList:CreateFontString(nil, "OVERLAY", "GameFontDisable")
             txt:SetPoint("TOPLEFT", npcList, "TOPLEFT", 8, -8)
-            txt:SetText("Pick a raid, wing or dungeon on the left.")
+            txt:SetText("Pick a Bosses or Trash leaf on the left.")
             npcList:SetHeight(32)
             return
         end
 
-        -- Split an NPC list into bosses/trash and render with headers,
-        -- so the bosses players actually hunt are always at the top.
-        -- If a group is empty its header is skipped (a trash-only wing
-        -- doesn't get a "BOSSES" placeholder).
-        local function renderBossTrash(npcs)
-            local bosses, trash = {}, {}
-            for _, npc in ipairs(npcs) do
-                if isBoss(npc) then table.insert(bosses, npc)
-                else table.insert(trash, npc) end
-            end
-            if #bosses > 0 then
-                y = addHeader("Bosses", y)
-                for _, npc in ipairs(bosses) do y = addNPC(npc, y, nil) end
-            end
-            if #trash > 0 then
-                y = addHeader("Trash", y)
-                for _, npc in ipairs(trash) do y = addNPC(npc, y, nil) end
-            end
-        end
-
-        if sel:sub(1, 5) == "wing:" then
-            -- Wing selected -> just this wing's NPCs, bosses first.
-            local raidName, wIdxStr = sel:sub(6):match("^(.+)/(%d+)$")
-            local wIdx = tonumber(wIdxStr or "")
-            local raid = raidName and findRaid(raidName)
-            if raid and raid.sections and raid.sections[wIdx] then
-                renderBossTrash(raid.sections[wIdx].npcs)
-            end
-
-        elseif sel:sub(1, 5) == "raid:" then
-            -- Raid selected -> flat list of every NPC in the raid,
-            -- grouped by Bosses then Trash (the wing breakdown stays
-            -- visible in the tree on the left).
-            local raid = findRaid(sel:sub(6))
-            if raid and raid.sections then
+        -- Flatten the raid's NPC roster across all spatial sections, OR
+        -- return the heroic dungeon's flat NPC list. The Atlas no longer
+        -- shows the wings themselves (the spatial Sections/<Raid>.lua data
+        -- still drives the Automarker tab; this is just the Atlas tree).
+        local function collectRoster(parent)
+            if parent.sections then
                 local all = {}
-                for _, sec in ipairs(raid.sections) do
+                for _, sec in ipairs(parent.sections) do
                     for _, npc in ipairs(sec.npcs) do table.insert(all, npc) end
                 end
-                renderBossTrash(all)
+                return all
             end
+            return parent.npcs or {}
+        end
 
-        elseif sel:sub(1, 7) == "heroic:" then
-            local heroic = findRaid(sel:sub(8))
-            if heroic and heroic.npcs then
-                renderBossTrash(heroic.npcs)
+        -- Filter `roster` to just bosses or just trash and render.
+        local function renderOneSide(roster, wantBoss)
+            local out = {}
+            for _, npc in ipairs(roster) do
+                if isBoss(npc) == wantBoss then table.insert(out, npc) end
             end
+            if #out == 0 then
+                local txt = npcList:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+                txt:SetPoint("TOPLEFT", npcList, "TOPLEFT", 8, -8)
+                txt:SetText(wantBoss and "No bosses listed." or "No trash listed.")
+                return
+            end
+            for _, npc in ipairs(out) do y = addNPC(npc, y, nil) end
+        end
+
+        -- Order matters: the longer-prefix keys must match before their
+        -- shorter cousins (raid-bosses: starts with "raid", heroic-bosses:
+        -- starts with "heroic").
+        if sel:sub(1, 12) == "raid-bosses:" then
+            local raid = findRaid(sel:sub(13))
+            if raid then renderOneSide(collectRoster(raid), true) end
+
+        elseif sel:sub(1, 11) == "raid-trash:" then
+            local raid = findRaid(sel:sub(12))
+            if raid then renderOneSide(collectRoster(raid), false) end
+
+        elseif sel:sub(1, 14) == "heroic-bosses:" then
+            local heroic = findRaid(sel:sub(15))
+            if heroic then renderOneSide(collectRoster(heroic), true) end
+
+        elseif sel:sub(1, 13) == "heroic-trash:" then
+            local heroic = findRaid(sel:sub(14))
+            if heroic then renderOneSide(collectRoster(heroic), false) end
 
         elseif sel:sub(1, 15) == "consumable-cat:" then
             -- Consumable category selected -> list the items in that
@@ -1223,31 +1266,56 @@ end
 -- =============================================================
 local function buildAtlas(parent)
     ensureState()
-    -- Migration: the "location" and "lore" sub-tabs were dropped in 0.13.0.
+    -- Migration: "location" and "lore" sub-tabs were dropped in 0.13.0.
     -- Coerce any saved active key that no longer maps to a button so the
-    -- detail pane lands on Spells instead of falling through to nil.
+    -- detail pane lands on a real tab instead of falling through to nil.
+    -- (Default-new-install sits on "drops" per the 0.13.1 reorder.)
     if not SUB_TAB_LABELS[L3F.db.atlas.lastActiveSubTab or ""] then
-        L3F.db.atlas.lastActiveSubTab = "spells"
+        L3F.db.atlas.lastActiveSubTab = "drops"
     end
     buildTreePane(parent)
     buildListPane(parent)
     buildDetailPane(parent)
 
+    -- Collapse the tree the moment the user closes the main window. Per
+    -- Morphéours: every category folds back so the next open lands on a
+    -- tidy collapsed tree instead of whatever the user left expanded last
+    -- time. Selection is preserved (the middle/detail panes still remember
+    -- which Boss / Trash leaf the user picked) - only the expand state
+    -- resets. Hook fires once per session; buildAtlas itself runs only
+    -- once via RegisterTab's first-show.
+    if L3F.mainFrame then
+        L3F.mainFrame:HookScript("OnHide", function()
+            if L3F.db and L3F.db.atlas and L3F.db.atlas.tree then
+                L3F.db.atlas.tree.expanded = {}
+            end
+            -- Re-render the tree while it's hidden so the collapsed rows are
+            -- ready the next time the user opens the window.
+            if L3F.RefreshTree then L3F.RefreshTree() end
+        end)
+    end
+
     if L3F.db.atlas.lastSelectedNPC then
         currentNPC = L3F.npcLookup[L3F.db.atlas.lastSelectedNPC]
     end
 
-    -- If the active raid is collapsed but selected, expand it so the user
-    -- sees their context on first open.
+    -- First session-build: expand the path down to the saved selection so
+    -- the user sees their context. Subsequent open/close cycles wipe the
+    -- expand state via the OnHide hook above, so this only fires the very
+    -- first time the Atlas tab is built per session.
     local sel = L3F.db.atlas.selected
-    if sel and (sel:sub(1, 5) == "raid:" or sel:sub(1, 5) == "wing:") then
-        setExpanded("cat:" .. CAT_RAIDS, true)
-        local raidName = (sel:sub(1, 5) == "wing:")
-            and sel:sub(6):match("^(.+)/%d+$")
-            or  sel:sub(6)
-        if raidName then setExpanded("raid:" .. raidName, true) end
-    elseif sel and sel:sub(1, 7) == "heroic:" then
-        setExpanded("cat:" .. CAT_HEROICS, true)
+    if sel then
+        if sel:sub(1, 12) == "raid-bosses:" or sel:sub(1, 11) == "raid-trash:" then
+            setExpanded("cat:" .. CAT_RAIDS, true)
+            local raidName = sel:match("^raid-bosses:(.+)$") or sel:match("^raid-trash:(.+)$")
+            if raidName then setExpanded("raid:" .. raidName, true) end
+        elseif sel:sub(1, 14) == "heroic-bosses:" or sel:sub(1, 13) == "heroic-trash:" then
+            setExpanded("cat:" .. CAT_HEROICS, true)
+            local heroicName = sel:match("^heroic-bosses:(.+)$") or sel:match("^heroic-trash:(.+)$")
+            if heroicName then setExpanded("heroic:" .. heroicName, true) end
+        elseif sel:sub(1, 15) == "consumable-cat:" then
+            setExpanded("cat:" .. CAT_CONSUMABLES, true)
+        end
     end
 
     L3F.RefreshTree()
