@@ -217,14 +217,19 @@ local LERP_STALL = 6.0     -- after this long with no new sample, snap and stop 
 -- Pin trail (hover-only, world map only). updateLerpState pushes a
 -- sample into set.samples; showTrail walks those samples to draw a
 -- white-fading breadcrumb behind the hovered pin.
-local TRAIL_DURATION       = 30     -- seconds of history shown
-local TRAIL_DOT_SPACING    = 1.0    -- one interpolated dot per second of broadcast gap
-local TRAIL_DOT_SIZE       = 4      -- px (pre-sizeMul; trails are uniform regardless of pin size)
-local SAMPLE_KEEP          = 60     -- seconds buffered (> TRAIL_DURATION for safety)
-local TRAIL_HEAD_AGE_GAP   = 3.0    -- skip dots younger than this (clear the pin sprite)
-local TRAIL_HEAD_DIST_GAP  = 0.015  -- skip dots within this normalized distance of head
-local TRAIL_REF            = "L3FToolsTrail"
-local TRAIL_TEXTURE        = "Interface\\AddOns\\L3FTools\\Media\\Dot"
+local TRAIL_DURATION    = 30     -- seconds of history shown
+local TRAIL_DOT_SPACING = 1.0    -- one interpolated dot per second of broadcast gap
+local TRAIL_DOT_SIZE    = 4      -- px (pre-sizeMul; trails are uniform regardless of pin size)
+local SAMPLE_KEEP       = 60     -- seconds buffered (> TRAIL_DURATION for safety)
+local TRAIL_DEDUP_EPS   = 0.001  -- treat dots within this normalized distance as "same spot"
+local TRAIL_REF         = "L3FToolsTrail"
+local TRAIL_TEXTURE     = "Interface\\AddOns\\L3FTools\\Media\\Dot"
+-- Pin-level type used for trail dots. The default for HBD pins is
+-- PIN_FRAME_LEVEL_AREA_POI; GROUP_MEMBER sits below that in the canvas
+-- z-order, so dots draw behind the player pin no matter the zoom. If
+-- the constant isn't recognized on this client, HBD falls back to the
+-- default layer and the trail draws on the same level (still works).
+local TRAIL_FRAME_LEVEL = "PIN_FRAME_LEVEL_GROUP_MEMBER"
 
 -- Sonar-ping highlight (triggered by Map-tab roster left-click)
 local HIGHLIGHT_DURATION      = 2.0   -- total animation length
@@ -400,15 +405,11 @@ local function rebuildTrail()
     local now    = GetTime()
     local cutoff = now - TRAIL_DURATION
     local dotIdx = 0
-
-    -- Head buffer: don't render dots too close (in time OR position) to
-    -- where the pin currently sits, or they pile on top of the pin sprite
-    -- and look like a smear instead of a trail. Take the head position
-    -- from the lerp's "next" sample - that's where the pin is animating
-    -- toward and (within a tenth of a second) where it visibly is.
-    local L      = set.lerp or {}
-    local headX  = L.nextX
-    local headY  = L.nextY
+    -- Dedup tracker: walk dots oldest-to-newest, skip if the position
+    -- matches the last rendered dot within TRAIL_DEDUP_EPS. Collapses
+    -- standing-still stacks down to a single dot at the rest point and
+    -- keeps the data well-behaved at any zoom level.
+    local lastX, lastY
 
     for i = 2, #set.samples do
         local a, b = set.samples[i - 1], set.samples[i]
@@ -420,25 +421,25 @@ local function rebuildTrail()
             for j = 1, nDots do
                 local frac = j / nDots
                 local pt   = a.t + gap * frac
-                local age  = now - pt
-                if pt >= cutoff and age >= TRAIL_HEAD_AGE_GAP then
+                if pt >= cutoff then
                     local px = a.x + (b.x - a.x) * frac
                     local py = a.y + (b.y - a.y) * frac
-                    -- Stationary broadcasters generate many samples at
-                    -- the same x/y - those dots ALL pile on the pin if we
-                    -- only filter by age. Also skip anything within
-                    -- HEAD_DIST_GAP normalized units of the head.
-                    local nearHead = headX and
-                        math.abs(px - headX) < TRAIL_HEAD_DIST_GAP and
-                        math.abs(py - headY) < TRAIL_HEAD_DIST_GAP
-                    if not nearHead then
+                    if not lastX
+                       or math.abs(px - lastX) > TRAIL_DEDUP_EPS
+                       or math.abs(py - lastY) > TRAIL_DEDUP_EPS then
+                        local age = now - pt
                         dotIdx = dotIdx + 1
                         local d = getTrailDot(dotIdx)
                         -- Linear alpha fade: 1.0 at head -> ~0 at tail.
                         -- Floor at 0.05 so the oldest dots remain barely visible.
                         d:SetAlpha(math.max(0.05, 1 - age / TRAIL_DURATION))
+                        -- Register on a lower pin-level type so any dot
+                        -- that lands under the player's pin sprite is
+                        -- occluded (replaces the old time+distance
+                        -- buffer that didn't survive zoomed-out views).
                         HBDPins:AddWorldMapIconMap(TRAIL_REF, d, a.mapID, px, py,
-                            HBD_PINS_WORLDMAP_SHOW_WORLD)
+                            HBD_PINS_WORLDMAP_SHOW_WORLD, TRAIL_FRAME_LEVEL)
+                        lastX, lastY = px, py
                     end
                 end
             end
