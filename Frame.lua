@@ -453,6 +453,77 @@ end
 
 
 -- =============================================================
+-- Temporary main-frame fade
+-- =============================================================
+-- Called by the Map tab when the user clicks a roster row: drops the
+-- main window's alpha so the world-map sonar-ping behind it is
+-- visible, then fades back to fully opaque. Total duration matches
+-- the sonar ping (~2s) so the window finishes restoring just as the
+-- last ring vanishes.
+local FADE_DIM_ALPHA = 0.25
+local FADE_OUT_TIME  = 0.2
+local FADE_IN_TIME   = 0.2
+
+local fadeState = {}      -- { startTime, duration, active }
+local fadeDriver
+
+local function restoreMainFrameAlpha()
+    if mainFrame then mainFrame:SetAlpha(1.0) end
+    fadeState.active = false
+    if fadeDriver then fadeDriver:Hide() end
+end
+
+local function fadeAlphaAt(elapsed, duration)
+    -- Returns the alpha to apply at this point in the timeline.
+    if elapsed < 0 or elapsed >= duration then return 1.0 end
+    local holdEnd = duration - FADE_IN_TIME
+    if elapsed < FADE_OUT_TIME then
+        local t = elapsed / FADE_OUT_TIME
+        return 1.0 + (FADE_DIM_ALPHA - 1.0) * t
+    elseif elapsed < holdEnd then
+        return FADE_DIM_ALPHA
+    else
+        local t = (elapsed - holdEnd) / FADE_IN_TIME
+        return FADE_DIM_ALPHA + (1.0 - FADE_DIM_ALPHA) * t
+    end
+end
+
+function L3F.FadeMainFrameFor(seconds)
+    if not mainFrame or not mainFrame:IsShown() then return end
+    seconds = seconds or 2.0
+    if seconds < FADE_OUT_TIME + FADE_IN_TIME then return end
+
+    -- Lazy-init the driver + the OnHide restore hook.
+    if not fadeDriver then
+        fadeDriver = CreateFrame("Frame")
+        fadeDriver:Hide()
+        fadeDriver:SetScript("OnUpdate", function()
+            if not fadeState.active or not mainFrame then return end
+            local elapsed = GetTime() - fadeState.startTime
+            if elapsed >= fadeState.duration then
+                restoreMainFrameAlpha()
+                return
+            end
+            mainFrame:SetAlpha(fadeAlphaAt(elapsed, fadeState.duration))
+        end)
+        -- If the window is closed mid-fade, restore alpha so re-opening
+        -- doesn't show it at 0.25.
+        mainFrame:HookScript("OnHide", function()
+            if fadeState.active then restoreMainFrameAlpha() end
+        end)
+    end
+
+    -- (Re-)start the fade from now. If a previous fade was in progress
+    -- the alpha will briefly snap to 1.0 on the next OnUpdate tick
+    -- before fading back out - acceptable for a 0.2s blip.
+    fadeState.startTime = GetTime()
+    fadeState.duration  = seconds
+    fadeState.active    = true
+    fadeDriver:Show()
+end
+
+
+-- =============================================================
 -- /l3f reset - recovery for a window that got dragged off-screen
 -- or resized past the screen edge. Wipes the saved geometry and
 -- re-centers at the 900x560 default.

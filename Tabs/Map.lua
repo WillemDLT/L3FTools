@@ -263,6 +263,11 @@ local function buildRosterPanel(parent)
                     -- pin to pan to.
                     if e.broadcasting and e.mapID then
                         panWorldMapTo(e.mapID)
+                        -- Fade our window so the sonar ping behind it is
+                        -- clearly visible during the ~2s animation.
+                        if L3F.FadeMainFrameFor then
+                            L3F.FadeMainFrameFor(2.0)
+                        end
                         -- Sonar-ping the pin so you don't have to scan
                         -- the map for it. Defer a frame so HBD has time
                         -- to finish RefreshAllData for the new mapID
