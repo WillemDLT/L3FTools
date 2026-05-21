@@ -205,24 +205,20 @@ local function buildMinimapButton()
     L3FToolsDB.guildMap.pinsButton = L3FToolsDB.guildMap.pinsButton or {}
     local saved = L3FToolsDB.guildMap.pinsButton
 
-    -- Parent: UIParent, NOT Minimap. This is the universal opt-out
-    -- against collectors that walk Minimap:GetChildren() and grab
-    -- anything that looks like a button (Chinchilla, SexyMap, sArena
-    -- minimap module, MBF aggressive mode, etc.). The button still
-    -- lives on the minimap rim because every SetPoint below is
-    -- ANCHORED to Minimap by reference - relational anchors don't
-    -- care about parent. Drag math reads Minimap:GetCenter() too.
-    local b = CreateFrame("Button", MM_BTN_NAME, UIParent)
+    -- Parent: Minimap. Register on Minimap directly so the button
+    -- inherits MinimapCluster scale + auto-hides with the minimap, and
+    -- the rim math (SetPoint to Minimap:CENTER) renders flush against
+    -- the rim like every other LibDBIcon button.
+    --
+    -- Collector opt-out is via frame name only: collectors that
+    -- pattern-match "LibDBIcon10_*" prefixes or "Minimap" substrings
+    -- leave "L3FToolsMapPinsToggle" alone (covers MinimapButtonButton,
+    -- BBI). Collectors that walk Minimap:GetChildren() blindly will
+    -- still grab it - reparenting to UIParent to defeat those was
+    -- tried in 0.12.3/0.12.4 and broke the visuals (button no longer
+    -- flush against the rim like other minimap buttons), reverted.
+    local b = CreateFrame("Button", MM_BTN_NAME, Minimap)
     b._db = saved
-    -- Match Minimap's effective scale. Minimap-parented buttons inherit
-    -- whatever MinimapCluster's scale is (typically slightly above
-    -- UIParent's effective scale on TBC); without this our button
-    -- would be visibly smaller AND our (x, y) rim offsets would be in
-    -- UIParent units, sitting the button INSIDE the rim instead of
-    -- flush against it.
-    local mmScale = (Minimap.GetEffectiveScale and Minimap:GetEffectiveScale()) or 1
-    local upScale = (UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
-    if upScale > 0 then b:SetScale(mmScale / upScale) end
     b:SetFrameStrata("MEDIUM")
     b:SetSize(31, 31)
     b:SetFrameLevel(8)
@@ -280,18 +276,7 @@ local function buildMinimapButton()
 
     updateMinimapButtonPosition(b, saved.minimapPos or 220)
 
-    -- Initial visibility: respect saved.hide AND Minimap's current
-    -- shown state (parented to UIParent, so we don't auto-hide with
-    -- the minimap any more; have to sync manually).
-    if saved.hide or not Minimap:IsShown() then b:Hide() else b:Show() end
-
-    -- Mirror Minimap visibility going forward. Without this, the
-    -- button stays on screen even when the user / a Minimap-managing
-    -- addon hides the minimap.
-    Minimap:HookScript("OnHide", function() b:Hide() end)
-    Minimap:HookScript("OnShow", function()
-        if not saved.hide then b:Show() end
-    end)
+    if saved.hide then b:Hide() end
 
     minimapBuilt = true
 
