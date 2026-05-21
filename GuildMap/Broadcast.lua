@@ -172,13 +172,30 @@ local function requestRoster()
     end
 end
 
+-- The "online" set returned by GetGuildRosterInfo can be incomplete for a
+-- moment right after GuildRoster() is called (the local cache is still
+-- populating). Two safeguards before we remove someone:
+--   1. If the online set is empty we treat it as untrustworthy and skip
+--      the sweep entirely — no mass-removal on a transient empty snapshot.
+--   2. We only remove an entry if we have NOT received a heartbeat from
+--      that player in the last OFFLINE_GRACE seconds. A fresh heartbeat
+--      trumps a stale "offline" report (this was the root cause of
+--      Morphéours' "pin disappears after ~10s while standing still" bug:
+--      the 10s GuildRoster ticker briefly reported an active broadcaster
+--      as offline, deleting their entry until the next heartbeat).
+local OFFLINE_GRACE = 15
+
 local guildFrame = CreateFrame("Frame")
 guildFrame:RegisterEvent("GUILD_ROSTER_UPDATE")
 guildFrame:RegisterEvent("PLAYER_GUILD_UPDATE")
 guildFrame:SetScript("OnEvent", function()
     local online = snapshotOnlineGuildies()
+    if not next(online) then return end  -- safeguard 1: empty cache
+    local now = GetTime()
     for short, entry in pairs(roster) do
-        if entry.source == "guild" and not online[short] then
+        if entry.source == "guild"
+           and not online[short]
+           and now - (entry.lastSeen or 0) > OFFLINE_GRACE then  -- safeguard 2
             roster[short] = nil
             if GM.OnRosterRemoved then GM.OnRosterRemoved(short) end
         end
