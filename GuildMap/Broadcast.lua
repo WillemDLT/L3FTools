@@ -137,10 +137,20 @@ end
 
 local function tick()
     if not shouldBroadcast() then return end
-    local mapID = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
-    local pos = mapID and C_Map.GetPlayerMapPosition and C_Map.GetPlayerMapPosition(mapID, "player")
-    local x, y = pos and pos:GetXY()
-    if not x then return end
+    if not (C_Map and C_Map.GetBestMapForUnit and C_Map.GetPlayerMapPosition) then return end
+    local mapID = C_Map.GetBestMapForUnit("player")
+    if not mapID then return end
+    local pos = C_Map.GetPlayerMapPosition(mapID, "player")
+    if not pos then return end
+    -- IMPORTANT: do NOT write `local x, y = pos and pos:GetXY()` — Lua's
+    -- `and` doesn't propagate multi-value returns, so y silently becomes
+    -- nil and the moved check on line below crashes whenever the player
+    -- stops moving (the x-delta short-circuit no longer hides the bug).
+    -- That crash was the root cause of "pin disappears when immobile":
+    -- tick aborted before sendNow, heartbeats stopped, TTL dropped us
+    -- from every receiver after 30s.
+    local x, y = pos:GetXY()
+    if not x or not y then return end
 
     local now = GetTime()
     local timeSince = now - lastSentTime

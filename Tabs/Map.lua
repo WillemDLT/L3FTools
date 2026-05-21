@@ -25,6 +25,20 @@ local function refreshPins()
     if L3F.GuildMap and L3F.GuildMap.RefreshAll then L3F.GuildMap.RefreshAll() end
 end
 
+-- Pin-visibility changes need to ripple to the world-map + minimap
+-- toggle buttons (dim, tooltip), the live pins themselves, AND back
+-- to our own checkboxes if the change came from a button. The
+-- NotifyPinSettingsChanged entrypoint in PinToggle.lua handles all of
+-- that, and uses our L3F.MapTab_RefreshCheckboxes (registered below)
+-- to push state back to us on the way back.
+local function notifyPinVisibility()
+    if L3F.GuildMap and L3F.GuildMap.NotifyPinSettingsChanged then
+        L3F.GuildMap.NotifyPinSettingsChanged()
+    else
+        refreshPins()  -- fall back to bare re-render if PinToggle missing
+    end
+end
+
 
 -- =============================================================
 -- Stack helper - every widget anchors to scrollChild's TOPLEFT
@@ -275,14 +289,23 @@ local function buildMap(parent)
 
     -- Display
     S:header("Display")
-    S:checkbox("Pins on world map",
+    local cbWorld = S:checkbox("Pins on world map",
         function() return db().showOnWorldMap end,
         function(v) db().showOnWorldMap = v end,
-        refreshPins)
-    S:checkbox("Pins on minimap",
+        notifyPinVisibility)
+    local cbMini = S:checkbox("Pins on minimap",
         function() return db().showOnMinimap end,
         function(v) db().showOnMinimap = v end,
-        refreshPins)
+        notifyPinVisibility)
+
+    -- Expose a refresher so the toggle buttons (PinToggle.lua) can push
+    -- their state back into our checkbox visuals after the user clicks
+    -- a button. Without this, the box stays stale until the tab is
+    -- closed and reopened.
+    L3F.MapTab_RefreshCheckboxes = function()
+        if cbWorld then cbWorld:SetChecked(db().showOnWorldMap) end
+        if cbMini  then cbMini:SetChecked(db().showOnMinimap)  end
+    end
     S:checkbox("Show player name on pin",
         function() return db().showName end,
         function(v) db().showName = v end,

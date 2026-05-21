@@ -302,13 +302,6 @@ local function upsertPin(short, entry)
     pins[short] = pins[short] or {}
     local set = pins[short]
 
-    -- Master toggle (pin-visibility button): hide everything immediately.
-    -- Takes precedence over the per-surface showOnWorldMap / showOnMinimap.
-    if gm.pinsHidden then
-        hideBothPins(set)
-        return
-    end
-
     -- If the base game already pins this player, hide ours and return early.
     -- (The roster entry stays — Map-tab UI still lists them.)
     if isPinnedByGame(entry.name) then

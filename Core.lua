@@ -171,15 +171,12 @@ local DEFAULTS = {
         showOnMinimap    = true,
         iconStyle        = "class",   -- "class" | "dot"
         worldPinSize     = 0.8,
-        minimapPinSize   = 0.8,
+        minimapPinSize   = 1.0,
         showName         = true,
         showLevel        = true,
         showHP           = true,
-        -- Master visibility toggle, flipped by the pin-visibility buttons
-        -- (LibDBIcon minimap + WorldMapFrame button, see GuildMap/PinToggle).
-        -- Takes precedence over showOnWorldMap / showOnMinimap.
-        pinsHidden       = false,
-        pinsButton       = { hide = false, minimapPos = 230 },  -- LibDBIcon state
+        -- LibDBIcon savedvar for the pin-visibility minimap button.
+        pinsButton       = { hide = false, minimapPos = 230 },
     },
 }
 
@@ -232,6 +229,26 @@ local function initDB()
             L3FToolsDB.guildMap.minimapPinSize = 0.8
         end
         L3FToolsDB.guildMap._pinSizeMigratedTo08 = true
+    end
+    -- Follow-up migration: minimapPinSize moves BACK to 1.0 (Morphéours
+    -- said 0.8 was too small on the minimap). Only flips users still on
+    -- the previous-default 0.8; if they've since picked anything else,
+    -- we leave it alone.
+    if L3FToolsDB.guildMap and not L3FToolsDB.guildMap._minimapSizeRevertedToOne then
+        if L3FToolsDB.guildMap.minimapPinSize == 0.8 then
+            L3FToolsDB.guildMap.minimapPinSize = 1.0
+        end
+        L3FToolsDB.guildMap._minimapSizeRevertedToOne = true
+    end
+    -- Migration: the old master pinsHidden flag is gone. If a user had
+    -- toggled pins off via the (now removed) master toggle, fold that
+    -- into the per-surface flags so their pins stay hidden after upgrade.
+    if L3FToolsDB.guildMap and L3FToolsDB.guildMap.pinsHidden then
+        L3FToolsDB.guildMap.showOnWorldMap = false
+        L3FToolsDB.guildMap.showOnMinimap  = false
+    end
+    if L3FToolsDB.guildMap then
+        L3FToolsDB.guildMap.pinsHidden = nil
     end
     deepCopyDefaults(L3FToolsDB, DEFAULTS)
     -- First-ever launch: enable Automarker for every NPC we know about.
