@@ -115,16 +115,37 @@ local function sendNow()
     local msg = string.format("%s,%d,%s,%.3f,%.3f,%d,%d",
         name, level, class, x, y, mapID, hp)
 
+    -- Both channels go through ChatThrottleLib so a wide friend fan-out
+    -- can't blow the per-second cap and trip a disconnect. BULK priority
+    -- because position broadcasts are background traffic; whisper/trade/
+    -- etc. (NORMAL) should always win bandwidth over us.
+    local CTL = _G.ChatThrottleLib
+    local function sendAddon(channel, target)
+        if CTL and CTL.SendAddonMessage then
+            CTL:SendAddonMessage("BULK", PREFIX, msg, channel, target)
+        else
+            C_ChatInfo.SendAddonMessage(PREFIX, msg, channel, target)
+        end
+    end
+
     local gm = L3FToolsDB.guildMap
     local sent = false
+
+    -- Snapshot guildies once if we'll be sending to GUILD - we use the
+    -- set below to skip WHISPER fan-out for friends who are also guildies
+    -- (their GUILD packet covers them already).
+    local guildieSet
     if guildChannelEligible(gm) then
-        C_ChatInfo.SendAddonMessage(PREFIX, msg, "GUILD")
+        sendAddon("GUILD")
         sent = true
+        guildieSet = snapshotOnlineGuildies()
     end
     if gm.shareWithFriends then
-        for _, fullName in pairs(snapshotOnlineFriends()) do
-            C_ChatInfo.SendAddonMessage(PREFIX, msg, "WHISPER", fullName)
-            sent = true
+        for short, fullName in pairs(snapshotOnlineFriends()) do
+            if not (guildieSet and guildieSet[short]) then
+                sendAddon("WHISPER", fullName)
+                sent = true
+            end
         end
     end
 

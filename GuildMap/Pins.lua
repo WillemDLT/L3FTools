@@ -153,6 +153,8 @@ end
 -- and tinted to the source color, so only a thin ring of source
 -- color shows around the class icon - and the corners of the frame
 -- stay transparent (which the old solid-color backdrop did not).
+local SKULL_TEXTURE = "Interface\\AddOns\\L3FTools\\Media\\Skull"
+
 local function applyClassAndSource(frame, class, source)
     local c = SOURCE_BORDER[source] or SOURCE_BORDER.guild
     local coords = CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[class]
@@ -172,6 +174,65 @@ local function applyClassAndSource(frame, class, source)
         frame.icon:SetTexCoord(l, r, t, b)
         frame.icon:SetVertexColor(1, 1, 1, 1)
     end
+end
+
+-- Wrapper that adds the dead-broadcaster swap: when hp==0 the world-map
+-- pin's class icon becomes the skull. Source-tinted ring + HP bar stay
+-- on top so you can still see who and where. Re-runs on every roster
+-- update + every 2s safety tick, so revival flips the icon back.
+local function applyWorldPinAppearance(frame, class, source, hp)
+    applyClassAndSource(frame, class, source)
+    if frame.icon and hp == 0 then
+        frame.icon:SetTexture(SKULL_TEXTURE)
+        frame.icon:SetTexCoord(0, 1, 0, 1)
+        frame.icon:SetVertexColor(1, 1, 1, 1)
+    end
+end
+
+
+-- =============================================================
+-- Smooth movement: linear lerp between samples
+-- =============================================================
+-- Each world-map pin owns its own OnUpdate. Between broadcasts it
+-- slides from the previous sample toward the latest one - reaching
+-- the new position by the time we'd expect the NEXT broadcast (sized
+-- to the gap between the last two we received). When a broadcast is
+-- overdue past LERP_STALL the pin freezes at the last known position.
+-- The OnUpdate is throttled to LERP_TICK so we're not pushing HBD
+-- recalcs every render frame.
+local LERP_TICK  = 0.1     -- 10 Hz HBD re-position cadence
+local LERP_STALL = 6.0     -- after this long with no new sample, snap and stop animating
+
+local function lerp(a, b, t) return a + (b - a) * t end
+
+local function computeLerped(f)
+    if not f._prevX or not f._nextX then
+        return f._nextX or f._prevX, f._nextY or f._prevY
+    end
+    local dt = (f._nextT or 0) - (f._prevT or 0)
+    if dt <= 0.05 then return f._nextX, f._nextY end
+    local t = (GetTime() - f._prevT) / dt
+    if t < 0 then t = 0 elseif t > 1 then t = 1 end
+    return lerp(f._prevX, f._nextX, t), lerp(f._prevY, f._nextY, t)
+end
+
+local function pinOnUpdate(self, elapsed)
+    self._lerpAcc = (self._lerpAcc or 0) + elapsed
+    if self._lerpAcc < LERP_TICK then return end
+    self._lerpAcc = 0
+
+    if not self._nextX or not self._mapID then return end
+
+    local renderX, renderY
+    if not self._prevX
+       or (self._lastBroadcast and GetTime() - self._lastBroadcast > LERP_STALL) then
+        renderX, renderY = self._nextX, self._nextY
+    else
+        renderX, renderY = computeLerped(self)
+    end
+
+    HBDPins:AddWorldMapIconMap(REF_NAME, self, self._mapID, renderX, renderY,
+        HBD_PINS_WORLDMAP_SHOW_WORLD)
 end
 
 local function buildWorldPinFrame()
@@ -215,8 +276,15 @@ local function buildWorldPinFrame()
     f:SetScript("OnMouseUp", function(self, button)
         if button == "RightButton" and self._name then
             showContextMenu(self._name, self._class)
+        elseif button == "LeftButton" and self._clusterMembers then
+            -- Clustered: open the per-cluster menu of all members instead
+            -- of doing nothing on left-click.
+            showClusterMenu(self._clusterMembers)
         end
     end)
+
+    -- Per-pin smooth-movement ticker (linear lerp).
+    f:SetScript("OnUpdate", pinOnUpdate)
 
     return f
 end
@@ -269,6 +337,7 @@ local function removePins(short)
     local set = pins[short]
     if not set then return end
     if set.world then
+        set.world._nextX = nil  -- stop the lerp OnUpdate from re-adding
         HBDPins:RemoveWorldMapIcon(REF_NAME, set.world)
         set.world:Hide()
     end
@@ -290,6 +359,7 @@ end
 
 local function hideBothPins(set)
     if set.world then
+        set.world._nextX = nil  -- stop the lerp OnUpdate from re-adding
         HBDPins:RemoveWorldMapIcon(REF_NAME, set.world); set.world:Hide()
     end
     if set.minimap then
@@ -318,7 +388,7 @@ local function upsertPin(short, entry)
         wf._class = entry.class
         wf._hp    = entry.hp
 
-        applyClassAndSource(wf, entry.class, entry.source or "guild")
+        applyWorldPinAppearance(wf, entry.class, entry.source or "guild", entry.hp)
 
         local sizeMul = gm.worldPinSize or 1.0
         wf:SetSize(22 * sizeMul, 22 * sizeMul)
@@ -344,12 +414,43 @@ local function upsertPin(short, entry)
             wf.hpBg:Hide(); wf.hpFill:Hide()
         end
 
-        -- HBD: remove the previous registration (no-op if not registered)
-        -- then add at the current map+xy. Cheap; HBD batches updates.
-        HBDPins:RemoveWorldMapIcon(REF_NAME, wf)
-        HBDPins:AddWorldMapIconMap(REF_NAME, wf, entry.mapID, entry.x, entry.y,
+        -- Smooth movement: capture the current rendered position as the
+        -- new "previous" sample and queue entry.x/y as "next". The pin's
+        -- own OnUpdate handler does the actual HBD positioning every
+        -- LERP_TICK, sliding from prev to next over an estimated gap
+        -- equal to the time since the last broadcast (so the pin reaches
+        -- the new position just as we'd expect the next broadcast).
+        local now = GetTime()
+        local mapChanged = wf._mapID and (wf._mapID ~= entry.mapID)
+        local curX, curY
+        if mapChanged or not wf._nextX then
+            curX, curY = entry.x, entry.y
+        else
+            curX, curY = computeLerped(wf)
+        end
+
+        local dtEstimate
+        if wf._lastBroadcast then
+            dtEstimate = now - wf._lastBroadcast
+        end
+        if not dtEstimate or dtEstimate < 0.2 or dtEstimate > LERP_STALL then
+            dtEstimate = 1.5  -- middle of [TICK_INTERVAL, MAX_INTERVAL]
+        end
+
+        wf._prevX, wf._prevY, wf._prevT = curX,    curY,    now
+        wf._nextX, wf._nextY, wf._nextT = entry.x, entry.y, now + dtEstimate
+        wf._lastBroadcast = now
+        wf._mapID = entry.mapID
+
+        -- Initial paint so the pin appears immediately on first registration
+        -- or after a hide; OnUpdate (10 Hz) takes over from here. Don't
+        -- unconditionally Show() - that would un-hide a pin we deliberately
+        -- hid as part of a cluster (until the next 0.3s cluster tick rehides).
+        if not wf._isClusterMember then wf:Show() end
+        HBDPins:AddWorldMapIconMap(REF_NAME, wf, entry.mapID, curX, curY,
             HBD_PINS_WORLDMAP_SHOW_WORLD)
     elseif set.world then
+        set.world._nextX = nil  -- stop the lerp OnUpdate from re-adding
         HBDPins:RemoveWorldMapIcon(REF_NAME, set.world)
         set.world:Hide()
     end
@@ -422,6 +523,226 @@ local groupFrame = CreateFrame("Frame")
 groupFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
 groupFrame:RegisterEvent("PARTY_LEADER_CHANGED")
 groupFrame:SetScript("OnEvent", resyncAll)
+
+
+-- =============================================================
+-- World-map clustering (zoom-aware, click-to-expand)
+-- =============================================================
+-- HBD has already positioned every pin on screen by the time this runs.
+-- We walk our pin frames, find groups whose centers are within
+-- CLUSTER_RADIUS_PX of each other in SCREEN space (so zoom changes auto-
+-- adjust which pins overlap), and pick one "primary" per group to remain
+-- visible with a count badge - the rest are hidden. Left-click on a
+-- primary pops up a small list of the cluster's members; each row opens
+-- the same Whisper/Invite menu the right-click context menu does.
+--
+-- Minimap pins are deliberately not touched here (Morphéours' explicit
+-- "world map only" requirement).
+local CLUSTER_RADIUS_PX = 22      -- approx pin diameter
+local CLUSTER_TICK      = 0.3     -- recompute interval
+
+local clusterMenu
+local function getClusterMenu()
+    if clusterMenu then return clusterMenu end
+    local m = CreateFrame("Frame", "L3FGuildMapClusterMenu", UIParent, "BackdropTemplate")
+    m:SetFrameStrata("FULLSCREEN_DIALOG")
+    m:SetFrameLevel(99)
+    m:SetBackdrop({
+        bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 12,
+        insets   = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    m:SetBackdropColor(0, 0, 0, 1)
+    m:Hide()
+
+    m.header = m:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    m.header:SetPoint("TOP", m, "TOP", 0, -8)
+
+    m._rows = {}
+    m:SetScript("OnUpdate", function(self, elapsed)
+        if not self:IsMouseOver() and not InCombatLockdown() then
+            self._lingerTime = (self._lingerTime or 0) + (elapsed or 0.05)
+            if self._lingerTime > 1.0 then self:Hide() end
+        else
+            self._lingerTime = 0
+        end
+    end)
+    m:HookScript("OnShow", function(self) self._lingerTime = 0 end)
+
+    clusterMenu = m
+    return m
+end
+
+local function showClusterMenu(members)
+    local m = getClusterMenu()
+    for _, r in ipairs(m._rows) do r:Hide() end
+
+    local W, HEADER_H, ROW_H = 170, 22, 18
+    m.header:SetText(string.format("|cffffd100%d players|r", #members))
+
+    for i, member in ipairs(members) do
+        local r = m._rows[i]
+        if not r then
+            r = CreateFrame("Button", nil, m)
+            r:SetHeight(ROW_H)
+            r:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+            r.hl = r:CreateTexture(nil, "BACKGROUND")
+            r.hl:SetAllPoints()
+            r.hl:SetColorTexture(1, 1, 1, 0)
+            r.text = r:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            r.text:SetPoint("LEFT",  r, "LEFT",  8, 0)
+            r.text:SetPoint("RIGHT", r, "RIGHT", -8, 0)
+            r.text:SetJustifyH("LEFT")
+            r:SetScript("OnEnter", function(self) self.hl:SetColorTexture(1, 1, 1, 0.10) end)
+            r:SetScript("OnLeave", function(self) self.hl:SetColorTexture(1, 1, 1, 0)    end)
+            r:SetScript("OnClick", function(self, button)
+                if not self._name then return end
+                showContextMenu(self._name, self._class)
+                m:Hide()
+            end)
+            m._rows[i] = r
+        end
+        r._name  = member._name
+        r._class = member._class
+        local color = (member._class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[member._class])
+            or { r = 1, g = 1, b = 1 }
+        local hex = string.format("%02x%02x%02x",
+            math.floor(color.r * 255 + 0.5),
+            math.floor(color.g * 255 + 0.5),
+            math.floor(color.b * 255 + 0.5))
+        r.text:SetText(string.format("|cff%s%s|r  |cff888888L%d|r",
+            hex, member._name or "?", member._level or 0))
+        r:ClearAllPoints()
+        r:SetPoint("TOPLEFT",  m, "TOPLEFT",  6, -(HEADER_H + (i - 1) * ROW_H))
+        r:SetPoint("TOPRIGHT", m, "TOPRIGHT", -6, -(HEADER_H + (i - 1) * ROW_H))
+        r:Show()
+    end
+
+    m:SetSize(W, HEADER_H + #members * ROW_H + 12)
+    local cx, cy = GetCursorPosition()
+    local scale  = UIParent:GetEffectiveScale()
+    m:ClearAllPoints()
+    m:SetPoint("CENTER", UIParent, "BOTTOMLEFT", cx / scale, cy / scale)
+    m:Show()
+end
+
+-- Union-find clustering by screen-pixel proximity. Returns a list of
+-- groups; each group is { primary = frame, members = { frame, ... } }
+-- with the primary chosen by alphabetical name for deterministic UI
+-- (so the same pin stays visible across recompute cycles).
+local function detectClusters()
+    local visible = {}
+    for _, set in pairs(pins) do
+        local wf = set.world
+        if wf and wf._mapID and wf._nextX and wf:IsShown() then
+            local cx, cy = wf:GetCenter()
+            if cx and cy then
+                table.insert(visible, { frame = wf, x = cx, y = cy })
+            end
+        end
+    end
+    if #visible < 2 then return {} end
+
+    local parent = {}
+    for i = 1, #visible do parent[i] = i end
+    local function find(i)
+        while parent[i] ~= i do parent[i] = parent[parent[i]]; i = parent[i] end
+        return i
+    end
+    local function union(i, j)
+        local pi, pj = find(i), find(j)
+        if pi ~= pj then parent[pi] = pj end
+    end
+
+    local r2 = CLUSTER_RADIUS_PX * CLUSTER_RADIUS_PX
+    for i = 1, #visible - 1 do
+        for j = i + 1, #visible do
+            local dx = visible[i].x - visible[j].x
+            local dy = visible[i].y - visible[j].y
+            if dx * dx + dy * dy < r2 then union(i, j) end
+        end
+    end
+
+    local roots = {}
+    for i = 1, #visible do
+        local r = find(i)
+        roots[r] = roots[r] or {}
+        table.insert(roots[r], visible[i].frame)
+    end
+
+    local clusters = {}
+    for _, frames in pairs(roots) do
+        if #frames > 1 then
+            table.sort(frames, function(a, b)
+                return (a._name or "") < (b._name or "")
+            end)
+            table.insert(clusters, { primary = frames[1], members = frames })
+        end
+    end
+    return clusters
+end
+
+local activeClusters = {}  -- [primaryFrame] = members[]
+
+local function clearClusters()
+    for primary, members in pairs(activeClusters) do
+        if primary.countBadge then primary.countBadge:Hide() end
+        primary._clusterMembers = nil
+        for _, m in ipairs(members) do
+            m._isClusterMember = false
+            if m ~= primary and m._nextX then
+                m:Show()
+            end
+        end
+    end
+    activeClusters = {}
+end
+
+local function applyClusters()
+    if not L3FToolsDB or not L3FToolsDB.guildMap then return end
+    if L3FToolsDB.guildMap.showOnWorldMap == false then
+        clearClusters()
+        return
+    end
+    -- Only useful when the world map is up; pin centers are stale otherwise.
+    if not WorldMapFrame or not WorldMapFrame:IsShown() then
+        clearClusters()
+        return
+    end
+
+    clearClusters()
+    local clusters = detectClusters()
+    for _, c in ipairs(clusters) do
+        local primary = c.primary
+        for _, m in ipairs(c.members) do
+            if m ~= primary then
+                m:Hide()
+                m._isClusterMember = true
+            else
+                m._isClusterMember = false
+            end
+        end
+        if not primary.countBadge then
+            primary.countBadge = primary:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            primary.countBadge:SetPoint("TOPRIGHT", primary, "TOPRIGHT", 8, 6)
+        end
+        primary.countBadge:SetText(string.format("|cffffd100x%d|r", #c.members))
+        primary.countBadge:Show()
+        primary._clusterMembers = c.members
+        activeClusters[primary] = c.members
+    end
+end
+
+C_Timer.NewTicker(CLUSTER_TICK, applyClusters)
+
+GM.OpenClusterMenuFor = function(frame)
+    if frame and frame._clusterMembers then
+        showClusterMenu(frame._clusterMembers)
+        return true
+    end
+    return false
+end
 
 
 -- =============================================================
