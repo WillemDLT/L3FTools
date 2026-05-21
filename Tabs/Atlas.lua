@@ -1043,7 +1043,7 @@ local function buildDetailPane(parent)
                 addLine(nil, placeholder)
                 -- Re-flow on resize: the placeholder is a single
                 -- wrapping FontString; same callback pattern Notes uses.
-                local txt = subTabContent.body:GetRegions and ({subTabContent.body:GetRegions()})[1]
+                local txt = subTabContent.body.GetRegions and ({subTabContent.body:GetRegions()})[1]
                 if txt then
                     subTabContent.body.onWidthChange = function()
                         subTabContent.body:SetHeight(math.max(txt:GetStringHeight() + 8, 1))

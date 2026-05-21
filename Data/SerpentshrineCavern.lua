@@ -18,7 +18,7 @@ L3F:RegisterRaid({
                 { id = 21215, name = "Leotheras the Blind",    marks = {8},
                   spells = { 37640, 37676, 37675 },
                   notes = "Alternates 60s Human form (Whirlwind aggro-resets and bleeds - spread out, pause DPS at transitions) with 60s Demon form (tanked by a fire-resist warlock soaking Chaos Blast). Demon phase: Insidious Whisper spawns Inner Demons that each target one player who must kill their own before phase ends or get MC'd. At 15% he splits into both forms - burn fast." },
-                { id = 21875, name = "Shadow of Leotheras",    marks = {7}
+                { id = 21875, name = "Shadow of Leotheras",    marks = {7},
                   spells = { 37675 }, },
                 { id = 21214, name = "Fathom-Lord Karathress", marks = {8},
                   spells = { 38441, 38455, 38452, 38451 },
