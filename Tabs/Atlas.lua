@@ -1216,7 +1216,12 @@ local function buildAtlas(parent)
     L3F.RefreshDetailPane()
 end
 
--- minWidth: the 3-pane layout (tree 200 + list 200 + detail) plus the
--- detail-pane sub-tab strip (Spells/Notes/Drops/Location/Lore) needs ~800
--- before the right-hand sub-tabs start clipping off the edge.
-L3F.RegisterTab("atlas", "Atlas", nil, buildAtlas, { minWidth = 800 })
+-- minWidth: 3-pane layout (tree 200 + list 200 + detail) where detail
+-- itself is split into modelHost (240) + infoHost. The infoHost hosts
+-- the sub-tab strip (Spells/Notes/Drops/Location/Lore) and the strip
+-- leaves a 60px buffer for the top-right L3F logo. At minimum the
+-- 5 sub-tab buttons clamp to 40px each (5*40 + 4 gap*4 = 216 needed).
+-- Walking back: subStrip >= 216, infoHost >= 276, detailPane >= 532,
+-- mainFrame >= 960. Below that, the rightmost buttons (Location, Lore)
+-- start to overflow the subStrip and collide with the L3F logo.
+L3F.RegisterTab("atlas", "Atlas", nil, buildAtlas, { minWidth = 960 })
