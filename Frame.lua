@@ -10,7 +10,35 @@
 
 local addonName, L3F = ...
 
-local MIN_WIDTH, MIN_HEIGHT = 700, 400
+local MIN_HEIGHT = 400
+
+-- Dynamic minimum width. Combines:
+--   (a) Row 1 tab-strip floor: enough room for every top-level tab button.
+--   (b) Row 2 sub-tab strip floor: widest sub-tab parent's row, accounting
+--       for the brick-wall offset.
+--   (c) The largest per-tab `minWidth` declared in any L3F.RegisterTab opts.
+-- Lazy-evaluated and cached so every per-tab file gets a chance to register
+-- before the first read.
+local _minWidthCache
+local function getMinWidth()
+    if _minWidthCache then return _minWidthCache end
+    local BTN_W, GAP, PAD, BRICK = 120, 4, 12, 60
+    local nTop = #L3F.tabOrder
+    local stripMin = PAD + nTop * BTN_W + math.max(0, nTop - 1) * GAP
+    local subStripMin = 0
+    for _, subList in pairs(L3F.subTabOrder) do
+        local n = #subList
+        local w = PAD + BRICK + n * BTN_W + math.max(0, n - 1) * GAP
+        if w > subStripMin then subStripMin = w end
+    end
+    local contentMin = 0
+    for _, t in pairs(L3F.tabs) do
+        local m = t.minWidth or 0
+        if m > contentMin then contentMin = m end
+    end
+    _minWidthCache = math.max(stripMin, subStripMin, contentMin, 400)
+    return _minWidthCache
+end
 
 -- Max size = UIParent minus a 20px margin on each side, so the resize
 -- grip stays grabbable. Computed dynamically each time it's needed - if
@@ -18,8 +46,8 @@ local MIN_WIDTH, MIN_HEIGHT = 700, 400
 -- next time they grab the grip.
 local function getMaxSize()
     local sw, sh = UIParent:GetSize()
-    return math.max(MIN_WIDTH,  math.floor((sw or 1280) - 40)),
-           math.max(MIN_HEIGHT, math.floor((sh or 768)  - 40))
+    return math.max(getMinWidth(), math.floor((sw or 1280) - 40)),
+           math.max(MIN_HEIGHT,    math.floor((sh or 768)  - 40))
 end
 
 -- Tab registry. Each entry: { name, label, icon, builder, frame, built, parent }
@@ -36,6 +64,10 @@ function L3F.RegisterTab(name, label, icon, builder, opts)
         name = name, label = label, icon = icon,
         builder = builder, frame = nil, built = false,
         parent = parent,
+        -- Optional declared minimum content width. Feeds into getMinWidth()
+        -- above so the user can't shrink the window below what this tab
+        -- needs to render its UI without clipping.
+        minWidth = opts and opts.minWidth or nil,
     }
     if parent then
         L3F.subTabOrder[parent] = L3F.subTabOrder[parent] or {}
@@ -237,10 +269,11 @@ end
 
 local function applyResizeBounds(frame)
     local maxW, maxH = getMaxSize()
+    local minW = getMinWidth()
     if frame.SetResizeBounds then
-        frame:SetResizeBounds(MIN_WIDTH, MIN_HEIGHT, maxW, maxH)
+        frame:SetResizeBounds(minW, MIN_HEIGHT, maxW, maxH)
     elseif frame.SetMinResize then
-        frame:SetMinResize(MIN_WIDTH, MIN_HEIGHT)
+        frame:SetMinResize(minW, MIN_HEIGHT)
         if frame.SetMaxResize then frame:SetMaxResize(maxW, maxH) end
     end
 end
@@ -280,8 +313,11 @@ function L3F.BuildFrame()
     -- We don't write the clamped value back to db - if the player later
     -- comes back on a larger screen, the original size is restored.
     local maxW, maxH = getMaxSize()
-    local loadW = math.min(L3F.db.window.width or 900, maxW)
-    local loadH = math.min(L3F.db.window.height or 560, maxH)
+    -- Clamp saved size against the dynamic min in addition to the screen
+    -- max, so a width saved before a new tab raised getMinWidth() snaps
+    -- back up to the new minimum instead of starting clipped.
+    local loadW = math.max(getMinWidth(), math.min(L3F.db.window.width  or 900, maxW))
+    local loadH = math.max(MIN_HEIGHT,    math.min(L3F.db.window.height or 560, maxH))
     mainFrame:SetSize(loadW, loadH)
     -- DIALOG strata so add-on UI icons (WeakAuras, BigWigs bars, ...) at
     -- HIGH don't draw on top of our menu. The hover preview matches.

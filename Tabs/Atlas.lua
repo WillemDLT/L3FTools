@@ -1216,4 +1216,7 @@ local function buildAtlas(parent)
     L3F.RefreshDetailPane()
 end
 
-L3F.RegisterTab("atlas", "Atlas", nil, buildAtlas)
+-- minWidth: the 3-pane layout (tree 200 + list 200 + detail) plus the
+-- detail-pane sub-tab strip (Spells/Notes/Drops/Location/Lore) needs ~800
+-- before the right-hand sub-tabs start clipping off the edge.
+L3F.RegisterTab("atlas", "Atlas", nil, buildAtlas, { minWidth = 800 })
