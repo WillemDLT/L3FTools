@@ -150,10 +150,10 @@ local DEFAULTS = {
         sizeW      = 280,
         sizeH      = 540,
     },
-    -- Minimap button
+    -- Minimap button (LibDBIcon-managed; see Minimap.lua)
     minimap = {
-        hide  = false,
-        angle = 200,
+        hide       = false,
+        minimapPos = 200,   -- degrees around the minimap; LibDBIcon reads/writes this key
     },
     -- Guild Map module (live position sharing on world map + minimap)
     guildMap = {
@@ -194,6 +194,17 @@ end
 
 local function initDB()
     L3FToolsDB = L3FToolsDB or {}
+    -- One-time migration: older builds used a custom minimap button that
+    -- saved its angle under `angle`. LibDBIcon (now used by Minimap.lua)
+    -- reads/writes the angle under `minimapPos`. Carry the user's saved
+    -- position across the rename. Runs BEFORE deepCopyDefaults so the
+    -- default minimapPos=200 doesn't overwrite the migrated value.
+    if L3FToolsDB.minimap
+       and L3FToolsDB.minimap.minimapPos == nil
+       and L3FToolsDB.minimap.angle then
+        L3FToolsDB.minimap.minimapPos = L3FToolsDB.minimap.angle
+        L3FToolsDB.minimap.angle = nil
+    end
     deepCopyDefaults(L3FToolsDB, DEFAULTS)
     -- First-ever launch: enable Automarker for every NPC we know about.
     if not L3FToolsDB.automarker._initialized then
