@@ -205,7 +205,14 @@ local function buildMinimapButton()
     L3FToolsDB.guildMap.pinsButton = L3FToolsDB.guildMap.pinsButton or {}
     local saved = L3FToolsDB.guildMap.pinsButton
 
-    local b = CreateFrame("Button", MM_BTN_NAME, Minimap)
+    -- Parent: UIParent, NOT Minimap. This is the universal opt-out
+    -- against collectors that walk Minimap:GetChildren() and grab
+    -- anything that looks like a button (Chinchilla, SexyMap, sArena
+    -- minimap module, MBF aggressive mode, etc.). The button still
+    -- lives on the minimap rim because every SetPoint below is
+    -- ANCHORED to Minimap by reference - relational anchors don't
+    -- care about parent. Drag math reads Minimap:GetCenter() too.
+    local b = CreateFrame("Button", MM_BTN_NAME, UIParent)
     b._db = saved
     b:SetFrameStrata("MEDIUM")
     b:SetSize(31, 31)
@@ -264,7 +271,18 @@ local function buildMinimapButton()
 
     updateMinimapButtonPosition(b, saved.minimapPos or 220)
 
-    if saved.hide then b:Hide() else b:Show() end
+    -- Initial visibility: respect saved.hide AND Minimap's current
+    -- shown state (parented to UIParent, so we don't auto-hide with
+    -- the minimap any more; have to sync manually).
+    if saved.hide or not Minimap:IsShown() then b:Hide() else b:Show() end
+
+    -- Mirror Minimap visibility going forward. Without this, the
+    -- button stays on screen even when the user / a Minimap-managing
+    -- addon hides the minimap.
+    Minimap:HookScript("OnHide", function() b:Hide() end)
+    Minimap:HookScript("OnShow", function()
+        if not saved.hide then b:Show() end
+    end)
 
     minimapBuilt = true
 
