@@ -153,7 +153,9 @@ end
 -- and tinted to the source color, so only a thin ring of source
 -- color shows around the class icon - and the corners of the frame
 -- stay transparent (which the old solid-color backdrop did not).
-local SKULL_TEXTURE = "Interface\\AddOns\\L3FTools\\Media\\Skull"
+local SKULL_TEXTURE       = "Interface\\AddOns\\L3FTools\\Media\\Skull"
+local AFK_WORLD_TEXTURE   = "Interface\\AddOns\\L3FTools\\Media\\MapAFK"
+local AFK_MINIMAP_TEXTURE = "Interface\\AddOns\\L3FTools\\Media\\MinimapAFK"
 
 -- Role labels + colors. Self-assigned roles arrive as entry.roles,
 -- a string of T/H/D chars in canonical T-H-D order. Tested as
@@ -187,17 +189,21 @@ local function applyClassAndSource(frame, class, source)
     end
 end
 
--- Wrapper that adds the dead-broadcaster swap. The skull stays for the
--- WHOLE death sequence - corpse (hp==0) AND ghost (UnitIsDeadOrGhost on
--- the broadcaster side, carried as entry.dead in the packet). Ghosts
--- have non-zero hp, so the hp==0 check alone would drop the skull the
--- moment the player releases their spirit. Source-tinted ring + HP bar
--- stay on top so you can still see who and where. Re-runs on every
--- roster update + every 2s safety tick, so revival flips the icon back.
-local function applyWorldPinAppearance(frame, class, source, isDead)
+-- Wrapper that adds the dead-broadcaster + AFK swaps.
+-- * Dead (corpse + ghost via UnitIsDeadOrGhost on the broadcaster):
+--   class icon -> Skull. Stays through the whole death sequence.
+-- * AFK (game's UnitIsAFK on the broadcaster): class icon -> MapAFK.
+-- Priority: dead wins over AFK. Source-tinted ring + HP bar stay in
+-- both states.
+local function applyWorldPinAppearance(frame, class, source, isDead, isAfk)
     applyClassAndSource(frame, class, source)
-    if frame.icon and isDead then
+    if not frame.icon then return end
+    if isDead then
         frame.icon:SetTexture(SKULL_TEXTURE)
+        frame.icon:SetTexCoord(0, 1, 0, 1)
+        frame.icon:SetVertexColor(1, 1, 1, 1)
+    elseif isAfk then
+        frame.icon:SetTexture(AFK_WORLD_TEXTURE)
         frame.icon:SetTexCoord(0, 1, 0, 1)
         frame.icon:SetVertexColor(1, 1, 1, 1)
     end
@@ -623,7 +629,11 @@ local function buildWorldPinFrame()
     f:SetScript("OnEnter", function(self)
         if not self._name then return end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine(self._name)
+        local nameLine = self._name
+        if self._afk then
+            nameLine = "|cffaaaaaa(AFK)|r " .. nameLine
+        end
+        GameTooltip:AddLine(nameLine)
         GameTooltip:AddLine(string.format("Level %d %s", self._level or 0, self._class or "?"), 1, 1, 1)
         if self._hp then GameTooltip:AddLine(string.format("HP: %d%%", self._hp), 1, 1, 1) end
         if self._roles and self._roles ~= "" then
@@ -679,11 +689,13 @@ end
 -- renders as a narrow tall pin with horizontal padding).
 local MINI_PIN_TEXTURE = "Interface\\AddOns\\L3FTools\\Media\\CheesePin"
 
-local function applyMinimapPin(frame)
-    if frame.icon then
-        frame.icon:SetTexture(MINI_PIN_TEXTURE)
-        frame.icon:SetVertexColor(1, 1, 1, 1)
-    end
+local function applyMinimapPin(frame, isAfk)
+    if not frame.icon then return end
+    -- AFK swaps the CheesePin out for the MinimapAFK glyph. Dead has
+    -- no minimap-side swap by design (CheesePin stays even for corpses;
+    -- the world-pin skull carries that signal).
+    frame.icon:SetTexture(isAfk and AFK_MINIMAP_TEXTURE or MINI_PIN_TEXTURE)
+    frame.icon:SetVertexColor(1, 1, 1, 1)
 end
 
 local function buildMinimapPinFrame()
@@ -696,7 +708,11 @@ local function buildMinimapPinFrame()
     f:SetScript("OnEnter", function(self)
         if not self._name then return end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine(self._name)
+        local nameLine = self._name
+        if self._afk then
+            nameLine = "|cffaaaaaa(AFK)|r " .. nameLine
+        end
+        GameTooltip:AddLine(nameLine)
         GameTooltip:AddLine(string.format("Level %d %s", self._level or 0, self._class or "?"), 1, 1, 1)
         GameTooltip:Show()
     end)
@@ -776,18 +792,21 @@ local function upsertPin(short, entry)
         wf._class = entry.class
         wf._hp    = entry.hp
         wf._roles = entry.roles or ""
+        wf._afk   = entry.afk and true or false
 
         -- "Dead" covers corpse (hp==0) AND ghost (entry.dead from the
         -- broadcaster's UnitIsDeadOrGhost). Older clients on the 7-field
         -- wire format won't set entry.dead, so we keep the hp==0 fallback.
         local isDead = entry.dead or (entry.hp == 0)
+        local isAfk  = entry.afk and not isDead   -- dead beats afk
 
-        applyWorldPinAppearance(wf, entry.class, entry.source or "guild", isDead)
+        applyWorldPinAppearance(wf, entry.class, entry.source or "guild", isDead, isAfk)
 
         local sizeMul = gm.worldPinSize or 1.0
         wf:SetSize(22 * sizeMul, 22 * sizeMul)
         -- Dead broadcasters get a bigger skull so it reads as "dead" at a
-        -- glance instead of just "icon swap". Skull overflows the source
+        -- glance instead of just "icon swap". AFK keeps the normal class-
+        -- icon size (less dramatic state). Skull overflows the source
         -- ring by a few px on each side - deliberate emphasis.
         local iconBase = isDead and 28 or 18
         wf.icon:SetSize(iconBase * sizeMul, iconBase * sizeMul)
@@ -844,7 +863,8 @@ local function upsertPin(short, entry)
         mf._class = entry.class
         mf._short = short
 
-        applyMinimapPin(mf)
+        mf._afk = entry.afk and true or false
+        applyMinimapPin(mf, mf._afk)
 
         local sizeMul = gm.minimapPinSize or 1.0
         mf:SetSize(16 * sizeMul, 16 * sizeMul)

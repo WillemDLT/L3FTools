@@ -334,6 +334,7 @@ local function buildRosterPanel(parent)
                 isGuildie    = onlineG[short] ~= nil,
                 isFriend     = onlineF[short] ~= nil,
                 roles        = entry.roles or "",
+                afk          = entry.afk and true or false,
             })
         end
         for short, info in pairs(onlineG) do
@@ -399,6 +400,12 @@ local function buildRosterPanel(parent)
             local nameStr, levelStr, suffix
             if e.broadcasting then
                 nameStr  = string.format("|cff%s%s|r", hex, e.name or "?")
+                if e.afk then
+                    -- (AFK) marker in neutral gray, BEFORE the class-
+                    -- colored name on the row. Matches the world / minimap
+                    -- pin tooltip treatment.
+                    nameStr = "|cffaaaaaa(AFK)|r " .. nameStr
+                end
                 levelStr = string.format("|cff888888L%d|r", e.level or 0)
                 -- Membership-based tag, NOT broadcast-channel based. A
                 -- player who is both a guildy and a friend gets the
