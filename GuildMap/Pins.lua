@@ -221,16 +221,26 @@ local function buildWorldPinFrame()
     return f
 end
 
+-- Minimap pin: a single source-tinted dot, no class icon. Morphéours
+-- wants minimap pins clearly readable at small size — the class icon
+-- gets crammed/blurred at 12px, so we trade per-class info for a clean
+-- gold/green/purple dot indicating which source the broadcast came from.
+local DOT_TEXTURE = "Interface\\AddOns\\L3FTools\\Media\\Dot"
+
+local function applyDotForSource(frame, source)
+    local c = SOURCE_BORDER[source] or SOURCE_BORDER.guild
+    if frame.dot then
+        frame.dot:SetTexture(DOT_TEXTURE)
+        frame.dot:SetVertexColor(c[1], c[2], c[3], 1)
+    end
+end
+
 local function buildMinimapPinFrame()
     local f = CreateFrame("Frame", nil, UIParent)
-    f:SetSize(14, 14)
+    f:SetSize(12, 12)
 
-    f.border = f:CreateTexture(nil, "BACKGROUND")
-    f.border:SetAllPoints()
-
-    f.icon = f:CreateTexture(nil, "ARTWORK")
-    f.icon:SetPoint("CENTER", f, "CENTER", 0, 0)
-    f.icon:SetSize(12, 12)
+    f.dot = f:CreateTexture(nil, "ARTWORK")
+    f.dot:SetAllPoints()
 
     f:SetScript("OnEnter", function(self)
         if not self._name then return end
@@ -357,11 +367,10 @@ local function upsertPin(short, entry)
         mf._level = entry.level
         mf._class = entry.class
 
-        applyClassAndSource(mf, entry.class, entry.source or "guild")
+        applyDotForSource(mf, entry.source or "guild")
 
         local sizeMul = gm.minimapPinSize or 1.0
-        mf:SetSize(14 * sizeMul, 14 * sizeMul)
-        mf.icon:SetSize(12 * sizeMul, 12 * sizeMul)
+        mf:SetSize(12 * sizeMul, 12 * sizeMul)
 
         HBDPins:RemoveMinimapIcon(REF_NAME, mf)
         -- showInParentZone=true (let sub-zone pins show on the parent map),

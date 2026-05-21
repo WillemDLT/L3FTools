@@ -2,12 +2,18 @@
 -- L3FTools - GuildMap/PinToggle.lua
 -- =============================================================
 -- Two buttons whose only job is to show/hide L3FTools map pins:
---   1. A LibDBIcon minimap button (Questie-style; separate from the
---      main L3F button so users can hide pins without leaving the
---      addon's main window behind).
---   2. A button anchored to the top-right of WorldMapFrame in the
---      same visual style, so you can toggle pins from the world map
---      without minimizing it.
+--   1. A LibDBIcon minimap button (separate from the main L3F
+--      button so users can hide pins without leaving the addon's
+--      main window behind).
+--   2. A button anchored to WorldMapFrame via Krowi_WorldMapButtons
+--      (same library RareScanner uses) so it lands in the standard
+--      "extra buttons" stack instead of floating in the title bar.
+--
+-- Visual style on both buttons matches the LibDBIcon ring + icon
+-- look: UI-Minimap-Background disc, the CheesePin icon Willem
+-- shipped, and MiniMap-TrackingBorder for the gold ring. LibDBIcon
+-- supplies that stack for the minimap button on its own; the world
+-- map button rebuilds it manually (RSWorldMapButtonTemplate pattern).
 --
 -- Both flip L3FToolsDB.guildMap.pinsHidden. Pins.lua reads that flag
 -- in upsertPin() (master override; takes precedence over the
@@ -19,7 +25,7 @@ local addonName, L3F = ...
 local GM = L3F.GuildMap
 if not GM then return end
 
-local ICON_PATH = "Interface\\AddOns\\L3FTools\\Media\\L3F"
+local ICON_PATH = "Interface\\AddOns\\L3FTools\\Media\\CheesePin"
 local LDB_NAME  = "L3FToolsMapPins"
 
 local function isPinsHidden()
@@ -82,41 +88,52 @@ end
 -- =============================================================
 -- 2) World Map button
 -- =============================================================
--- Visual stack: a class-circle disc (vertex-tinted gold to match the
--- LibDBIcon ring look) plus the L3F icon on top. Anchored to the
--- top-right of WorldMapFrame, offset left of the close button so it
--- never overlaps the existing world map UI.
+-- Anchoring goes through Krowi_WorldMapButtons-1.4, the same library
+-- RareScanner uses. It stacks our button next to the existing
+-- WorldMapFrame buttons (tracking pin, tracking options) so we never
+-- overlap them and the placement matches what Morphéours expects.
+--
+-- Visual stack borrowed from RareScanner's RSWorldMapButtonTemplate:
+--   * BG       UI-Minimap-Background          25x25 at (2, -4)
+--   * Icon     L3FTools\Media\CheesePin       20x20 at (7.2, -6)
+--   * Border   MiniMap-TrackingBorder         54x54 at (0, 0)
+--   * Highlight UI-Minimap-ZoomButton-Highlight (ADD blend)
 local function buildWorldMapButton()
     if _G.L3FToolsMapPinWorldMapButton then return end
     if not WorldMapFrame then return end
 
-    local b = CreateFrame("Button", "L3FToolsMapPinWorldMapButton", WorldMapFrame)
-    b:SetSize(26, 26)
-    b:SetFrameStrata("HIGH")
-    b:SetFrameLevel((WorldMapFrame:GetFrameLevel() or 0) + 10)
-    -- Anchor: left of the world map's close button. -42 leaves room
-    -- for the close button + the dropdown to its left in TBC.
-    b:SetPoint("TOPRIGHT", WorldMapFrame, "TOPRIGHT", -42, -4)
+    local krowi = LibStub and LibStub("Krowi_WorldMapButtons-1.4", true)
+    if not krowi then return end
 
-    -- Gold disc (uses the warrior class-circle texture as a generic
-    -- circular shape, vertex-tinted gold).
-    b.disc = b:CreateTexture(nil, "BACKGROUND")
-    b.disc:SetTexture("Interface\\TargetingFrame\\UI-Classes-Circles")
-    b.disc:SetTexCoord(0, 0.25, 0, 0.25)  -- top-left quadrant: WARRIOR
-    b.disc:SetVertexColor(1.00, 0.84, 0.00, 0.85)
-    b.disc:SetAllPoints()
+    local b = krowi:Add(nil, "Button")
+    if not b then return end
 
-    -- L3F brand icon on top.
-    b.icon = b:CreateTexture(nil, "ARTWORK")
-    b.icon:SetTexture(ICON_PATH)
-    b.icon:SetPoint("CENTER", b, "CENTER", 0, 0)
-    b.icon:SetSize(18, 18)
+    -- Stable global name for the slash-toggle / RefreshVisual hookups.
+    -- (Krowi gives the frame its own name; we add an alias for ours.)
+    _G.L3FToolsMapPinWorldMapButton = b
 
-    -- Highlight on hover.
-    local h = b:CreateTexture(nil, "HIGHLIGHT")
-    h:SetTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
-    h:SetAllPoints()
-    h:SetBlendMode("ADD")
+    b:SetSize(32, 32)
+
+    -- BACKGROUND disc
+    b.Background = b:CreateTexture(nil, "BACKGROUND")
+    b.Background:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
+    b.Background:SetSize(25, 25)
+    b.Background:SetPoint("TOPLEFT", b, "TOPLEFT", 2, -4)
+    b.Background:SetVertexColor(1, 1, 1, 1)
+
+    -- Icon
+    b.Icon = b:CreateTexture(nil, "ARTWORK")
+    b.Icon:SetTexture(ICON_PATH)
+    b.Icon:SetSize(20, 20)
+    b.Icon:SetPoint("TOPLEFT", b, "TOPLEFT", 7.2, -6)
+
+    -- Tracking-border ring (slightly larger than the button itself).
+    b.Border = b:CreateTexture(nil, "OVERLAY", nil, 1)
+    b.Border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+    b.Border:SetSize(54, 54)
+    b.Border:SetPoint("TOPLEFT", b, "TOPLEFT", 0, 0)
+
+    b:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight", "ADD")
 
     b:RegisterForClicks("LeftButtonUp")
     b:SetScript("OnClick", function() togglePinsHidden() end)
@@ -131,10 +148,14 @@ local function buildWorldMapButton()
     end)
     b:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    -- Dim the icon when pins are hidden, so the visual state matches.
+    -- Krowi calls button:Refresh() on RefreshOverlayFrames / OnMapChanged.
+    -- Our button is static; no state to re-fetch on map change.
+    b.Refresh = function() end
+
+    -- Dim the icon when pins are hidden so the visual state matches.
     b.RefreshVisual = function(self)
         local hidden = isPinsHidden()
-        self.icon:SetVertexColor(1, 1, 1, hidden and 0.35 or 1.0)
+        self.Icon:SetVertexColor(1, 1, 1, hidden and 0.35 or 1.0)
     end
     b:RefreshVisual()
 end
