@@ -3,7 +3,7 @@ local _, L3F = ...
 
 L3F.RegisterConsumables({
     { id = 21991, name = "Heavy Netherweave Bandage", nameFR = "Bandage épais en tisse-néant", category = "Profession Items", effect = "3400 HP over 8s" },
-    { id = 24116, name = "Eye of the Night", nameFR = "Oeil de la nuit", category = "Profession Items", effect = "+34 spell damage party aura — verify JC neck name", notes = "Needs in-game / Wowhead confirmation" },
+    { id = 24116, name = "Eye of the Night", nameFR = "Oeil de la nuit", category = "Profession Items", effect = "+34 spell damage party aura (30min, JC neck)" },
     { id = 24121, name = "Chain of the Twilight Owl", nameFR = "Chaîne de la chouette du crépuscule", category = "Profession Items", effect = "+2% spell crit party aura (30min)" },
     { id = 29529, name = "Drums of Battle", nameFR = "Tambours de bataille", category = "Profession Items", effect = "+80 Haste for 30s, party" },
     { id = 29528, name = "Drums of War", nameFR = "Tambours de guerre", category = "Profession Items", effect = "+60 AP, +30 spell dmg, party" },

@@ -18,16 +18,16 @@
 --   * Raid selected     -> the raid's NPCs grouped by wing with headers.
 --   * Heroic selected   -> the dungeon's NPCs.
 --
--- Right pane: model + sub-tabs (Spells / Notes / Drops / Location / Lore).
--- Drops sub-tab shows the item icon, name (coloured by quality) and chance.
+-- Right pane: model + sub-tabs (Spells / Notes / Drops).
+-- Drops sub-tab shows the item icon, name (coloured by quality) and chance,
+-- with NORMAL/HEROIC sub-headers when a heroic-dungeon boss has both modes.
 -- =============================================================
 
 local addonName, L3F = ...
 
-local SUB_TABS = { "spells", "notes", "drops", "location", "lore" }
+local SUB_TABS = { "spells", "notes", "drops" }
 local SUB_TAB_LABELS = {
     spells = "Spells", notes = "Notes", drops = "Drops",
-    location = "Location", lore = "Lore",
 }
 
 -- Consumable-specific sub-tab strip (a separate strip, shown when a
@@ -1144,12 +1144,30 @@ local function buildDetailPane(parent)
 
         elseif sub == "drops" then
             if npc.drops and #npc.drops > 0 then
-                local y = 0
+                -- Split into Normal / Heroic. Heroic-only entries (heroic
+                -- dungeon bosses) ship without name + chance - GetItemInfo
+                -- populates the name async; we hide the chance label entirely
+                -- so we never display a misleading "0.0%".
+                local normalDrops, heroicDrops = {}, {}
                 for _, drop in ipairs(npc.drops) do
+                    if drop.difficulty == "heroic" then
+                        table.insert(heroicDrops, drop)
+                    else
+                        table.insert(normalDrops, drop)
+                    end
+                end
+
+                local y = 0
+                local function addHeader(label)
+                    local h = subTabContent.body:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+                    h:SetPoint("TOPLEFT", subTabContent.body, "TOPLEFT", 4, -y)
+                    h:SetText(label:upper())
+                    y = y + 16
+                end
+                local function addDropRow(drop)
                     local row = CreateFrame("Button", nil, subTabContent.body)
                     row:SetSize(420, 24)
                     row:SetPoint("TOPLEFT", subTabContent.body, "TOPLEFT", 4, -y)
-                    -- Item icon (async refresh once GetItemInfo populates)
                     local icon = row:CreateTexture(nil, "ARTWORK")
                     icon:SetSize(20, 20); icon:SetPoint("LEFT", row, "LEFT", 0, 0)
                     icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
@@ -1157,9 +1175,16 @@ local function buildDetailPane(parent)
                     lbl:SetPoint("LEFT", icon, "RIGHT", 6, 0); lbl:SetWidth(260); lbl:SetJustifyH("LEFT")
                     lbl:SetText(drop.name or ("Item #" .. drop.id))
                     queueItemUI(drop.id, lbl, icon)
-                    local chance = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-                    chance:SetPoint("LEFT", lbl, "RIGHT", 8, 0)
-                    chance:SetText(string.format("%.1f%%", drop.chance or 0))
+                    -- Hide the chance label entirely when no confirmed % is
+                    -- available (Heroic-mode rows, or any future entry that
+                    -- ships without a chance field). Showing "0.0%" would be
+                    -- misleading - the drop happens, we just don't have a
+                    -- verified rate yet.
+                    if drop.chance and drop.chance > 0 then
+                        local chance = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+                        chance:SetPoint("LEFT", lbl, "RIGHT", 8, 0)
+                        chance:SetText(string.format("%.1f%%", drop.chance))
+                    end
                     row:SetScript("OnEnter", function(self)
                         GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
                         if GameTooltip.SetItemByID then GameTooltip:SetItemByID(drop.id)
@@ -1169,17 +1194,25 @@ local function buildDetailPane(parent)
                     row:SetScript("OnLeave", function() GameTooltip:Hide() end)
                     y = y + 24
                 end
+
+                if #heroicDrops > 0 and #normalDrops > 0 then
+                    addHeader("Normal")
+                    for _, d in ipairs(normalDrops) do addDropRow(d) end
+                    y = y + 4
+                    addHeader("Heroic")
+                    for _, d in ipairs(heroicDrops) do addDropRow(d) end
+                else
+                    -- One mode only - no header needed (raid bosses or any
+                    -- NPC without a heroic table).
+                    for _, d in ipairs(normalDrops) do addDropRow(d) end
+                    for _, d in ipairs(heroicDrops) do addDropRow(d) end
+                end
                 subTabContent.body:SetHeight(math.max(y, 1))
             else
                 local txt = subTabContent.body:CreateFontString(nil, "OVERLAY", "GameFontDisable")
                 txt:SetPoint("TOPLEFT", subTabContent.body, "TOPLEFT", 4, -4)
                 txt:SetText("No drop table for this NPC.")
             end
-
-        else
-            local txt = subTabContent.body:CreateFontString(nil, "OVERLAY", "GameFontDisable")
-            txt:SetPoint("TOPLEFT", subTabContent.body, "TOPLEFT", 4, -4)
-            txt:SetText("Data for '" .. SUB_TAB_LABELS[sub] .. "' coming in v0.3.")
         end
     end
 end
@@ -1190,6 +1223,12 @@ end
 -- =============================================================
 local function buildAtlas(parent)
     ensureState()
+    -- Migration: the "location" and "lore" sub-tabs were dropped in 0.13.0.
+    -- Coerce any saved active key that no longer maps to a button so the
+    -- detail pane lands on Spells instead of falling through to nil.
+    if not SUB_TAB_LABELS[L3F.db.atlas.lastActiveSubTab or ""] then
+        L3F.db.atlas.lastActiveSubTab = "spells"
+    end
     buildTreePane(parent)
     buildListPane(parent)
     buildDetailPane(parent)
@@ -1218,10 +1257,10 @@ end
 
 -- minWidth: 3-pane layout (tree 200 + list 200 + detail) where detail
 -- itself is split into modelHost (240) + infoHost. The infoHost hosts
--- the sub-tab strip (Spells/Notes/Drops/Location/Lore) and the strip
--- leaves a 60px buffer for the top-right L3F logo. At minimum the
--- 5 sub-tab buttons clamp to 40px each (5*40 + 4 gap*4 = 216 needed).
--- Walking back: subStrip >= 216, infoHost >= 276, detailPane >= 532,
--- mainFrame >= 960. Below that, the rightmost buttons (Location, Lore)
--- start to overflow the subStrip and collide with the L3F logo.
+-- the sub-tab strip (Spells/Notes/Drops) and the strip leaves a 60px
+-- buffer for the top-right L3F logo. The 3 sub-tab buttons clamp to
+-- 40px each (3*40 + 4 gap*2 = 128 needed). Walking back: subStrip >= 128,
+-- infoHost >= 188, detailPane >= 444, mainFrame >= 872. We keep 960 as
+-- the floor so the buttons feel comfortable rather than crammed and so
+-- existing saved window widths don't trigger an unexpected resize.
 L3F.RegisterTab("atlas", "Atlas", nil, buildAtlas, { minWidth = 960 })

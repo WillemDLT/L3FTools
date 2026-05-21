@@ -32,7 +32,7 @@ L3F.RegisterConsumables({
     { id = 22847, name = "Major Holy Protection Potion", nameFR = "Potion de protection contre le Sacré majeure", category = "Potions", effect = "" },
     { id = 22844, name = "Major Nature Protection Potion", nameFR = "Potion de protection contre la Nature majeure", category = "Potions", effect = "" },
     { id = 22846, name = "Major Shadow Protection Potion", nameFR = "Potion de protection contre l'Ombre majeure", category = "Potions", effect = "" },
-    { id = 3386, name = "Potion of Curing", nameFR = "Potion de guérison", category = "Potions", effect = "Cures up to 4 poisons (renamed old Poison Resistance Elixir)" },
+    { id = 3386, name = "Potion of Curing", nameFR = "Potion de guérison", category = "Potions", effect = "Cures up to 4 poisons" },
     { id = 9030, name = "Restorative Potion", nameFR = "Potion de restauration", category = "Potions", effect = "Removes 1 magic/curse/poison/disease for 60s" },
     { id = 13462, name = "Purification Potion", nameFR = "Potion de purification", category = "Potions", effect = "Removes 1 curse + disease + poison" },
     { id = 5634, name = "Free Action Potion", nameFR = "Potion de libre action", category = "Potions", effect = "Immune to stun/slow" },

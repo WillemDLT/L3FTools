@@ -5,7 +5,7 @@ L3F.RegisterConsumables({
     { id = 33052, name = "Fisherman's Feast", nameFR = "Festin du pêcheur", category = "Food", effect = "+30 Sta, +20 Spirit" },
     { id = 27667, name = "Spicy Crawdad", nameFR = "Ecrevisse épicée", category = "Food", effect = "+30 Sta, +20 Spirit" },
     { id = 27663, name = "Blackened Sporefish", nameFR = "Poisson-spore noirci", category = "Food", effect = "+20 Sta, +8 MP/5sec" },
-    { id = 33867, name = "Broiled Bloodfin", nameFR = "Aileron-de-sang grillé", category = "Food", effect = "+8 to all magic resistances" },
+    { id = 33867, name = "Broiled Bloodfin", nameFR = "Aileron-de-sang grillé", category = "Food", effect = "+8 to all magic resistances (Outland feast vendor)" },
     { id = 33872, name = "Spicy Hot Talbuk", nameFR = "Talbuk extra piquant", category = "Food", effect = "+20 Hit, +20 Spirit" },
     { id = 27655, name = "Ravager Dog", nameFR = "Croque-ravageur", category = "Food", effect = "+40 AP, +20 Spirit" },
     { id = 27658, name = "Roasted Clefthoof", nameFR = "Sabot-fourchu rôti", category = "Food", effect = "+20 Str, +20 Spirit" },

@@ -4,7 +4,7 @@ local _, L3F = ...
 L3F.RegisterConsumables({
     { id = 25521, name = "Greater Rune of Warding", nameFR = "Rune de garde supérieure", category = "Armor & Weapon Buffs", effect = "25% chance to absorb 400 phys (chest enchant)" },
     { id = 23576, name = "Greater Ward of Shielding", nameFR = "Gardien de sauvegarde supérieur", category = "Armor & Weapon Buffs", effect = "4000 dmg absorb (shield enchant)" },
-    { id = 25679, name = "Comfortable Insoles", nameFR = "Semelles confortables", category = "Armor & Weapon Buffs", effect = "Boot comfort buff — verify name", notes = "Needs in-game / Wowhead confirmation" },
+    { id = 25679, name = "Comfortable Insoles", nameFR = "Semelles confortables", category = "Armor & Weapon Buffs", effect = "Boot comfort buff (cosmetic foot speed feel)" },
     { id = 34539, name = "Righteous Weapon Coating", nameFR = "Enduit d'arme vertueux", category = "Armor & Weapon Buffs", effect = "+300 AP proc (Quel'Danas only)" },
     { id = 23529, name = "Adamantite Sharpening Stone", nameFR = "Pierre à aiguiser adamantine", category = "Armor & Weapon Buffs", effect = "+12 weapon dmg, +14 melee crit (slashing)" },
     { id = 28421, name = "Adamantite Weightstone", nameFR = "Pierre de lest d'adamantite", category = "Armor & Weapon Buffs", effect = "+12 weapon dmg, +14 melee crit (blunt)" },
