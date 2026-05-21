@@ -151,9 +151,15 @@ function L3F.ApplyPlayerMarks()
     if not marks then return end
 
     local inUse = {}
+    -- Filter dead nameplates: a just-died mob's nameplate persists for a
+    -- frame or two after CLEU UNIT_DIED, and GetRaidTargetIndex on it
+    -- still reports the mob's old mark. Without this filter, the restore
+    -- declined on the first death and only fired on the NEXT mob death.
+    -- UnitIsDead returns true the moment HP hits 0, regardless of
+    -- nameplate cleanup timing.
     for i = 1, 40 do
         local u = "nameplate" .. i
-        if UnitExists(u) then
+        if UnitExists(u) and not UnitIsDead(u) then
             local m = GetRaidTargetIndex(u)
             if m then inUse[m] = true end
         end
