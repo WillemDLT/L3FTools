@@ -56,6 +56,12 @@ local MM_BTN_NAME   = "L3FToolsMapPinsToggle"
 -- (button center 10 units INSIDE the rim) restores rim-flush look that
 -- Morpheours expects. Iterate if a future Morpheours report needs it.
 local MM_BTN_RADIUS = -10
+-- SetScale fudge: in theory SetScale(Minimap.effective/UIParent.eff)
+-- should match other LibDBIcon buttons' visual size, but ours renders
+-- slightly larger in practice (likely a small frame-scale chain detail
+-- that's not worth chasing). 0.90 = 10% reduction to match the
+-- surrounding rim buttons.
+local MM_BTN_SCALE_FUDGE = 0.90
 
 -- Minimap-shape quadrant tables (from LibDBIcon - same shapes the
 -- minimap-shape addons advertise via the global GetMinimapShape).
@@ -233,7 +239,7 @@ local function buildMinimapButton()
     -- MM_BTN_RADIUS = -10 above.
     local mmScale = (Minimap.GetEffectiveScale and Minimap:GetEffectiveScale()) or 1
     local upScale = (UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
-    if upScale > 0 then b:SetScale(mmScale / upScale) end
+    if upScale > 0 then b:SetScale((mmScale / upScale) * MM_BTN_SCALE_FUDGE) end
     b:SetFrameStrata("MEDIUM")
     b:SetSize(31, 31)
     b:SetFrameLevel(8)
@@ -259,10 +265,11 @@ local function buildMinimapButton()
     b.icon = b:CreateTexture(nil, "ARTWORK")
     b.icon:SetSize(20, 20)
     b.icon:SetTexture(ICON_PATH)
-    -- Cheese-pin anchored at (7, -7) - same offset we used to force on
-    -- top of LibDBIcon's default in 0.8.4. Centers the pin head over
-    -- the disc instead of riding above it.
-    b.icon:SetPoint("TOPLEFT", 7, -7)
+    -- Cheese-pin anchored at (6, -6.5). Centers the pin head over the
+    -- disc instead of riding above it; tuned by eye against the rim
+    -- ring rather than LibDBIcon's default (7, -7) because the pin's
+    -- visual mass sits slightly off-center inside its own 20x20 art.
+    b.icon:SetPoint("TOPLEFT", 6, -6.5)
 
     b:SetScript("OnClick", function(self, button)
         if button == "LeftButton" then toggleMinimapPins() end
