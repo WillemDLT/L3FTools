@@ -155,6 +155,25 @@ end
 -- stay transparent (which the old solid-color backdrop did not).
 local SKULL_TEXTURE = "Interface\\AddOns\\L3FTools\\Media\\Skull"
 
+-- Role badges (LFG portrait icons). Self-assigned by the broadcaster
+-- from the Map tab; arrive as entry.roles, a string of T/H/D chars in
+-- canonical order. Each role lives in a fixed corner of the world pin
+-- so the layout is predictable regardless of which combination a
+-- player picks.
+local ROLE_TEXTURE = "Interface\\LFGFrame\\UI-LFG-ICON-PORTRAITROLES"
+local ROLE_TCOORDS = {
+    T = { 0,     19/64, 22/64, 41/64 },  -- Tank
+    H = { 20/64, 39/64, 1/64,  20/64 },  -- Healer
+    D = { 20/64, 39/64, 22/64, 41/64 },  -- DPS (Damager)
+}
+local ROLE_COLORS = {
+    T = { 0.27, 0.42, 0.69 },  -- tank blue
+    H = { 0.27, 0.62, 0.27 },  -- healer green
+    D = { 0.78, 0.25, 0.27 },  -- dps red
+}
+local ROLE_LABELS = { T = "Tank", H = "Healer", D = "DPS" }
+local ROLE_BADGE_BASE = 10  -- multiplied by worldPinSize at runtime
+
 local function applyClassAndSource(frame, class, source)
     local c = SOURCE_BORDER[source] or SOURCE_BORDER.guild
     local coords = CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[class]
@@ -297,6 +316,23 @@ end
 local function worldPinOnUpdate(self, elapsed)   pinTick(self, elapsed, applyWorldPinPosition)   end
 local function minimapPinOnUpdate(self, elapsed) pinTick(self, elapsed, applyMinimapPinPosition) end
 
+-- Role-badge factory: builds a single corner badge texture with a
+-- shared role-icon spritesheet. Returns the texture so we can show/hide
+-- and resize per pin update.
+local function makeRoleBadge(frame, role, anchorPoint)
+    local t = frame:CreateTexture(nil, "OVERLAY")
+    t:SetTexture(ROLE_TEXTURE)
+    local tc = ROLE_TCOORDS[role]
+    if tc then t:SetTexCoord(tc[1], tc[2], tc[3], tc[4]) end
+    -- CENTER on the frame's corner = badge straddles the corner half
+    -- inside / half outside. Sits over the class circle's transparent
+    -- corner pixels, so no class-icon detail is occluded.
+    t:SetPoint("CENTER", frame, anchorPoint, 0, 0)
+    t:SetSize(ROLE_BADGE_BASE, ROLE_BADGE_BASE)
+    t:Hide()
+    return t
+end
+
 local function buildWorldPinFrame()
     local f = CreateFrame("Frame", nil, UIParent)
     f:SetSize(22, 22)
@@ -307,6 +343,11 @@ local function buildWorldPinFrame()
     f.icon = f:CreateTexture(nil, "ARTWORK")
     f.icon:SetPoint("CENTER", f, "CENTER", 0, 0)
     f.icon:SetSize(18, 18)
+
+    -- Role badges in fixed corners. Tank = TL, Healer = TR, DPS = BR.
+    f.roleBadgeT = makeRoleBadge(f, "T", "TOPLEFT")
+    f.roleBadgeH = makeRoleBadge(f, "H", "TOPRIGHT")
+    f.roleBadgeD = makeRoleBadge(f, "D", "BOTTOMRIGHT")
 
     -- Thin HP bar above the icon. Anchored to the frame top so it
     -- scales naturally with worldPinSize.
@@ -332,6 +373,24 @@ local function buildWorldPinFrame()
         GameTooltip:AddLine(self._name)
         GameTooltip:AddLine(string.format("Level %d %s", self._level or 0, self._class or "?"), 1, 1, 1)
         if self._hp then GameTooltip:AddLine(string.format("HP: %d%%", self._hp), 1, 1, 1) end
+        if self._roles and self._roles ~= "" then
+            local parts = {}
+            for i = 1, #self._roles do
+                local r = self._roles:sub(i, i)
+                local color = ROLE_COLORS[r]
+                if color then
+                    table.insert(parts, string.format(
+                        "|cff%02x%02x%02x%s|r",
+                        math.floor(color[1] * 255 + 0.5),
+                        math.floor(color[2] * 255 + 0.5),
+                        math.floor(color[3] * 255 + 0.5),
+                        ROLE_LABELS[r] or r))
+                end
+            end
+            if #parts > 0 then
+                GameTooltip:AddLine("Role: " .. table.concat(parts, ", "), 1, 1, 1)
+            end
+        end
         GameTooltip:Show()
     end)
     f:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -349,6 +408,20 @@ local function buildWorldPinFrame()
     f:SetScript("OnUpdate", worldPinOnUpdate)
 
     return f
+end
+
+local function applyRoleBadges(frame, roles, sizeMul)
+    if not frame.roleBadgeT then return end
+    local size = ROLE_BADGE_BASE * (sizeMul or 1)
+    local map = { T = frame.roleBadgeT, H = frame.roleBadgeH, D = frame.roleBadgeD }
+    for k, badge in pairs(map) do
+        if roles and roles:find(k, 1, true) then
+            badge:SetSize(size, size)
+            badge:Show()
+        else
+            badge:Hide()
+        end
+    end
 end
 
 -- Minimap pin: the CheesePin icon (same one as the toggle buttons), no
@@ -456,6 +529,7 @@ local function upsertPin(short, entry)
         wf._level = entry.level
         wf._class = entry.class
         wf._hp    = entry.hp
+        wf._roles = entry.roles or ""
 
         -- "Dead" covers corpse (hp==0) AND ghost (entry.dead from the
         -- broadcaster's UnitIsDeadOrGhost). Older clients on the 7-field
@@ -472,6 +546,7 @@ local function upsertPin(short, entry)
         local iconBase = isDead and 28 or 18
         wf.icon:SetSize(iconBase * sizeMul, iconBase * sizeMul)
         wf.hpBg:SetSize(20 * sizeMul, 3 * sizeMul)
+        applyRoleBadges(wf, wf._roles, sizeMul)
 
         if gm.showName then
             wf.nameText:Show(); wf.nameText:SetText(wf._name)

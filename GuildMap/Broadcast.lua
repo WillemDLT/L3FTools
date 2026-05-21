@@ -6,13 +6,16 @@
 --   * WHISPER - one targeted packet per online friend with L3FTools
 --
 -- Wire format (CSV, single packet, well under the 255-byte limit):
---   name,level,class,x,y,mapID,hp%,dead
--- e.g.  "Willem,70,WARLOCK,0.412,0.587,84,98,0"
+--   name,level,class,x,y,mapID,hp%,dead,roles
+-- e.g.  "Willem,70,WARLOCK,0.412,0.587,84,98,0,TH"
 -- dead is "1" while the player is dead OR a ghost (UnitIsDeadOrGhost) so
 -- the receiver's pin keeps the skull icon for the whole death sequence;
 -- ghosts have non-zero hp so hp==0 alone wasn't enough.
--- The dead field is appended at the END of the CSV, which keeps old
--- clients (which only strsplit the first 7 fields) silently compatible.
+-- roles is up to three chars from {T,H,D} (Tank/Healer/DPS), in canonical
+-- T-H-D order, or empty for none. Self-assigned by the player from the
+-- Map tab. Each role appears as a corner badge on the world pin.
+-- Both dead and roles are appended at the END of the CSV in order, so
+-- clients on an older field count silently ignore the trailing fields.
 --
 -- Send conditions (the master gate + each channel independently):
 --   * not (pauseInInstance AND we are inside a raid instance or BG)
@@ -138,9 +141,17 @@ local function sendNow()
     -- read this flag for the skull-icon swap so the icon doesn't vanish
     -- the moment the player releases.
     local dead  = (UnitIsDeadOrGhost and UnitIsDeadOrGhost("player")) and 1 or 0
+    -- Self-assigned roles. Already canonicalized to T-H-D order when the
+    -- user toggles the Map-tab checkboxes; defensive-canonicalize here
+    -- in case the SavedVariable was hand-edited.
+    local rolesRaw = (L3FToolsDB.guildMap.myRoles) or ""
+    local roles    = ""
+    if rolesRaw:find("T", 1, true) then roles = roles .. "T" end
+    if rolesRaw:find("H", 1, true) then roles = roles .. "H" end
+    if rolesRaw:find("D", 1, true) then roles = roles .. "D" end
 
-    local msg = string.format("%s,%d,%s,%.3f,%.3f,%d,%d,%d",
-        name, level, class, x, y, mapID, hp, dead)
+    local msg = string.format("%s,%d,%s,%.3f,%.3f,%d,%d,%d,%s",
+        name, level, class, x, y, mapID, hp, dead, roles)
 
     -- Both channels go through ChatThrottleLib so a wide friend fan-out
     -- can't blow the per-second cap and trip a disconnect. BULK priority
@@ -226,7 +237,7 @@ local function isSelf(sender)
     return short == UnitName("player")
 end
 
-local function ingest(senderShort, name, level, class, x, y, mapID, hp, dead, source)
+local function ingest(senderShort, name, level, class, x, y, mapID, hp, dead, roles, source)
     local nx = tonumber(x) or 0
     local ny = tonumber(y) or 0
     if nx < 0 or nx > 1 then nx = 0 end
@@ -239,6 +250,15 @@ local function ingest(senderShort, name, level, class, x, y, mapID, hp, dead, so
     if existing and existing.source == "guild" and source == "friend" then
         effectiveSource = "guild"
     end
+    -- Validate + canonicalize roles. Anything that isn't a T/H/D char is
+    -- dropped; canonical order is T-H-D. Missing field (old clients on
+    -- the 8-field wire format) parses as nil -> empty.
+    local cleanedRoles = ""
+    if type(roles) == "string" then
+        if roles:find("T", 1, true) then cleanedRoles = cleanedRoles .. "T" end
+        if roles:find("H", 1, true) then cleanedRoles = cleanedRoles .. "H" end
+        if roles:find("D", 1, true) then cleanedRoles = cleanedRoles .. "D" end
+    end
     roster[senderShort] = {
         name     = name or senderShort,
         level    = tonumber(level) or 0,
@@ -250,6 +270,7 @@ local function ingest(senderShort, name, level, class, x, y, mapID, hp, dead, so
         -- dead is "1" for dead OR ghost. Missing field (old clients on
         -- the 7-field wire format) parses as nil -> evaluates to false.
         dead     = (dead == "1"),
+        roles    = cleanedRoles,
         lastSeen = GetTime(),
         source   = effectiveSource,
     }
@@ -270,10 +291,10 @@ recvFrame:SetScript("OnEvent", function(self, event, prefix, text, channel, send
     else
         return
     end
-    local name, level, class, x, y, mapID, hp, dead = strsplit(",", text)
+    local name, level, class, x, y, mapID, hp, dead, roles = strsplit(",", text)
     if not name then return end
     local short = Ambiguate(sender, "short")
-    ingest(short, name, level, class, x, y, mapID, hp, dead, source)
+    ingest(short, name, level, class, x, y, mapID, hp, dead, roles, source)
 end)
 
 

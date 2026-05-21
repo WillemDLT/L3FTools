@@ -160,6 +160,7 @@ local DEFAULTS = {
         privacyAnswered  = false,  -- set true after the user has answered the first-run popup
         shareWithGuild   = false,  -- broadcast position to guild members with L3FTools
         shareWithFriends = false,  -- whisper-broadcast position to char-friends with L3FTools
+        myRoles          = "",     -- self-assigned roles: subset of "T"/"H"/"D" in canonical TH D order
         -- Auto-pause broadcasting inside any raid instance OR battleground.
         -- (Pre-rename name was pauseInRaidInstance; migrated below.)
         pauseInInstance  = true,

@@ -313,6 +313,7 @@ local function buildRosterPanel(parent)
                 mapID        = entry.mapID,
                 isGuildie    = onlineG[short] ~= nil,
                 isFriend     = onlineF[short] ~= nil,
+                roles        = entry.roles or "",
             })
         end
         for short, info in pairs(onlineG) do
@@ -394,6 +395,13 @@ local function buildRosterPanel(parent)
                 else
                     suffix = ""
                 end
+                -- Append self-assigned role tags (Tank/Healer/DPS) in
+                -- canonical T-H-D order, each in its LFG-standard color.
+                if e.roles and e.roles ~= "" then
+                    if e.roles:find("T", 1, true) then suffix = suffix .. " |cff4566B0(Tank)|r"   end
+                    if e.roles:find("H", 1, true) then suffix = suffix .. " |cff44A044(Healer)|r" end
+                    if e.roles:find("D", 1, true) then suffix = suffix .. " |cffC74045(DPS)|r"    end
+                end
             else
                 -- Greyed: online guildie not running L3FTools.
                 nameStr  = string.format("|cff666666%s|r", e.name or "?")
@@ -464,6 +472,46 @@ local function buildMap(parent)
         "Pause sharing inside raids and battlegrounds",
         function() return db().pauseInInstance end,
         function(v) db().pauseInInstance = v end)
+
+    S:gap(6)
+
+    -- Self-assigned roles (broadcast to other L3F users).
+    -- Canonicalize the string at SET time (T-H-D order) so the wire
+    -- format is always in canonical order.
+    local function roleHas(ch)   return (db().myRoles or ""):find(ch, 1, true) ~= nil end
+    local function setRole(ch, on)
+        local gm = db()
+        local r = gm.myRoles or ""
+        local hasT = (ch == "T") and on or (r:find("T", 1, true) ~= nil)
+        local hasH = (ch == "H") and on or (r:find("H", 1, true) ~= nil)
+        local hasD = (ch == "D") and on or (r:find("D", 1, true) ~= nil)
+        local out = ""
+        if hasT then out = out .. "T" end
+        if hasH then out = out .. "H" end
+        if hasD then out = out .. "D" end
+        gm.myRoles = out
+        -- Fire an immediate broadcast so other players see the change
+        -- without waiting for the next 1s tick.
+        if L3F.GuildMap and L3F.GuildMap.BroadcastNow then
+            L3F.GuildMap.BroadcastNow()
+        end
+    end
+
+    S:gap(2)
+    local roleHdr = leftChild:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    roleHdr:SetPoint("TOPLEFT", leftChild, "TOPLEFT", 4, -S.y)
+    roleHdr:SetText("|cffffd100My roles|r |cffaaaaaa(pick any)|r")
+    S.y = S.y + 18
+
+    S:checkbox("Tank",
+        function() return roleHas("T") end,
+        function(v) setRole("T", v) end)
+    S:checkbox("Healer",
+        function() return roleHas("H") end,
+        function(v) setRole("H", v) end)
+    S:checkbox("DPS",
+        function() return roleHas("D") end,
+        function(v) setRole("D", v) end)
 
     S:gap(8)
 
