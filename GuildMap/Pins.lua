@@ -222,6 +222,16 @@ end
 local LERP_TICK  = 0.1     -- 10 Hz HBD re-position cadence
 local LERP_STALL = 6.0     -- after this long with no new sample, snap and stop animating
 
+-- Pin trail (hover-only, world map only). updateLerpState pushes a
+-- sample into set.samples; showTrail walks those samples to draw a
+-- white-fading breadcrumb behind the hovered pin.
+local TRAIL_DURATION    = 30     -- seconds of history shown
+local TRAIL_DOT_SPACING = 1.0    -- one interpolated dot per second of broadcast gap
+local TRAIL_DOT_SIZE    = 4      -- px (pre-sizeMul; trails are uniform regardless of pin size)
+local SAMPLE_KEEP       = 60     -- seconds buffered (> TRAIL_DURATION for safety)
+local TRAIL_REF         = "L3FToolsTrail"
+local TRAIL_TEXTURE     = "Interface\\AddOns\\L3FTools\\Media\\Dot"
+
 local function lerp(a, b, t) return a + (b - a) * t end
 
 local function computeLerp(L, now)
@@ -259,6 +269,18 @@ local function updateLerpState(set, entry)
     L.nextX, L.nextY, L.nextT = entry.x, entry.y, now + dtEstimate
     L.lastBroadcast = now
     L.mapID = entry.mapID
+
+    -- Record this sample for the pin-trail render. Ring-buffer trimmed
+    -- to SAMPLE_KEEP seconds. Cheap (one append + a couple of removes
+    -- per broadcast) and the storage cost is bounded.
+    set.samples = set.samples or {}
+    local samples = set.samples
+    table.insert(samples, { x = entry.x, y = entry.y, mapID = entry.mapID, t = now })
+    local cutoff = now - SAMPLE_KEEP
+    while samples[1] and samples[1].t < cutoff do
+        table.remove(samples, 1)
+    end
+
     return curX, curY
 end
 
@@ -333,6 +355,114 @@ local function makeRoleBadge(frame, role, anchorPoint)
     return t
 end
 
+
+-- =============================================================
+-- Pin trail (hover-only, world map)
+-- =============================================================
+-- When the user hovers a world pin, we walk that player's recent
+-- broadcast samples (set.samples, populated by updateLerpState) and
+-- render them as a fading white breadcrumb across the world map.
+-- Dots are interpolated between samples that are more than
+-- TRAIL_DOT_SPACING seconds apart, so the trail looks continuous
+-- even when the broadcaster's broadcasts were sparse. Periodic 1s
+-- rebuild keeps the trail current with new broadcasts arriving
+-- while the mouse is still on the pin.
+local trailDots          = {}    -- pool of dot frames
+local activeTrailShort   = nil   -- short-name of the player whose trail is up
+
+local function getTrailDot(i)
+    local d = trailDots[i]
+    if not d then
+        d = CreateFrame("Frame", nil, UIParent)
+        d:SetSize(TRAIL_DOT_SIZE, TRAIL_DOT_SIZE)
+        d.tex = d:CreateTexture(nil, "OVERLAY")
+        d.tex:SetAllPoints()
+        d.tex:SetTexture(TRAIL_TEXTURE)
+        d.tex:SetVertexColor(1, 1, 1, 1)
+        trailDots[i] = d
+    end
+    d:Show()
+    return d
+end
+
+local function clearTrail()
+    if HBDPins.RemoveAllWorldMapIcons then
+        HBDPins:RemoveAllWorldMapIcons(TRAIL_REF)
+    end
+    for _, d in ipairs(trailDots) do d:Hide() end
+    activeTrailShort = nil
+end
+
+local function rebuildTrail()
+    if not activeTrailShort then return end
+    local set = pins[activeTrailShort]
+    if not set or not set.samples or #set.samples < 2 then
+        if HBDPins.RemoveAllWorldMapIcons then
+            HBDPins:RemoveAllWorldMapIcons(TRAIL_REF)
+        end
+        for _, d in ipairs(trailDots) do d:Hide() end
+        return
+    end
+
+    -- Wipe previous dots before re-registering. Same canvas-pool
+    -- discipline as the main pin path - calling AddWorldMapIconMap
+    -- without a Remove leaks providerPins.
+    if HBDPins.RemoveAllWorldMapIcons then
+        HBDPins:RemoveAllWorldMapIcons(TRAIL_REF)
+    end
+
+    local now    = GetTime()
+    local cutoff = now - TRAIL_DURATION
+    local dotIdx = 0
+
+    for i = 2, #set.samples do
+        local a, b = set.samples[i - 1], set.samples[i]
+        -- Skip segments that cross a map boundary - we don't try to
+        -- draw a trail line spanning two different zones.
+        if a.mapID == b.mapID and b.t >= cutoff then
+            local gap   = b.t - a.t
+            local nDots = math.max(1, math.floor(gap / TRAIL_DOT_SPACING))
+            for j = 1, nDots do
+                local frac = j / nDots
+                local pt   = a.t + gap * frac
+                if pt >= cutoff then
+                    local px  = a.x + (b.x - a.x) * frac
+                    local py  = a.y + (b.y - a.y) * frac
+                    local age = now - pt
+                    dotIdx = dotIdx + 1
+                    local d = getTrailDot(dotIdx)
+                    -- Linear alpha fade: 1.0 at head (current) -> ~0 at tail
+                    -- (TRAIL_DURATION old). Floor at 0.05 so the oldest
+                    -- dots remain just barely visible.
+                    d:SetAlpha(math.max(0.05, 1 - age / TRAIL_DURATION))
+                    HBDPins:AddWorldMapIconMap(TRAIL_REF, d, a.mapID, px, py,
+                        HBD_PINS_WORLDMAP_SHOW_WORLD)
+                end
+            end
+        end
+    end
+
+    -- Hide leftover dots from the previous render.
+    for k = dotIdx + 1, #trailDots do trailDots[k]:Hide() end
+end
+
+local function showTrail(short)
+    if activeTrailShort == short then return end
+    clearTrail()
+    activeTrailShort = short
+    rebuildTrail()
+end
+
+-- Refresh the trail every second while one is active, so newly-arrived
+-- broadcasts extend the head of the trail in close-to-real time.
+C_Timer.NewTicker(1, function()
+    if activeTrailShort then rebuildTrail() end
+end)
+
+GM.ShowTrail = showTrail
+GM.HideTrail = clearTrail
+
+
 local function buildWorldPinFrame()
     local f = CreateFrame("Frame", nil, UIParent)
     f:SetSize(22, 22)
@@ -392,8 +522,14 @@ local function buildWorldPinFrame()
             end
         end
         GameTooltip:Show()
+        -- Pin trail: hover-only. Draw the trail for this player while
+        -- the mouse is over the pin; cleared in OnLeave.
+        if self._short then showTrail(self._short) end
     end)
-    f:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    f:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+        clearTrail()
+    end)
     f:SetScript("OnMouseUp", function(self, button)
         if button == "RightButton" and self._name then
             showContextMenu(self._name, self._class)
