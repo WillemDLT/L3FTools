@@ -160,7 +160,9 @@ local DEFAULTS = {
         privacyAnswered  = false,  -- set true after the user has answered the first-run popup
         shareWithGuild   = false,  -- broadcast position to guild members with L3FTools
         shareWithFriends = false,  -- whisper-broadcast position to char-friends with L3FTools
-        myRoles          = "",     -- self-assigned roles: subset of "T"/"H"/"D" in canonical TH D order
+        -- Note: myRoles lives in the PER-CHARACTER savedvar (L3FToolsCharDB),
+        -- not here. The original implementation put it in guildMap which made
+        -- it account-wide; moved out in 0.11.6.
         -- Auto-pause broadcasting inside any raid instance OR battleground.
         -- (Pre-rename name was pauseInRaidInstance; migrated below.)
         pauseInInstance  = true,
@@ -197,7 +199,18 @@ local function deepCopyDefaults(target, defaults)
 end
 
 local function initDB()
-    L3FToolsDB = L3FToolsDB or {}
+    L3FToolsDB     = L3FToolsDB     or {}
+    L3FToolsCharDB = L3FToolsCharDB or {}
+    -- One-time per-character migration: if this character has no
+    -- per-char myRoles yet, seed from the previous account-wide value
+    -- so 0.11.5-and-earlier users don't see their roles wiped on
+    -- upgrade. Each character on the account independently runs this
+    -- on its first 0.11.6+ login; once seeded, each diverges.
+    -- The account-wide field is left in place (orphaned, harmless) so
+    -- alt characters who log in later still get the same seed.
+    if L3FToolsCharDB.myRoles == nil then
+        L3FToolsCharDB.myRoles = (L3FToolsDB.guildMap and L3FToolsDB.guildMap.myRoles) or ""
+    end
     -- One-time migration: older builds used a custom minimap button that
     -- saved its angle under `angle`. LibDBIcon (now used by Minimap.lua)
     -- reads/writes the angle under `minimapPos`. Carry the user's saved

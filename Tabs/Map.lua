@@ -501,11 +501,18 @@ local function buildMap(parent)
 
     -- Self-assigned roles (broadcast to other L3F users).
     -- Canonicalize the string at SET time (T-H-D order) so the wire
-    -- format is always in canonical order.
-    local function roleHas(ch)   return (db().myRoles or ""):find(ch, 1, true) ~= nil end
+    -- format is always in canonical order. Per-character storage: each
+    -- toon on the account picks independently.
+    local function getMyRoles()
+        return (L3FToolsCharDB and L3FToolsCharDB.myRoles) or ""
+    end
+    local function setMyRoles(s)
+        if not L3FToolsCharDB then L3FToolsCharDB = {} end
+        L3FToolsCharDB.myRoles = s
+    end
+    local function roleHas(ch) return getMyRoles():find(ch, 1, true) ~= nil end
     local function setRole(ch, on)
-        local gm = db()
-        local r = gm.myRoles or ""
+        local r = getMyRoles()
         -- Per role: the one being toggled takes `on`; the other two
         -- carry their current value. Earlier attempt used a
         -- `(ch == "T") and on or (r:find(...))` ternary, which is broken
@@ -521,7 +528,7 @@ local function buildMap(parent)
         if hasT then out = out .. "T" end
         if hasH then out = out .. "H" end
         if hasD then out = out .. "D" end
-        gm.myRoles = out
+        setMyRoles(out)
         -- Fire an immediate broadcast so other players see the change
         -- without waiting for the next 1s tick.
         if L3F.GuildMap and L3F.GuildMap.BroadcastNow then

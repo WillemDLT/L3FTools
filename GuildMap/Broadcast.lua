@@ -144,7 +144,9 @@ local function sendNow()
     -- Self-assigned roles. Already canonicalized to T-H-D order when the
     -- user toggles the Map-tab checkboxes; defensive-canonicalize here
     -- in case the SavedVariable was hand-edited.
-    local rolesRaw = (L3FToolsDB.guildMap.myRoles) or ""
+    -- myRoles lives in the PER-CHARACTER savedvar so each toon can be
+    -- a different role on the same account.
+    local rolesRaw = (L3FToolsCharDB and L3FToolsCharDB.myRoles) or ""
     local roles    = ""
     if rolesRaw:find("T", 1, true) then roles = roles .. "T" end
     if rolesRaw:find("H", 1, true) then roles = roles .. "H" end
