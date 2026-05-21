@@ -217,24 +217,22 @@ local LERP_STALL = 6.0     -- after this long with no new sample, snap and stop 
 -- Pin trail (hover-only, world map only). updateLerpState pushes a
 -- sample into set.samples; showTrail walks those samples to draw a
 -- white-fading breadcrumb behind the hovered pin.
-local TRAIL_DURATION    = 30     -- seconds of history shown
-local TRAIL_DOT_SPACING = 1.0    -- one interpolated dot per second of broadcast gap
-local TRAIL_DOT_SIZE    = 4      -- px (pre-sizeMul; trails are uniform regardless of pin size)
-local SAMPLE_KEEP       = 60     -- seconds buffered (> TRAIL_DURATION for safety)
-local TRAIL_DEDUP_EPS   = 0.001  -- treat dots within this normalized distance as "same spot"
-local TRAIL_REF         = "L3FToolsTrail"
-local TRAIL_TEXTURE     = "Interface\\AddOns\\L3FTools\\Media\\Dot"
-
--- Z-order: we set numeric frame levels DIRECTLY on the providerPins
--- rather than via the canvas's PIN_FRAME_LEVEL_* type system. Earlier
--- attempts using the type system (0.11.5/0.11.7) didn't survive the
--- canvas's automatic ApplyFrameLevel passes - the type registration
--- order on TBC 2.5.x apparently doesn't put GROUP_MEMBER below
--- AREA_POI the way Wrath does, so type-derived levels reordered our
--- pins on map refresh events. Direct numeric assignment + a hook on
--- RefreshAllPinFrameLevels gives us a hard guarantee.
-local TRAIL_PIN_FRAME_LEVEL  = 1     -- dots underneath everything else
-local PLAYER_PIN_FRAME_LEVEL = 500   -- well above any plausible canvas-assigned value
+local TRAIL_DURATION         = 30     -- seconds of history shown
+local TRAIL_DOT_SPACING      = 1.0    -- one interpolated dot per second of broadcast gap
+local TRAIL_DOT_SIZE         = 4      -- px (pre-sizeMul; trails are uniform regardless of pin size)
+local SAMPLE_KEEP            = 60     -- seconds buffered (> TRAIL_DURATION for safety)
+local TRAIL_DEDUP_EPS        = 0.001  -- treat dots within this normalized distance as "same spot"
+-- Head buffer: time + zoom-aware distance. After multiple failed
+-- attempts to put the trail in a lower canvas z-layer (0.11.5 / 0.11.7
+-- / 0.11.8) we keep the dots visually clear of the pin instead. The
+-- distance buffer is computed per-render from the canvas's current
+-- scale, so a 25-px clear works at any zoom level (the old fixed
+-- 0.015 normalized was undersized at full zoom-out and oversized
+-- when zoomed in).
+local TRAIL_HEAD_AGE_GAP     = 3.0    -- skip dots younger than this (moving-broadcaster case)
+local TRAIL_HEAD_BUFFER_PX   = 25     -- desired clear gap from pin in screen pixels
+local TRAIL_REF              = "L3FToolsTrail"
+local TRAIL_TEXTURE          = "Interface\\AddOns\\L3FTools\\Media\\Dot"
 
 -- Sonar-ping highlight (triggered by Map-tab roster left-click)
 local HIGHLIGHT_DURATION      = 2.0   -- total animation length
@@ -332,13 +330,18 @@ local function pinTick(self, elapsed, applyPosition)
     applyPosition(self, L.mapID, renderX, renderY)
 end
 
--- Reach the providerPin via icon:GetParent() and force its numeric
--- frame level. Bypasses HBD's type system entirely so we don't
--- depend on PIN_FRAME_LEVEL_* registration order being what we hope.
-local function pinSetFrameLevel(icon, level)
-    if not icon then return end
-    local pp = icon:GetParent()
-    if pp and pp.SetFrameLevel then pp:SetFrameLevel(level) end
+-- Pixels-to-normalized-units conversion at the WorldMap's CURRENT zoom.
+-- The MapCanvasMixin exposes GetCanvasScale (current zoom factor) and
+-- GetCanvasContainer (the visible map area). Width times scale gives
+-- the effective pixel width that one full normalized unit covers; the
+-- buffer in normalized units is then desired-px divided by that.
+local function computeHeadDistBuffer()
+    if not WorldMapFrame then return 0.025 end
+    local scale = (WorldMapFrame.GetCanvasScale and WorldMapFrame:GetCanvasScale()) or 1
+    local container = WorldMapFrame.GetCanvasContainer and WorldMapFrame:GetCanvasContainer()
+    local width = (container and container:GetWidth()) or 600
+    if width <= 0 or scale <= 0 then return 0.025 end
+    return TRAIL_HEAD_BUFFER_PX / (width * scale)
 end
 
 local function applyWorldPinPosition(self, mapID, x, y)
@@ -349,7 +352,6 @@ local function applyWorldPinPosition(self, mapID, x, y)
     -- canvas zoom-scale animation (the "flashing larger" bug).
     HBDPins:RemoveWorldMapIcon(REF_NAME, self)
     HBDPins:AddWorldMapIconMap(REF_NAME, self, mapID, x, y, HBD_PINS_WORLDMAP_SHOW_WORLD)
-    pinSetFrameLevel(self, PLAYER_PIN_FRAME_LEVEL)
 end
 
 local function applyMinimapPinPosition(self, mapID, x, y)
@@ -422,9 +424,18 @@ local function rebuildTrail()
     local dotIdx = 0
     -- Dedup tracker: walk dots oldest-to-newest, skip if the position
     -- matches the last rendered dot within TRAIL_DEDUP_EPS. Collapses
-    -- standing-still stacks down to a single dot at the rest point and
-    -- keeps the data well-behaved at any zoom level.
+    -- standing-still stacks down to a single dot at the rest point.
     local lastX, lastY
+
+    -- Head buffers: skip dots too young (covers moving-broadcaster
+    -- overlap near the pin) AND dots too close to the head in
+    -- normalized coords (covers stationary broadcaster + zoom-out).
+    -- The distance buffer is recomputed PER RENDER from the canvas
+    -- zoom so a 25-px clear works at any zoom level.
+    local headDistBuf = computeHeadDistBuffer()
+    local L           = set.lerp or {}
+    local headX       = L.nextX
+    local headY       = L.nextY
 
     for i = 2, #set.samples do
         local a, b = set.samples[i - 1], set.samples[i]
@@ -436,24 +447,24 @@ local function rebuildTrail()
             for j = 1, nDots do
                 local frac = j / nDots
                 local pt   = a.t + gap * frac
-                if pt >= cutoff then
+                local age  = now - pt
+                if pt >= cutoff and age >= TRAIL_HEAD_AGE_GAP then
                     local px = a.x + (b.x - a.x) * frac
                     local py = a.y + (b.y - a.y) * frac
-                    if not lastX
-                       or math.abs(px - lastX) > TRAIL_DEDUP_EPS
-                       or math.abs(py - lastY) > TRAIL_DEDUP_EPS then
-                        local age = now - pt
+                    local nearHead = headX and
+                        math.abs(px - headX) < headDistBuf and
+                        math.abs(py - headY) < headDistBuf
+                    if not nearHead
+                       and (not lastX
+                            or math.abs(px - lastX) > TRAIL_DEDUP_EPS
+                            or math.abs(py - lastY) > TRAIL_DEDUP_EPS) then
                         dotIdx = dotIdx + 1
                         local d = getTrailDot(dotIdx)
                         -- Linear alpha fade: 1.0 at head -> ~0 at tail.
                         -- Floor at 0.05 so the oldest dots remain barely visible.
                         d:SetAlpha(math.max(0.05, 1 - age / TRAIL_DURATION))
-                        -- Register the dot, then force its providerPin to
-                        -- a low numeric frame level so it draws behind
-                        -- the player pin (set to PLAYER_PIN_FRAME_LEVEL).
                         HBDPins:AddWorldMapIconMap(TRAIL_REF, d, a.mapID, px, py,
                             HBD_PINS_WORLDMAP_SHOW_WORLD)
-                        pinSetFrameLevel(d, TRAIL_PIN_FRAME_LEVEL)
                         lastX, lastY = px, py
                     end
                 end
@@ -480,49 +491,6 @@ end)
 
 GM.ShowTrail = showTrail
 GM.HideTrail = clearTrail
-
-
--- =============================================================
--- Frame-level lock: canvas refresh hook
--- =============================================================
--- The canvas calls WorldMapFrame:RefreshAllPinFrameLevels on map-show
--- and zoom events, which walks every pin and calls ApplyFrameLevel -
--- that derives the level from PIN_FRAME_LEVEL_* type registration.
--- We've set the levels ourselves to numbers OUTSIDE any registered
--- range; ApplyFrameLevel would silently overwrite them. Hook the
--- refresh and re-apply our levels right after.
-local function reapplyFrameLevels()
-    for _, d in ipairs(trailDots) do
-        if d:IsShown() then pinSetFrameLevel(d, TRAIL_PIN_FRAME_LEVEL) end
-    end
-    for _, set in pairs(pins) do
-        if set.world and set.world:IsShown() then
-            pinSetFrameLevel(set.world, PLAYER_PIN_FRAME_LEVEL)
-        end
-    end
-end
-
-local frameLevelHooked = false
-local function installFrameLevelHook()
-    if frameLevelHooked then return end
-    if WorldMapFrame and WorldMapFrame.RefreshAllPinFrameLevels then
-        hooksecurefunc(WorldMapFrame, "RefreshAllPinFrameLevels", reapplyFrameLevels)
-        frameLevelHooked = true
-    end
-end
-
--- WorldMapFrame may be lazy-loaded by Blizzard_WorldMap on some clients;
--- hook at file-load if it's already there, otherwise retry on its load
--- and once more on PLAYER_LOGIN as a final safety net.
-installFrameLevelHook()
-local hookEvents = CreateFrame("Frame")
-hookEvents:RegisterEvent("PLAYER_LOGIN")
-hookEvents:RegisterEvent("ADDON_LOADED")
-hookEvents:SetScript("OnEvent", function(_, event, name)
-    if frameLevelHooked then return end
-    if event == "ADDON_LOADED" and name ~= "Blizzard_WorldMap" then return end
-    installFrameLevelHook()
-end)
 
 
 -- =============================================================
@@ -849,7 +817,6 @@ local function upsertPin(short, entry)
         HBDPins:RemoveWorldMapIcon(REF_NAME, wf)
         HBDPins:AddWorldMapIconMap(REF_NAME, wf, entry.mapID, curX, curY,
             HBD_PINS_WORLDMAP_SHOW_WORLD)
-        pinSetFrameLevel(wf, PLAYER_PIN_FRAME_LEVEL)
         wf._lastRenderedX, wf._lastRenderedY = curX, curY
     elseif set.world then
         set.world._nextX = nil  -- cluster code's "is live" check sees this and skips
