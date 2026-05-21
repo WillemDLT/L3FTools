@@ -159,8 +159,7 @@ local DEFAULTS = {
     guildMap = {
         privacyAnswered  = false,  -- set true after the user has answered the first-run popup
         shareWithGuild   = false,  -- broadcast position to guild members with L3FTools
-        shareWithGroup   = false,  -- broadcast position to group/raid members (Phase 1.5)
-        shareWithFriends = false,  -- whisper-broadcast position to char-friends (Phase 1.5)
+        shareWithFriends = false,  -- whisper-broadcast position to char-friends with L3FTools
         -- Auto-pause broadcasting inside any raid instance OR battleground.
         -- (Pre-rename name was pauseInRaidInstance; migrated below.)
         pauseInInstance  = true,
@@ -249,6 +248,12 @@ local function initDB()
     end
     if L3FToolsDB.guildMap then
         L3FToolsDB.guildMap.pinsHidden = nil
+    end
+    -- Drop shareWithGroup. Party/raid members are pinned natively by the
+    -- WoW client, so an L3FTools group broadcast would always be redundant.
+    -- The field is gone from DEFAULTS; clear any saved value.
+    if L3FToolsDB.guildMap then
+        L3FToolsDB.guildMap.shareWithGroup = nil
     end
     deepCopyDefaults(L3FToolsDB, DEFAULTS)
     -- First-ever launch: enable Automarker for every NPC we know about.

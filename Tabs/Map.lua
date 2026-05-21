@@ -9,9 +9,9 @@
 --
 -- Layout:
 --   * Title + hint anchored to the tab parent (always visible)
---   * Left column wrapped in a scroll frame - keeps Privacy reachable
---     no matter how short the window gets, and prevents the left drift
---     that came from chaining elements to each others' BOTTOMLEFT
+--   * Left column wrapped in a scroll frame - prevents the left drift
+--     that came from chaining elements to each others' BOTTOMLEFT, and
+--     keeps everything reachable when the window is collapsed short
 --   * Right column: roster panel (its own scroll frame inside)
 -- =============================================================
 
@@ -121,9 +121,41 @@ end
 
 
 -- =============================================================
--- Roster panel (class-sorted list of who is broadcasting to you)
+-- Roster panel
 -- =============================================================
-local CLASS_NAME = LOCALIZED_CLASS_NAMES_MALE or {}
+-- A single scrollable list of everyone we know about: each broadcaster
+-- (guild source = currently in roster from a GUILD packet; friend
+-- source = from a WHISPER packet) plus, for the "nag list" use case,
+-- online guildies who AREN'T broadcasting (i.e. don't run L3FTools).
+-- Filter dropdown narrows the list to one of:
+--   All / Guild / Friends / Not running L3F
+-- Search box filters by case-insensitive substring on the player name.
+-- Click handling:
+--   Left-click on a broadcasting entry opens the world map and switches
+--     to that player's mapID.
+--   Right-click on any entry (broadcasting or not) opens the same
+--     Whisper / Invite / Cancel menu the world-map pin already has.
+local ROW_HEIGHT = 18
+
+local FILTER_OPTIONS = {
+    { value = "all",        label = "All" },
+    { value = "guild",      label = "Guild" },
+    { value = "friend",     label = "Friends" },
+    { value = "notrunning", label = "Not running L3F" },
+}
+
+local function panWorldMapTo(mapID)
+    if not mapID or mapID == 0 then return end
+    if not WorldMapFrame then return end
+    if not WorldMapFrame:IsShown() then
+        if ToggleWorldMap then ToggleWorldMap() else WorldMapFrame:Show() end
+    end
+    if WorldMapFrame.SetMapID then
+        WorldMapFrame:SetMapID(mapID)
+    elseif SetMapByID then
+        SetMapByID(mapID)
+    end
+end
 
 local function buildRosterPanel(parent)
     local box = CreateFrame("Frame", nil, parent, "BackdropTemplate")
@@ -138,14 +170,54 @@ local function buildRosterPanel(parent)
 
     local title = box:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     title:SetPoint("TOPLEFT", box, "TOPLEFT", 10, -8)
-    title:SetText("|cffffd100Broadcasting to you|r")
+    title:SetText("|cffffd100Roster|r")
 
     local count = box:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     count:SetPoint("TOPRIGHT", box, "TOPRIGHT", -12, -10)
-    count:SetText("0 players")
+    count:SetText("")
 
+    -- Filter dropdown (top-left under the title)
+    local currentFilter = "all"
+    local filter = CreateFrame("Frame", "L3FMapTabFilterDD", box, "UIDropDownMenuTemplate")
+    filter:SetPoint("TOPLEFT", box, "TOPLEFT", -6, -26)
+    UIDropDownMenu_SetWidth(filter, 110)
+    UIDropDownMenu_SetText(filter, "All")
+    local refresh  -- forward declaration so the dropdown can call it
+    UIDropDownMenu_Initialize(filter, function(self, level)
+        for _, opt in ipairs(FILTER_OPTIONS) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = opt.label
+            info.checked = (currentFilter == opt.value)
+            info.func = function()
+                currentFilter = opt.value
+                UIDropDownMenu_SetText(filter, opt.label)
+                CloseDropDownMenus()
+                if refresh then refresh() end
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end)
+
+    -- Search box (top-right under the count)
+    local currentSearch = ""
+    local search = CreateFrame("EditBox", "L3FMapTabSearchBox", box, "InputBoxTemplate")
+    search:SetAutoFocus(false)
+    search:SetSize(120, 18)
+    search:SetPoint("TOPRIGHT", box, "TOPRIGHT", -16, -28)
+    search:SetMaxLetters(20)
+    search:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    search:SetScript("OnEnterPressed",  function(self) self:ClearFocus() end)
+    search:SetScript("OnTextChanged", function(self)
+        currentSearch = (self:GetText() or ""):lower()
+        if refresh then refresh() end
+    end)
+    local searchHint = box:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    searchHint:SetPoint("RIGHT", search, "LEFT", -4, 0)
+    searchHint:SetText("Search:")
+
+    -- Scrollable list, sitting under filter + search
     local sf = CreateFrame("ScrollFrame", "L3FMapTabRosterScroll", box, "UIPanelScrollFrameTemplate")
-    sf:SetPoint("TOPLEFT",     box, "TOPLEFT",     8,  -28)
+    sf:SetPoint("TOPLEFT",     box, "TOPLEFT",     8,  -56)
     sf:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -28, 8)
 
     local child = CreateFrame("Frame", nil, sf)
@@ -154,37 +226,122 @@ local function buildRosterPanel(parent)
     child._rows = {}
 
     local empty = box:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    empty:SetPoint("CENTER", box, "CENTER", 0, 0)
-    empty:SetText("|cffaaaaaaNobody is broadcasting yet.|r")
+    empty:SetPoint("CENTER", sf, "CENTER", 0, 0)
+    empty:SetText("|cffaaaaaaNobody to show.|r")
     empty:SetJustifyH("CENTER")
 
-    local rowIdx = 0
-    local function getRow()
-        rowIdx = rowIdx + 1
-        local r = child._rows[rowIdx]
+    -- Row factory: each row is a clickable Button with a FontString inside.
+    -- Pool grows lazily; refresh() hides any leftover rows from prior renders.
+    local function getRow(idx)
+        local r = child._rows[idx]
         if not r then
-            r = child:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            child._rows[rowIdx] = r
+            r = CreateFrame("Button", nil, child)
+            r:SetHeight(ROW_HEIGHT)
+            r:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+
+            r.hl = r:CreateTexture(nil, "BACKGROUND")
+            r.hl:SetAllPoints()
+            r.hl:SetColorTexture(1, 1, 1, 0)
+
+            r.text = r:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            r.text:SetPoint("LEFT",  r, "LEFT",  6, 0)
+            r.text:SetPoint("RIGHT", r, "RIGHT", -6, 0)
+            r.text:SetJustifyH("LEFT")
+
+            r:SetScript("OnEnter", function(self)
+                self.hl:SetColorTexture(1, 1, 1, 0.10)
+            end)
+            r:SetScript("OnLeave", function(self)
+                self.hl:SetColorTexture(1, 1, 1, 0)
+            end)
+            r:SetScript("OnClick", function(self, button)
+                local e = self._entry
+                if not e then return end
+                if button == "LeftButton" then
+                    -- Pan only makes sense for someone we're actively
+                    -- receiving from; a "not running L3F" guildie has no
+                    -- pin to pan to.
+                    if e.broadcasting and e.mapID then panWorldMapTo(e.mapID) end
+                elseif button == "RightButton" then
+                    if L3F.GuildMap and L3F.GuildMap.OpenPinContextMenu then
+                        L3F.GuildMap.OpenPinContextMenu(e.name, e.class)
+                    end
+                end
+            end)
+
+            child._rows[idx] = r
         end
-        r:ClearAllPoints()
         r:Show()
         return r
     end
 
-    local function refresh()
-        rowIdx = 0
-        local roster = (L3F.GuildMap and L3F.GuildMap.GetRoster and L3F.GuildMap.GetRoster()) or {}
-
-        local byClass, total = {}, 0
-        for _, entry in pairs(roster) do
-            total = total + 1
-            local cls = entry.class or "UNKNOWN"
-            byClass[cls] = byClass[cls] or {}
-            table.insert(byClass[cls], entry)
+    local function passesFilter(e)
+        if currentFilter == "all"        then return true end
+        if currentFilter == "guild"      then return e.source == "guild" end
+        if currentFilter == "friend"     then return e.source == "friend" end
+        if currentFilter == "notrunning" then
+            return e.source == "guild" and not e.broadcasting
         end
-        count:SetText(total .. " player" .. (total == 1 and "" or "s"))
+        return true
+    end
 
-        if total == 0 then
+    local function passesSearch(e)
+        if currentSearch == "" then return true end
+        return string.find((e.name or ""):lower(), currentSearch, 1, true) ~= nil
+    end
+
+    refresh = function()
+        local roster = (L3F.GuildMap and L3F.GuildMap.GetRoster and L3F.GuildMap.GetRoster()) or {}
+        local onlineG = (L3F.GuildMap and L3F.GuildMap.GetOnlineGuildies and L3F.GuildMap.GetOnlineGuildies()) or {}
+
+        -- Build the unified entry list. Broadcasters come from the roster
+        -- (we know their live x/y/mapID/HP). Non-broadcasting guildies
+        -- come from the guild roster snapshot - we know their name +
+        -- level + class but they have no pin.
+        local entries = {}
+        for short, entry in pairs(roster) do
+            table.insert(entries, {
+                name         = entry.name or short,
+                level        = entry.level,
+                class        = entry.class,
+                source       = entry.source,
+                broadcasting = true,
+                mapID        = entry.mapID,
+            })
+        end
+        for short, info in pairs(onlineG) do
+            if not roster[short] then
+                table.insert(entries, {
+                    name         = info.name,
+                    level        = info.level,
+                    class        = info.class,
+                    source       = "guild",
+                    broadcasting = false,
+                })
+            end
+        end
+
+        local filtered = {}
+        for _, e in ipairs(entries) do
+            if passesFilter(e) and passesSearch(e) then
+                table.insert(filtered, e)
+            end
+        end
+
+        -- Sort: broadcasters first, then alphabetical by name within
+        -- each group. Inside broadcasters, friends end up sorted in
+        -- among guildies alphabetically (the filter dropdown is the
+        -- way to isolate one source).
+        table.sort(filtered, function(a, b)
+            if a.broadcasting ~= b.broadcasting then
+                return a.broadcasting
+            end
+            return (a.name or "") < (b.name or "")
+        end)
+
+        count:SetText(#filtered .. " player" .. (#filtered == 1 and "" or "s"))
+
+        if #filtered == 0 then
             empty:Show()
             for i = 1, #child._rows do child._rows[i]:Hide() end
             child:SetHeight(1)
@@ -192,39 +349,39 @@ local function buildRosterPanel(parent)
         end
         empty:Hide()
 
-        local classes = {}
-        for c in pairs(byClass) do table.insert(classes, c) end
-        table.sort(classes)
+        local sfWidth = sf:GetWidth()
+        if not sfWidth or sfWidth < 50 then sfWidth = 260 end
 
-        local y = 4
-        for _, cls in ipairs(classes) do
-            local h = getRow()
-            h:SetFontObject("GameFontNormal")
-            local color = (RAID_CLASS_COLORS and RAID_CLASS_COLORS[cls])
-                or { r = 1, g = 1, b = 1 }
-            h:SetTextColor(color.r, color.g, color.b)
-            h:SetText(CLASS_NAME[cls] or cls)
-            h:SetPoint("TOPLEFT", child, "TOPLEFT", 4, -y)
-            y = y + 18
+        for i, e in ipairs(filtered) do
+            local r = getRow(i)
+            r._entry = e
+            r:ClearAllPoints()
+            r:SetPoint("TOPLEFT",  child, "TOPLEFT",  0, -(i - 1) * ROW_HEIGHT)
+            r:SetPoint("TOPRIGHT", child, "TOPRIGHT", 0, -(i - 1) * ROW_HEIGHT)
 
-            table.sort(byClass[cls], function(a, b)
-                return (a.name or "") < (b.name or "")
-            end)
+            local color = (e.class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[e.class])
+                or { r = 0.85, g = 0.85, b = 0.85 }
+            local hex = string.format("%02x%02x%02x",
+                math.floor(color.r * 255 + 0.5),
+                math.floor(color.g * 255 + 0.5),
+                math.floor(color.b * 255 + 0.5))
 
-            for _, entry in ipairs(byClass[cls]) do
-                local r = getRow()
-                r:SetFontObject("GameFontNormalSmall")
-                r:SetTextColor(0.9, 0.9, 0.9)
-                r:SetText(string.format("    %s  |cff888888L%d|r",
-                    entry.name or "?", entry.level or 0))
-                r:SetPoint("TOPLEFT", child, "TOPLEFT", 8, -y)
-                y = y + 14
+            local nameStr, levelStr, suffix
+            if e.broadcasting then
+                nameStr  = string.format("|cff%s%s|r", hex, e.name or "?")
+                levelStr = string.format("|cff888888L%d|r", e.level or 0)
+                suffix   = (e.source == "friend") and "  |cff9966ff(friend)|r" or ""
+            else
+                -- Greyed: online guildie not running L3FTools.
+                nameStr  = string.format("|cff666666%s|r", e.name or "?")
+                levelStr = string.format("|cff555555L%d|r", e.level or 0)
+                suffix   = "  |cff555555(not running L3F)|r"
             end
-            y = y + 4
+            r.text:SetText(nameStr .. "  " .. levelStr .. suffix)
         end
 
-        for i = rowIdx + 1, #child._rows do child._rows[i]:Hide() end
-        child:SetSize(sf:GetWidth(), math.max(y, sf:GetHeight()))
+        for i = #filtered + 1, #child._rows do child._rows[i]:Hide() end
+        child:SetSize(sfWidth, math.max(#filtered * ROW_HEIGHT + 4, sf:GetHeight() or 1))
     end
 
     return box, refresh
@@ -244,8 +401,8 @@ local function buildMap(parent)
     hint:SetText("Live guild positions on the world map and minimap.")
 
     -- ---------- LEFT COLUMN: scrollable control stack ----------
-    -- The scroll frame keeps Privacy reachable even when the window
-    -- is collapsed below the control stack's natural height.
+    -- The scroll frame keeps every control reachable even when the
+    -- window is collapsed below the control stack's natural height.
     local leftScroll = CreateFrame("ScrollFrame", "L3FMapTabLeftScroll", parent, "UIPanelScrollFrameTemplate")
     leftScroll:SetPoint("TOPLEFT",     parent, "TOPLEFT",     8,  -52)
     leftScroll:SetPoint("BOTTOMLEFT",  parent, "BOTTOMLEFT",  8,   16)
@@ -326,19 +483,6 @@ local function buildMap(parent)
         function() return db().minimapPinSize or 0.8 end,
         function(v) db().minimapPinSize = v end,
         refreshPins)
-
-    S:gap(10)
-
-    -- Privacy
-    S:header("Privacy")
-    S:button("Re-show first-install popup", 220, 22, function()
-        if L3F.GuildMap and L3F.GuildMap.ResetPrivacyAnswer then
-            L3F.GuildMap.ResetPrivacyAnswer()
-        end
-        if L3F.GuildMap and L3F.GuildMap.ShowPrivacyPopup then
-            L3F.GuildMap.ShowPrivacyPopup()
-        end
-    end)
 
     S:finalize()
 

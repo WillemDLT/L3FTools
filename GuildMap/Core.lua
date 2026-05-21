@@ -27,24 +27,26 @@ local GM = L3F.GuildMap
 -- re-shows on /reload or future logins, only after a fresh install
 -- that wipes SavedVariables.
 StaticPopupDialogs["L3F_GUILDMAP_PRIVACY"] = {
-    text = "L3FTools can show your |cffffd100guild members|r on the world map and minimap in real time.\n\n"
-        .. "Share your live position with guildies who also run L3FTools?\n\n"
-        .. "|cffaaaaaaYou can change this any time in the Map tab.|r",
+    text = "L3FTools can show your |cffffd100guildmates|r and |cffffd100friends|r on the world map and minimap in real time.\n\n"
+        .. "Share your live position with guildmates and friends who also run L3FTools?\n\n"
+        .. "|cffaaaaaaYou can toggle each channel separately any time from the Map tab.|r",
     button1 = "Yes, share",
     button2 = "No, keep private",
     OnAccept = function()
         if not L3FToolsDB or not L3FToolsDB.guildMap then return end
-        L3FToolsDB.guildMap.shareWithGuild = true
-        L3FToolsDB.guildMap.privacyAnswered = true
-        print("|cffffd100L3FTools|r Position sharing with guildmates |cff00ff00enabled|r. "
-            .. "Toggle anytime in the Map tab.")
+        L3FToolsDB.guildMap.shareWithGuild   = true
+        L3FToolsDB.guildMap.shareWithFriends = true
+        L3FToolsDB.guildMap.privacyAnswered  = true
+        print("|cffffd100L3FTools|r position sharing |cff00ff00enabled|r for guildmates and friends. "
+            .. "Toggle each channel anytime in the Map tab.")
     end,
     OnCancel = function()
         if not L3FToolsDB or not L3FToolsDB.guildMap then return end
-        L3FToolsDB.guildMap.shareWithGuild = false
-        L3FToolsDB.guildMap.privacyAnswered = true
-        print("|cffffd100L3FTools|r Position sharing |cffff5555disabled|r. "
-            .. "You can enable it anytime in the Map tab.")
+        L3FToolsDB.guildMap.shareWithGuild   = false
+        L3FToolsDB.guildMap.shareWithFriends = false
+        L3FToolsDB.guildMap.privacyAnswered  = true
+        print("|cffffd100L3FTools|r position sharing |cffff5555disabled|r. "
+            .. "You can enable each channel anytime in the Map tab.")
     end,
     timeout      = 0,
     whileDead    = true,

@@ -427,6 +427,13 @@ groupFrame:SetScript("OnEvent", resyncAll)
 -- =============================================================
 -- Public surface
 -- =============================================================
+-- Expose the pin's right-click context menu so other surfaces (e.g.
+-- the Map-tab roster panel) can reuse the same Whisper/Invite UX.
+function GM.OpenPinContextMenu(name, class)
+    if not name then return end
+    showContextMenu(name, class)
+end
+
 function GM.ClearAllPins()
     for short in pairs(pins) do
         removePins(short)

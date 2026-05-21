@@ -357,6 +357,29 @@ end
 -- next ticker before the first WHISPER fan-out.
 GM.RequestFriendList = requestFriendList
 
+-- Expose the online-guildie snapshot for the Map-tab roster panel. The
+-- panel needs to render guildies who are online but NOT broadcasting
+-- (i.e. they don't run L3FTools) as greyed entries so the user can see
+-- who to nag. Includes level + classFile so the panel can keep the same
+-- visual format used for actual broadcasters.
+function GM.GetOnlineGuildies()
+    local list = {}
+    if not IsInGuild() then return list end
+    local n = GetNumGuildMembers() or 0
+    for i = 1, n do
+        local name, _, _, level, _, _, _, _, online, _, classFile = GetGuildRosterInfo(i)
+        if name and online then
+            local short = Ambiguate(name, "short")
+            list[short] = {
+                name  = short,
+                level = level or 0,
+                class = classFile or "UNKNOWN",
+            }
+        end
+    end
+    return list
+end
+
 -- Console dump of the current roster, useful while there is no Map tab UI.
 function GM.DumpRoster()
     local n = 0
