@@ -214,6 +214,15 @@ local function buildMinimapButton()
     -- care about parent. Drag math reads Minimap:GetCenter() too.
     local b = CreateFrame("Button", MM_BTN_NAME, UIParent)
     b._db = saved
+    -- Match Minimap's effective scale. Minimap-parented buttons inherit
+    -- whatever MinimapCluster's scale is (typically slightly above
+    -- UIParent's effective scale on TBC); without this our button
+    -- would be visibly smaller AND our (x, y) rim offsets would be in
+    -- UIParent units, sitting the button INSIDE the rim instead of
+    -- flush against it.
+    local mmScale = (Minimap.GetEffectiveScale and Minimap:GetEffectiveScale()) or 1
+    local upScale = (UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
+    if upScale > 0 then b:SetScale(mmScale / upScale) end
     b:SetFrameStrata("MEDIUM")
     b:SetSize(31, 31)
     b:SetFrameLevel(8)
