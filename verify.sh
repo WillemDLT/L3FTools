@@ -213,7 +213,49 @@ else:
     print("  (no Sections/ directory yet)")
 
 print()
+print("=== Lua syntax (luac -p) ===")
+# Authoritative syntax check via the official Lua 5.1 compiler.
+# The brace/paren balance pass above can't detect missing commas
+# inside table entries or invalid `obj:method and ...` shorthand
+# (two real bugs that hid the Atlas tab until BugSack surfaced them).
+# luac -p catches both with the same error message WoW prints in-game.
+luac_candidates = [
+    "luac", "luac5.1", "luac.exe", "luac5.1.exe",
+    "C:/Users/pc/bin/lua/luac5.1.exe",
+    os.path.expanduser("~/bin/lua/luac5.1.exe"),
+]
+luac_path = None
+for cand in luac_candidates:
+    try:
+        r = subprocess.run([cand, "-v"], capture_output=True, text=True, timeout=5)
+        if "Lua" in (r.stdout + r.stderr):
+            luac_path = cand
+            break
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        continue
+
+syntax_bad = 0
+if not luac_path:
+    print("  WARN   luac not on PATH or known locations; skipping authoritative syntax check.")
+    print("         Install Lua 5.1 binaries to catch missing commas / colon-shorthand bugs.")
+else:
+    for root, dirs, files in os.walk('.'):
+        if '.git' in root: continue
+        if 'Libs' in root.replace('\\','/').split('/'): continue
+        for fn in sorted(files):
+            if not fn.endswith('.lua'): continue
+            fp = os.path.join(root, fn)
+            r = subprocess.run([luac_path, "-p", fp], capture_output=True, text=True)
+            if r.returncode != 0:
+                err = (r.stderr or r.stdout).strip().split('\n')[0]
+                err = err.replace(luac_path + ": ", "")
+                print(f"  FAIL   {err}")
+                syntax_bad += 1
+    if syntax_bad == 0:
+        print(f"  OK     all .lua files parsed cleanly ({luac_path})")
+
+print()
 warn_note = f", {sec_warn} section warnings" if sec_warn else ""
-print(f"Summary: {len(bad)} file failures, {len(miss)} missing functions, {dup} id conflicts, {sec_bad} section mismatches, {bind_bad} bindings issues{warn_note}")
-sys.exit(1 if (bad or miss or dup or sec_bad or bind_bad or not toc_ok) else 0)
+print(f"Summary: {len(bad)} file failures, {len(miss)} missing functions, {dup} id conflicts, {sec_bad} section mismatches, {bind_bad} bindings issues, {syntax_bad} syntax errors{warn_note}")
+sys.exit(1 if (bad or miss or dup or sec_bad or bind_bad or syntax_bad or not toc_ok) else 0)
 PYEOF

@@ -1,5 +1,8 @@
 <Bindings>
-    <Binding name="L3FTOOLS_MOUSEOVERMARK" runOnUp="true" header="L3FTOOLS">
+    <Binding name="L3FTOOLS_MOUSEOVERMARK" runOnUp="true" Category="BINDING_HEADER_L3FTOOLS">
         if L3FTools then L3FTools.mouseoverHeld = keystate == "down" end
+    </Binding>
+    <Binding name="L3FTOOLS_RESETMARKS" Category="BINDING_HEADER_L3FTOOLS">
+        if L3FTools and L3FTools.ResetAllMarks then L3FTools.ResetAllMarks() end
     </Binding>
 </Bindings>

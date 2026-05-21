@@ -33,7 +33,7 @@ L3F:RegisterRaid({
                   spells = { 31540 },
                   notes = "Lowest-priority cannon fodder. Frenzy is a self attack-speed enrage that can be Tranquilizing Shot / Soothe-removed. Stack them on the off-tank and AoE down." },
                 { id = 17897, name = "Crypt Fiend",        marks = TRASH,
-                  spells = {},
+                  spells = { 28622, 31428 },
                   notes = "Periodically Web-roots a random raid member for ~10s, making them eat melee from anything in range. Trinket/free the webbed player and burn the Fiend (interruptible, Shackleable since humanoid)." },
                 { id = 17898, name = "Abomination",        marks = TRASH,
                   spells = { 31607, 31610 },

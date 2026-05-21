@@ -1,88 +1,60 @@
 -- =============================================================
 -- L3FTools - Minimap.lua
 -- =============================================================
--- Custom minimap button. Left-click opens the main window;
--- left-drag slides it around the minimap edge. Right-click ignored.
+-- Minimap button via the standard LibDBIcon-1.0 library. Registers
+-- the addon as a LibDataBroker-1.1 "launcher" object; LibDBIcon
+-- turns that into a draggable minimap icon with the standard gold
+-- tracking ring, correct anchor geometry, position persistence, and
+-- compatibility with MinimapButtonFrame / Bagnon-style stash addons.
+--
+-- Also makes detectors (Leatrix Plus etc.) stop nagging about
+-- custom buttons - LibDBIcon is exactly the convention they want.
 -- =============================================================
 
 local _, L3F = ...
 
-local BUTTON_RADIUS = 80
+local ADDON_NAME = "L3FTools"
+local ICON_PATH  = "Interface\\AddOns\\L3FTools\\Media\\automarker"
 
-local function reposition(btn)
-    local angle = L3F.db.minimap.angle or 200
-    local rad = math.rad(angle)
-    local x = math.cos(rad) * BUTTON_RADIUS
-    local y = math.sin(rad) * BUTTON_RADIUS
-    btn:ClearAllPoints()
-    btn:SetPoint("CENTER", Minimap, "CENTER", x, y)
-end
-
-local function dragUpdate(btn)
-    local mx, my = Minimap:GetCenter()
-    if not mx then return end
-    local scale = Minimap:GetEffectiveScale()
-    local cx, cy = GetCursorPosition()
-    cx, cy = cx / scale, cy / scale
-    local angle = math.deg(math.atan2(cy - my, cx - mx))
-    L3F.db.minimap.angle = angle
-    reposition(btn)
-end
+local registered = false
 
 function L3F.BuildMinimap()
-    if L3F.minimapButton then return L3F.minimapButton end
+    if registered then return end
+    local LDB     = LibStub and LibStub("LibDataBroker-1.1", true)
+    local LDBIcon = LibStub and LibStub("LibDBIcon-1.0",      true)
+    if not LDB or not LDBIcon then return end
 
-    local btn = CreateFrame("Button", "L3FToolsMinimapButton", Minimap)
-    btn:SetSize(28, 28)
-    btn:SetFrameStrata("MEDIUM")
-    btn:SetFrameLevel(8)
+    local obj = LDB:NewDataObject(ADDON_NAME, {
+        type = "launcher",
+        icon = ICON_PATH,
+        OnClick = function(_, button)
+            if button == "LeftButton" then
+                if L3F.ToggleFrame then L3F.ToggleFrame() end
+            end
+        end,
+        OnTooltipShow = function(tt)
+            tt:AddLine("|cffffd100L3FTools|r")
+            tt:AddLine("Left-click: open",  1, 1, 1)
+            tt:AddLine("Drag: reposition", 0.7, 0.7, 0.7)
+        end,
+    })
 
-    btn:SetNormalTexture("Interface\\AddOns\\L3FTools\\Media\\automarker")
-    local normal = btn:GetNormalTexture()
-    if normal then normal:SetTexCoord(0, 1, 0, 1) end
+    -- LibDBIcon reads/writes `hide` and `minimapPos` on this table.
+    L3F.db.minimap = L3F.db.minimap or {}
+    LDBIcon:Register(ADDON_NAME, obj, L3F.db.minimap)
 
-    btn:SetHighlightTexture("Interface\\AddOns\\L3FTools\\Media\\automarker", "ADD")
-    local hl = btn:GetHighlightTexture()
-    if hl then hl:SetAlpha(0.4) end
+    if L3F.db.minimap.hide then LDBIcon:Hide(ADDON_NAME)
+    else                        LDBIcon:Show(ADDON_NAME) end
 
-    btn:SetPushedTexture("Interface\\AddOns\\L3FTools\\Media\\automarker")
-    local pushed = btn:GetPushedTexture()
-    if pushed then pushed:SetVertexColor(0.8, 0.8, 0.8) end
+    registered = true
+end
 
-    btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-    btn:SetMovable(true)
-    btn:RegisterForDrag("LeftButton")
-
-    btn:SetScript("OnDragStart", function(self)
-        self:LockHighlight()
-        self:SetScript("OnUpdate", dragUpdate)
-    end)
-    btn:SetScript("OnDragStop", function(self)
-        self:UnlockHighlight()
-        self:SetScript("OnUpdate", nil)
-    end)
-
-    btn:SetScript("OnClick", function(self, mouseButton)
-        if mouseButton == "LeftButton" then
-            if L3F.ToggleFrame then L3F.ToggleFrame() end
-        end
-    end)
-
-    btn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:AddLine("|cffffd100L3FTools|r")
-        GameTooltip:AddLine("Left-click: open", 1, 1, 1)
-        GameTooltip:AddLine("Drag: reposition", 0.7, 0.7, 0.7)
-        GameTooltip:Show()
-    end)
-    btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-    L3F.minimapButton = btn
-    L3F.RefreshMinimap = function()
-        if L3F.db.minimap.hide then btn:Hide()
-        else btn:Show(); reposition(btn) end
+function L3F.RefreshMinimap()
+    local LDBIcon = LibStub and LibStub("LibDBIcon-1.0", true)
+    if not LDBIcon then return end
+    if L3F.db.minimap.hide then
+        LDBIcon:Hide(ADDON_NAME)
+    else
+        LDBIcon:Show(ADDON_NAME)
     end
-
-    L3F.RefreshMinimap()
-    return btn
 end

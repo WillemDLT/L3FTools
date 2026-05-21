@@ -128,15 +128,92 @@ end
 
 
 -- =============================================================
--- 4. THE WING SWITCHER  (movable on-screen prev / next)
+-- 4. RESET ALL MARKS  (button + Bindings.xml hotkey)
+-- =============================================================
+-- Clears every raid icon currently placed on any unit in the party /
+-- raid's awareness. The trick (credit: Morpheours):
+--   * WoW raid icons are unique - a unit can hold at most one icon
+--     and an icon can be on at most one unit at a time.
+--   * Calling SetRaidTarget("player", N) for N=1..8 forces every
+--     other unit to drop the icon it was carrying, since each icon
+--     ends up on the player instead. Player only ever holds the
+--     LAST icon assigned (8), all earlier ones are released.
+--   * SetRaidTarget("player", 0) then clears the icon left on the
+--     player.
+-- Works for mobs anywhere in the world - no nameplate visibility or
+-- reachable unit-token required, unlike per-unit SetRaidTarget calls.
+-- Also wipes the engine's once-placed GUID set so the automarker is
+-- free to re-decorate the room on the next pull.
+function L3F.ResetAllMarks()
+    -- Two-phase sequence:
+    --   1. Cycle SetRaidTarget("player", 1..8). Raid icons are unique
+    --      per group so each call dislodges whoever was holding that
+    --      icon; player ends up holding the skull (the final 8).
+    --   2. Wait for RAID_TARGET_UPDATE to CONFIRM the skull has actually
+    --      committed to the player, then SetRaidTarget("player", 0) to
+    --      clear it. Reacting to the event survives raid-load batching
+    --      where the prior fixed 150ms timer was racing the server -
+    --      the timer's 0 was firing before the skull arrived, so it
+    --      cleared nothing and the skull stuck.
+    --
+    -- Pattern lifted from MRT (Method Raid Tools), MarksSimple.lua:
+    --   if GetRaidTargetIndex("player") == 8 then
+    --       SetRaidTarget("player", 0)
+    --       module:UnregisterEvents('RAID_TARGET_UPDATE')
+    --   end
+    for i = 1, 8 do SetRaidTarget("player", i) end
+
+    local watcher = CreateFrame("Frame")
+    local done = false
+    local function finishUp()
+        -- Sticky player marks survive Clear All - re-apply them after the
+        -- cycle has actually committed. A small delay gives the server a
+        -- moment to settle so SetRaidTarget calls land cleanly.
+        if L3F.ApplyPlayerMarks then
+            C_Timer.After(0.1, L3F.ApplyPlayerMarks)
+        end
+    end
+    watcher:RegisterEvent("RAID_TARGET_UPDATE")
+    watcher:SetScript("OnEvent", function(self)
+        if done then return end
+        if GetRaidTargetIndex("player") == 8 then
+            SetRaidTarget("player", 0)
+            done = true
+            self:UnregisterAllEvents()
+            self:SetScript("OnEvent", nil)
+            finishUp()
+        end
+    end)
+
+    -- Safety net: if RAID_TARGET_UPDATE never fires (solo testing, the
+    -- icon was cleared by something else mid-flight, etc.), unhook
+    -- after 2 seconds and fire a final clear so we never leak a watcher.
+    C_Timer.After(2.0, function()
+        if done then return end
+        if GetRaidTargetIndex("player") == 8 then
+            SetRaidTarget("player", 0)
+        end
+        done = true
+        watcher:UnregisterAllEvents()
+        watcher:SetScript("OnEvent", nil)
+        finishUp()
+    end)
+
+    if L3F.AutomarkerResetGUIDs then L3F.AutomarkerResetGUIDs() end
+end
+
+
+-- =============================================================
+-- 5. THE WING SWITCHER  (movable on-screen prev / next + clear)
 -- =============================================================
 local switcher
 
 local function buildSwitcher()
     if switcher then return switcher end
 
+    -- Height 56 (was 40) to fit the new Clear-marks button at the bottom.
     local f = CreateFrame("Frame", "L3FToolsSwitcher", UIParent, "BackdropTemplate")
-    f:SetSize(280, 40)
+    f:SetSize(280, 56)
     f:SetFrameStrata("MEDIUM")
     f:SetMovable(true)
     f:EnableMouse(true)
@@ -162,9 +239,13 @@ local function buildSwitcher()
         f:SetPoint("TOP", UIParent, "TOP", 0, -140)
     end
 
+    -- prev/next buttons + raid/wing labels live in the upper area
+    -- (~40px). The Y offset 8 raises them above the new frame center
+    -- so they keep their original visual position relative to the
+    -- raid/wing labels.
     local prev = CreateFrame("Button", nil, f)
     prev:SetSize(26, 26)
-    prev:SetPoint("LEFT", f, "LEFT", 8, 0)
+    prev:SetPoint("LEFT", f, "LEFT", 8, 8)
     prev:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Up")
     prev:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Down")
     prev:SetDisabledTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Disabled")
@@ -173,7 +254,7 @@ local function buildSwitcher()
 
     local nextb = CreateFrame("Button", nil, f)
     nextb:SetSize(26, 26)
-    nextb:SetPoint("RIGHT", f, "RIGHT", -8, 0)
+    nextb:SetPoint("RIGHT", f, "RIGHT", -8, 8)
     nextb:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Up")
     nextb:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Down")
     nextb:SetDisabledTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Disabled")
@@ -188,14 +269,30 @@ local function buildSwitcher()
     raidText:SetWordWrap(false)
 
     local label = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    label:SetPoint("BOTTOM", f, "BOTTOM", 0, 7)
+    label:SetPoint("TOP", raidText, "BOTTOM", 0, -2)
     label:SetPoint("LEFT", prev, "RIGHT", 2, 0)
     label:SetPoint("RIGHT", nextb, "LEFT", -2, 0)
     label:SetJustifyH("CENTER")
     label:SetWordWrap(false)
     label:SetTextColor(1, 0.82, 0)
 
-    f.prev, f.next, f.label, f.raidText = prev, nextb, label, raidText
+    -- Clear-marks button: centred in the bottom strip. Same action
+    -- the L3FTOOLS_RESETMARKS keybind fires.
+    local clearBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    clearBtn:SetSize(120, 18)
+    clearBtn:SetPoint("BOTTOM", f, "BOTTOM", 0, 5)
+    clearBtn:SetText("Clear marks")
+    clearBtn:SetScript("OnClick", function() L3F.ResetAllMarks() end)
+    clearBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Clear all marks")
+        GameTooltip:AddLine("Removes the raid icon from every NPC the client currently sees, and resets the once-placed-lock so the addon is free to re-mark them on the next wave.", 1, 1, 1, true)
+        GameTooltip:AddLine("Also bindable as a hotkey under Esc - Key Bindings - L3FTools.", 0.7, 0.7, 0.7, true)
+        GameTooltip:Show()
+    end)
+    clearBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    f.prev, f.next, f.label, f.raidText, f.clearBtn = prev, nextb, label, raidText, clearBtn
     f:Hide()
     switcher = f
     return f

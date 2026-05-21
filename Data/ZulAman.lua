@@ -181,7 +181,7 @@ L3F:RegisterRaid({
                   spells = { 43243, 43290 },
                   notes = "Halazzi's spirit form, split off at 75/50/25%. Lynx Flurry (43290) haste buff and Shred Armor (43243) on the tank - off-tank snap-pickup near the player it spawns on." },
                 { id = 24138, name = "Tamed Amani Crocolisk",      marks = TRASH,
-                  spells = {},
+                  spells = { 43353, 43352 },
                   notes = "Crocolisk pet handled by the Amani'shi Beast Tamers - distinct from the wild Amani Crocolisk. Kill or CC alongside its tamer; no verified ability spell IDs." },
             },
         },

@@ -72,7 +72,7 @@ L3F:RegisterRaid({
                   notes = "Imp summoned by Sunblade Cabalists. Casts Fire Nova (46551) for AoE fire damage in melee range; AoE down and don't let it free-cast on healers. Banishable/enslavable." },
                 { id = 25132, name = "Sunblade Lookout",     marks = TRASH,
                   spells = {},
-                  notes = "Ranged blood-elf archer that pelts the raid with shots and triggers pack reactivation alongside Scouts. No verifiable cast data in Wowhead's TBC entry - focus early and LoS to break shots." },
+                  notes = "Ranged blood-elf archer that pelts the raid with shots and triggers pack reactivation alongside Scouts. No verifiable cast data in Wowhead's TBC entry - focus early and LoS to break shots. Ability spell IDs unresolved: Wowhead /tbc/ page is a stub, retail page returns modern Timewalking IDs only. Likely pure-melee trash; if any IDs are needed, in-game combat-log capture is the path." },
                 { id = 25367, name = "Sunblade Arch Mage",   marks = TRASH,
                   spells = { 46553, 46555, 46573 },
                   notes = "Sheepable caster with Arcane Explosion (46553) PBAoE, Frost Nova (46555) root nearby targets, and Blink (46573) untanks. Keep CC'd or interrupt-rotate; melee out of Frost Nova range and rebuild threat after Blink." },
@@ -164,7 +164,7 @@ L3F:RegisterRaid({
             npcs = {
                 { id = 25268, name = "Unyielding Dead",      marks = TRASH,
                   spells = {},
-                  notes = "Undead spawned from Felmysts Demonic Vapor trail. Walks slowly toward raid and reanimates if not finished off. AoE down before melee range; warlock banish reliable." },
+                  notes = "Undead spawned from Felmyst's Demonic Vapor trail. Walks slowly toward raid and reanimates if not finished off. AoE down before melee range; warlock banish reliable. Per Wowpedia, Unyielding Dead has a 30% CC-duration-reduction self-aura and teleports to current target; no public spell IDs surfaced." },
 
             },
         },
@@ -195,10 +195,10 @@ L3F:RegisterRaid({
             npcs = {
                 { id = 25772, name = "Void Sentinel",        marks = TRASH,
                   spells = { 46087 },
-                  notes = "Large Muru add (one spawns periodically). Shadow Pulse (46087) rhythmic AoE shadow damage around it; on death spawns four small Void Spawn adds. TOP kill priority alongside Fury Mage; dedicated add tank, burn fast, AoE the spawns." },
+                  notes = "Large M'uru add (one spawns periodically). Shadow Pulse (46087) rhythmic AoE shadow damage around it; on death spawns four small Void Spawn adds. TOP kill priority alongside Fury Mage; dedicated add tank, burn fast, AoE the spawns." },
                 { id = 25824, name = "Void Spawn",           marks = TRASH,
-                  spells = {},
-                  notes = "Four spawn from each Void Sentinels death. Low HP but fixate random raid members and hit harder than they look. AoE immediately - leaving them alive overwhelms healers." },
+                  spells = { 46082 },
+                  notes = "Four spawn from each Void Sentinel's death. Low HP but fixate random raid members and hit harder than they look. AoE immediately - leaving them alive overwhelms healers." },
                 { id = 26289, name = "Shattered Sun Riftwaker", marks = TRASH,
                   spells = { 46801 },
                   notes = "Friendly portal NPC at entrance/checkpoints - casts Open Portal (46801) from Shattrath to provide teleports between unlocked checkpoints. Not a hostile mob; no combat handling needed." },

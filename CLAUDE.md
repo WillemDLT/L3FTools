@@ -67,3 +67,6 @@ L3F.RegisterDrops(17535, {
 - **Wing-aware marking** (`Sections.lua` + `Sections/`) is built and shipped on `dev` — engine, instance detection, on-screen wing switcher, per-wing mark config, 6h memory. Treated as correct unless in-game verification by Morphéours proves otherwise.
 - Per-raid spatial sectioning done: Tempest Keep, Serpentshrine Cavern. Remaining 7 (Karazhan, Black Temple, Gruul's Lair, Magtheridon's Lair, Hyjal Summit, Zul'Aman, Sunwell Plateau) each await a section list, built via the `wing-section-raid` skill.
 - Open punch-list: bundled default profiles deferred.
+
+## Atlas / WoW Data
+The master reference behind the in-game Atlas tab lives at `C:\Users\pc\Downloads\WoW Addons\WoW Data\` (JSON, organised by category folder: `raids/<Raid>.json`, `consumables/`, `dungeons/`, ...). The addon's `Data/`, `Data/Drops/` and `Sections/` files are *derived* from it on a reviewed pull — never auto-edited. Extend the master via the `atlas` skill (one chunk per run); Gruul's Lair is the first pilot raid signed off.

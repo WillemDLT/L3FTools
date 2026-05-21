@@ -62,7 +62,9 @@ local function getStringDialog()
     local d = CreateFrame("Frame", "L3FToolsStringDialog", UIParent, "BasicFrameTemplateWithInset")
     d:SetSize(440, 340)
     d:SetPoint("CENTER")
-    d:SetFrameStrata("DIALOG")
+    -- FULLSCREEN_DIALOG (one strata above the main window's DIALOG) so
+    -- Export/Import popups always appear IN FRONT of the main window.
+    d:SetFrameStrata("FULLSCREEN_DIALOG")
     d:SetToplevel(true)
     d:SetClampedToScreen(true)
     d:EnableMouse(true)
@@ -147,20 +149,51 @@ end
 function L3F.SetupKeybindButton(btn, command)
     local listening = false
 
+    -- Defensive: ensure the button never sits in a keyboard-enabled
+    -- state at rest. The Automarker tab's sibling search EditBox needs
+    -- Backspace to reach it; an idle picker with EnableKeyboard(true)
+    -- (or with an OnKeyDown still attached after one listening session)
+    -- has been observed to silently eat keys from the EditBox.
+    btn:EnableKeyboard(false)
+
     local function refresh()
         if listening then return end
         local k = GetBindingKey(command)
         btn:SetText(k and (GetBindingText(k, "KEY_") or k) or "Not bound")
     end
 
-    local function stop()
+    -- Forward-declared so the handler closures below can call them.
+    local apply, stop
+
+    -- Listener bodies. Attached ONLY while actively capturing a key
+    -- (in OnClick), and detached on stop(). Keeping the OnKeyDown
+    -- handler attached at rest is the suspected cause of the
+    -- Automarker-only Backspace bug - the EditBox never sees the
+    -- keystroke because the picker frame consumes it first.
+    local function onKeyDown(self, key)
+        if not listening then return end
+        if key == "ESCAPE" then apply(nil) return end
+        local k = kbModified(key)
+        if k then apply(k) end
+    end
+    local function onMouseDown(self, mb)
+        if listening and KB_MOUSE[mb] then apply(kbModified(KB_MOUSE[mb])) end
+    end
+    local function onMouseWheel(self, delta)
+        if listening then apply(kbModified(delta > 0 and "MOUSEWHEELUP" or "MOUSEWHEELDOWN")) end
+    end
+
+    stop = function()
         listening = false
         btn:EnableKeyboard(false)
         btn:UnlockHighlight()
+        btn:SetScript("OnKeyDown",    nil)
+        btn:SetScript("OnMouseDown",  nil)
+        btn:SetScript("OnMouseWheel", nil)
         refresh()
     end
 
-    local function apply(key)
+    apply = function(key)
         local existing = GetBindingKey(command)
         while existing do
             SetBinding(existing)
@@ -182,18 +215,9 @@ function L3F.SetupKeybindButton(btn, command)
         self:EnableKeyboard(true)
         self:LockHighlight()
         self:SetText("Press a key  (Esc = clear)")
-    end)
-    btn:SetScript("OnKeyDown", function(self, key)
-        if not listening then return end
-        if key == "ESCAPE" then apply(nil) return end
-        local k = kbModified(key)
-        if k then apply(k) end
-    end)
-    btn:SetScript("OnMouseDown", function(self, mb)
-        if listening and KB_MOUSE[mb] then apply(kbModified(KB_MOUSE[mb])) end
-    end)
-    btn:SetScript("OnMouseWheel", function(self, delta)
-        if listening then apply(kbModified(delta > 0 and "MOUSEWHEELUP" or "MOUSEWHEELDOWN")) end
+        self:SetScript("OnKeyDown",    onKeyDown)
+        self:SetScript("OnMouseDown",  onMouseDown)
+        self:SetScript("OnMouseWheel", onMouseWheel)
     end)
     btn:SetScript("OnShow", refresh)
     btn:SetScript("OnEnter", function(self)
@@ -212,41 +236,61 @@ local function buildAutomarker(parent)
     -- before its real assignment further down in this function.
     local rebuild
 
-    local toggleRow = CreateFrame("Frame", nil, parent)
-    toggleRow:SetHeight(28)
-    toggleRow:SetPoint("TOPLEFT",  parent, "TOPLEFT",  8, -8)
-    toggleRow:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -8, -8)
-
-    local cbEnable = CreateFrame("CheckButton", nil, toggleRow, "UICheckButtonTemplate")
-    cbEnable:SetPoint("LEFT", toggleRow, "LEFT", 0, 0)
-    cbEnable:SetSize(20, 20)
-    cbEnable:SetChecked(L3F.db.automarker.enabled)
-    cbEnable.text:SetText("  Enable Automarker")
+    -- =========================================================
+    -- TOP ROW: three polished Blizzard-options checkboxes - mirrors
+    -- AutomarkerL3F's standalone window so the two addons feel
+    -- identical when you swap between them.
+    -- =========================================================
+    local cbEnable = CreateFrame("CheckButton", nil, parent, "InterfaceOptionsCheckButtonTemplate")
+    cbEnable:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, -10)
+    cbEnable.Text:SetText("Enable Automarker")
+    cbEnable:SetScript("OnShow", function(self) self:SetChecked(L3F.db.automarker.enabled) end)
     cbEnable:SetScript("OnClick", function(self)
-        L3F.db.automarker.enabled = self:GetChecked()
+        L3F.db.automarker.enabled = self:GetChecked() and true or false
         if L3F.UpdateSwitcher then L3F.UpdateSwitcher() end
     end)
+    cbEnable:SetChecked(L3F.db.automarker.enabled)
 
-    local cbCombat = CreateFrame("CheckButton", nil, toggleRow, "UICheckButtonTemplate")
-    cbCombat:SetPoint("LEFT", cbEnable, "RIGHT", 110, 0)
-    cbCombat:SetSize(20, 20)
+    local cbCombat = CreateFrame("CheckButton", nil, parent, "InterfaceOptionsCheckButtonTemplate")
+    cbCombat:SetPoint("TOPLEFT", parent, "TOPLEFT", 190, -10)
+    cbCombat.Text:SetText("Combat lock")
+    cbCombat:SetScript("OnShow", function(self) self:SetChecked(L3F.db.automarker.combatLock) end)
+    cbCombat:SetScript("OnClick", function(self)
+        L3F.db.automarker.combatLock = self:GetChecked() and true or false
+    end)
+    cbCombat:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Combat lock")
+        GameTooltip:AddLine("When on, no new marks are placed while you are in combat.", 1, 1, 1, true)
+        GameTooltip:AddLine("Disable if you want to mark mid-fight adds.", 0.7, 0.7, 0.7, true)
+        GameTooltip:Show()
+    end)
+    cbCombat:SetScript("OnLeave", function() GameTooltip:Hide() end)
     cbCombat:SetChecked(L3F.db.automarker.combatLock)
-    cbCombat.text:SetText("  Combat lock")
-    cbCombat:SetScript("OnClick", function(self) L3F.db.automarker.combatLock = self:GetChecked() end)
 
-    local cbOnce = CreateFrame("CheckButton", nil, toggleRow, "UICheckButtonTemplate")
-    cbOnce:SetPoint("LEFT", cbCombat, "RIGHT", 80, 0)
-    cbOnce:SetSize(20, 20)
+    local cbOnce = CreateFrame("CheckButton", nil, parent, "InterfaceOptionsCheckButtonTemplate")
+    cbOnce:SetPoint("TOPLEFT", parent, "TOPLEFT", 320, -10)
+    cbOnce.Text:SetText("Once-placed lock")
+    cbOnce:SetScript("OnShow", function(self) self:SetChecked(L3F.db.automarker.oncePlacedLock) end)
+    cbOnce:SetScript("OnClick", function(self)
+        L3F.db.automarker.oncePlacedLock = self:GetChecked() and true or false
+    end)
+    cbOnce:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Once-placed lock")
+        GameTooltip:AddLine("When on, each GUID we mark is recorded so the addon won't re-mark it later.", 1, 1, 1, true)
+        GameTooltip:AddLine("Auto-releases if our mark was stolen by another mob.", 0.7, 0.7, 0.7, true)
+        GameTooltip:Show()
+    end)
+    cbOnce:SetScript("OnLeave", function() GameTooltip:Hide() end)
     cbOnce:SetChecked(L3F.db.automarker.oncePlacedLock)
-    cbOnce.text:SetText("  Once-placed lock")
-    cbOnce:SetScript("OnClick", function(self) L3F.db.automarker.oncePlacedLock = self:GetChecked() end)
 
     -- =========================================================
     -- HOLD-TO-MARK KEYBIND PICKER - click it, then press a key.
     -- The same key is the WoW binding (Esc > Key Bindings too).
     -- =========================================================
-    local kbLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    kbLabel:SetPoint("TOPLEFT", toggleRow, "BOTTOMLEFT", 4, -8)
+    local kbLabel = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    kbLabel:SetPoint("TOPLEFT", cbEnable, "BOTTOMLEFT", 4, -12)
     kbLabel:SetText("Hold-to-mark key:")
 
     local kbBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
@@ -254,15 +298,54 @@ local function buildAutomarker(parent)
     kbBtn:SetPoint("LEFT", kbLabel, "RIGHT", 8, 0)
     L3F.SetupKeybindButton(kbBtn, "L3FTOOLS_MOUSEOVERMARK")
 
+    -- Second picker on the same row: clear-all-marks hotkey. Fires
+    -- the same SetRaidTarget('player', 1..8) -> 150ms -> 0 sequence
+    -- L3F.ResetAllMarks does when clicked from the wing widget.
+    local kbResetLabel = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    kbResetLabel:SetPoint("LEFT", kbBtn, "RIGHT", 24, 0)
+    kbResetLabel:SetText("Clear-marks key:")
+
+    local kbResetBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    kbResetBtn:SetSize(150, 22)
+    kbResetBtn:SetPoint("LEFT", kbResetLabel, "RIGHT", 8, 0)
+    L3F.SetupKeybindButton(kbResetBtn, "L3FTOOLS_RESETMARKS")
+
+    -- =========================================================
+    -- PLAYER MARKS row: opens the sticky-mark manager dialog.
+    -- Sticky marks are reserved from the Automarker's NPC pool and
+    -- re-applied after Clear All. The dialog handles the full UI;
+    -- this row is just the entry point.
+    -- =========================================================
+    local pmLabel = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    pmLabel:SetPoint("TOPLEFT", kbLabel, "BOTTOMLEFT", 0, -14)
+    pmLabel:SetText("Player marks:")
+
+    local pmBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    pmBtn:SetSize(180, 22)
+    pmBtn:SetPoint("LEFT", pmLabel, "RIGHT", 8, 0)
+    pmBtn:SetText("Manage player marks...")
+    pmBtn:SetScript("OnClick", function()
+        if L3F.ShowPlayerMarksDialog then L3F.ShowPlayerMarksDialog() end
+    end)
+    pmBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Player marks")
+        GameTooltip:AddLine(
+            "Assign sticky marks to players in your raid/party. They survive Clear All Marks and the Automarker won't use those marks on NPCs.",
+            1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    pmBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
     -- =========================================================
     -- PROFILE STRIP: [Profile: dropdown] [Save As] [Delete] [Export] [Import]
     -- =========================================================
-    local profLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    profLabel:SetPoint("TOPLEFT", kbLabel, "BOTTOMLEFT", 0, -12)
+    local profLabel = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    profLabel:SetPoint("TOPLEFT", pmLabel, "BOTTOMLEFT", 0, -14)
     profLabel:SetText("Profile:")
 
     local profDD = CreateFrame("Frame", "L3FToolsAMProfileDD", parent, "UIDropDownMenuTemplate")
-    profDD:SetPoint("LEFT", profLabel, "RIGHT", 0, -2)
+    profDD:SetPoint("TOPLEFT", profLabel, "BOTTOMLEFT", -16, -4)
     UIDropDownMenu_SetWidth(profDD, 160)
 
     -- Forward-declared so the dropdown init function can reach applyProfile.
@@ -385,12 +468,55 @@ local function buildAutomarker(parent)
 
     refreshProfileDD()
 
-    local raidLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local raidLabel = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     raidLabel:SetPoint("TOPLEFT", profDD, "BOTTOMLEFT", 16, -16)
     raidLabel:SetText("Raid:")
 
     local dropdown = CreateFrame("Frame", "L3FToolsAutomarkerRaidDropdown", parent, "UIDropDownMenuTemplate")
-    dropdown:SetPoint("LEFT", raidLabel, "RIGHT", 0, -2)
+    dropdown:SetPoint("TOPLEFT", raidLabel, "BOTTOMLEFT", -16, -4)
+    UIDropDownMenu_SetWidth(dropdown, 200)
+
+    -- SEARCH BOX - filters the NPC list by name as you type. Sits to the
+    -- right of the raid dropdown so it doesn't push everything down.
+    -- Mirrors the L3FTools Atlas search (which Morphéours confirmed works):
+    -- unnamed EditBox, synchronous rebuild, no OnEditFocus handlers, and
+    -- an explicit X clear button so the user always has a way to empty
+    -- the box even if their keybindings happen to capture Backspace.
+    local searchBox = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
+    searchBox:SetSize(160, 22)
+    searchBox:SetPoint("LEFT", dropdown, "RIGHT", 8, 2)
+    searchBox:SetAutoFocus(false)
+    searchBox:SetMaxLetters(40)
+    -- Reserve room on the right for the X clear button so a long query
+    -- can't slide visually under it.
+    searchBox:SetTextInsets(0, 20, 0, 0)
+    local searchPlaceholder = searchBox:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+    searchPlaceholder:SetPoint("LEFT", searchBox, "LEFT", 2, 0)
+    searchPlaceholder:SetText("Search NPCs...")
+    searchBox:HookScript("OnTextChanged", function(self)
+        searchPlaceholder:SetShown(self:GetText() == "")
+        if rebuild then rebuild() end
+    end)
+    searchBox:SetScript("OnEscapePressed", function(self) self:SetText("") self:ClearFocus() end)
+
+    -- Visible X button to clear the search. Useful as a Backspace fallback
+    -- whenever a player has a global keybind that swallows the Backspace
+    -- key while an EditBox is focused (rare but observed).
+    local clearBtn = CreateFrame("Button", nil, searchBox)
+    clearBtn:SetSize(16, 16)
+    clearBtn:SetPoint("RIGHT", searchBox, "RIGHT", -2, 0)
+    clearBtn:SetNormalTexture("Interface\\FriendsFrame\\ClearBroadcastIcon")
+    clearBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+    clearBtn:SetScript("OnClick", function()
+        searchBox:SetText("")
+        searchBox:ClearFocus()
+    end)
+    clearBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Clear search")
+        GameTooltip:Show()
+    end)
+    clearBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     local scroll = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT",     dropdown, "BOTTOMLEFT", 16, -8)
@@ -399,22 +525,30 @@ local function buildAutomarker(parent)
     content:SetSize(800, 1)
     scroll:SetScrollChild(content)
 
+    local function getFilter()
+        local t = searchBox:GetText() or ""
+        return t:lower():gsub("^%s+", ""):gsub("%s+$", "")
+    end
+
     local rowPool = {}
 
     local function getRow(i)
         local row = rowPool[i]
         if row then return row end
-        row = CreateFrame("Frame", nil, content)
+        -- Button (not Frame) so OnEnter/OnLeave fire reliably across all client
+        -- versions, matching AutomarkerL3F's row template.
+        row = CreateFrame("Button", nil, content)
         row:SetHeight(ROW_HEIGHT)
-        row:EnableMouse(true)
 
-        row.checkbox = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
-        row.checkbox:SetSize(20, 20)
-        row.checkbox:SetPoint("LEFT", row, "LEFT", 0, 0)
-        row.label = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        row.checkbox = CreateFrame("CheckButton", nil, row, "InterfaceOptionsCheckButtonTemplate")
+        row.checkbox:SetPoint("LEFT", row, "LEFT", 14, 0)
+        row.checkbox.Text:SetText("")
+
+        row.label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
         row.label:SetPoint("LEFT", row.checkbox, "RIGHT", 4, 0)
-        row.label:SetWidth(220)
+        row.label:SetWidth(230)
         row.label:SetJustifyH("LEFT")
+        row.label:SetWordWrap(false)
 
         -- Hover handlers: show preview popup with model + spells + notes
         row:SetScript("OnEnter", function(self)
@@ -430,7 +564,7 @@ local function buildAutomarker(parent)
         for j, _ in ipairs(MARK_ORDER) do
             local btn = CreateFrame("Button", nil, row)
             btn:SetSize(20, 20)
-            btn:SetPoint("LEFT", row, "LEFT", 250 + (j - 1) * 22, 0)
+            btn:SetPoint("LEFT", row, "LEFT", 290 + (j - 1) * 24, 0)
             local tex = btn:CreateTexture(nil, "ARTWORK")
             tex:SetAllPoints()
             btn.tex = tex
@@ -463,6 +597,10 @@ local function buildAutomarker(parent)
             if r.name == currentRaidName then raid = r; break end
         end
         if not raid then return end
+
+        -- Search filter (case-insensitive substring match on NPC name).
+        local filter = getFilter()
+        local function matches(npc) return filter == "" or npc.name:lower():find(filter, 1, true) end
 
         local rowIdx, secIdx = 0, 0
         local y = 0
@@ -514,19 +652,33 @@ local function buildAutomarker(parent)
         local secDef = L3F.GetRaidSections and L3F.GetRaidSections(raid.name)
         if secDef then
             for wIdx, wing in ipairs(secDef.sections) do
-                renderSection(wing.name)
+                -- Collect NPCs that pass the filter; only emit the header if
+                -- the wing has at least one match (so search hides empty wings).
+                local hits = {}
                 for _, ref in ipairs(wing.npcs) do
                     local npc = L3F.npcLookup[ref.id]
-                    if npc then renderRow(npc, secDef.mapID, wIdx) end
+                    if npc and matches(npc) then table.insert(hits, npc) end
+                end
+                if #hits > 0 then
+                    renderSection(wing.name)
+                    for _, npc in ipairs(hits) do renderRow(npc, secDef.mapID, wIdx) end
                 end
             end
         elseif raid.sections then
             for _, sec in ipairs(raid.sections) do
-                renderSection(sec.name)
-                for _, npc in ipairs(sec.npcs) do renderRow(npc) end
+                local hits = {}
+                for _, npc in ipairs(sec.npcs) do
+                    if matches(npc) then table.insert(hits, npc) end
+                end
+                if #hits > 0 then
+                    renderSection(sec.name)
+                    for _, npc in ipairs(hits) do renderRow(npc) end
+                end
             end
         elseif raid.npcs then
-            for _, npc in ipairs(raid.npcs) do renderRow(npc) end
+            for _, npc in ipairs(raid.npcs) do
+                if matches(npc) then renderRow(npc) end
+            end
         end
         content:SetHeight(math.max(y + 8, 1))
     end
@@ -563,8 +715,22 @@ local function buildAutomarker(parent)
         end
     end
     selectRaid(found or firstRaid or "")
+
+    -- Auto-select the current raid when this tab becomes visible. If the
+    -- player is inside a mapped raid (Sections/<Raid>.lua match), the
+    -- dropdown snaps to it. Outside a mapped raid (open world, heroic
+    -- dungeon, BG, etc.), the previously-selected raid stays.
+    -- L3F.activeRaidSections is maintained by Sections.lua off
+    -- PLAYER_ENTERING_WORLD / ZONE_CHANGED_NEW_AREA.
+    parent:HookScript("OnShow", function()
+        if L3F.activeRaidSections and L3F.activeRaidSections.raid then
+            local r = L3F.activeRaidSections.raid
+            if r ~= currentRaidName then selectRaid(r) end
+        end
+    end)
 end
 
-L3F.RegisterTab("automarker", "Automarker", nil, buildAutomarker)
-
-L3F.RegisterTab("automarker", "Automarker", nil, buildAutomarker)
+-- minWidth: keybind row ("Hold-to-mark key:" label + button +
+-- "Clear-marks key:" label + button) is the widest single row inside
+-- the tab; ~700 keeps it from clipping.
+L3F.RegisterTab("automarker", "Automarker", nil, buildAutomarker, { minWidth = 700 })

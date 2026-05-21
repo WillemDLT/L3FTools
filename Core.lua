@@ -14,6 +14,7 @@ _G.L3FTools = L3F
 -- the raw header key ("HEADER_L3FTOOLS") instead of a friendly name.
 BINDING_HEADER_L3FTOOLS = "L3FTools"
 BINDING_NAME_L3FTOOLS_MOUSEOVERMARK = "Hold to mark mob under cursor"
+BINDING_NAME_L3FTOOLS_RESETMARKS    = "Clear all raid marks"
 
 -- LibDeflate (loaded from Libs/) - used to compress profile export strings.
 local LibDeflate = LibStub and LibStub("LibDeflate", true)
@@ -55,6 +56,30 @@ end
 -- Inverse index: item ID -> { {npc=..., chance=..., raid=...}, ... }
 -- Built after npcLookup so a future Atlas search bar can do reverse-lookup.
 L3F.itemLookup = nil
+
+-- =============================================================
+-- CONSUMABLES REGISTRY (Atlas-only - the Automarker never reads these)
+-- =============================================================
+-- Each consumable is a record { id, name, category, effect, notes, [nameFR] }.
+-- The category groups it under the Consumables tree node (e.g. "Flasks",
+-- "Battle Elixirs"). consumableCategoryOrder preserves registration order
+-- so Data/Consumables/Flasks.lua appears before Data/Consumables/Food.lua
+-- if listed that way in the .toc.
+L3F.consumables = {}              -- categoryName -> { item, item, ... }
+L3F.consumableLookup = {}         -- itemID -> item
+L3F.consumableCategoryOrder = {}  -- ordered list of category names
+
+function L3F.RegisterConsumables(items)
+    for _, item in ipairs(items) do
+        local cat = item.category or "Other"
+        if not L3F.consumables[cat] then
+            L3F.consumables[cat] = {}
+            table.insert(L3F.consumableCategoryOrder, cat)
+        end
+        table.insert(L3F.consumables[cat], item)
+        if item.id then L3F.consumableLookup[item.id] = item end
+    end
+end
 
 local function buildLookup()
     L3F.npcLookup = {}
@@ -104,6 +129,11 @@ local DEFAULTS = {
         profiles        = {},     -- name -> { enabledNPCs={...}, markPriorities={...} }
         activeProfile   = nil,
         _initialized    = false,
+        -- Player marks: sticky per-player mark assignments. Survive Clear All
+        -- (Sections.lua's ResetAllMarks re-applies them after the cycle+clear).
+        -- The engine reserves these mark indices so it never uses them for
+        -- NPCs (findFreeMark in Engine.lua treats them as taken).
+        playerMarks     = {},     -- shortCharName -> markIdx (1..8)
     },
     -- Atlas module
     atlas = {
@@ -111,15 +141,38 @@ local DEFAULTS = {
         lastSelectedNPC  = nil,
         lastActiveSubTab = "spells",
     },
-    -- Preview (shared by Automarker and Atlas tabs)
+    -- Preview (the hover popup next to the Automarker tab; also shared
+    -- state for Atlas's embedded model viewer where applicable).
     preview = {
         zoom       = 1.0,
         autoRotate = true,
+        pinned     = false,
+        sizeW      = 280,
+        sizeH      = 540,
     },
-    -- Minimap button
+    -- Minimap button (LibDBIcon-managed; see Minimap.lua)
     minimap = {
-        hide  = false,
-        angle = 200,
+        hide       = false,
+        minimapPos = 200,   -- degrees around the minimap; LibDBIcon reads/writes this key
+    },
+    -- Guild Map module (live position sharing on world map + minimap)
+    guildMap = {
+        privacyAnswered     = false,  -- set true after the user has answered the first-run popup
+        shareWithGuild      = false,  -- broadcast position to guild members with L3FTools
+        shareWithGroup      = false,  -- broadcast position to group/raid members (Phase 1.5)
+        shareWithFriends    = false,  -- whisper-broadcast position to char-friends (Phase 1.5)
+        pauseInRaidInstance = true,   -- pause broadcasting while inside a raid instance
+        blockedPlayers      = {},     -- characters this client refuses to share with
+        -- Display preferences (used by chunks 4-5; saved here so the panel
+        -- can reach them through a single namespace).
+        showOnWorldMap   = true,
+        showOnMinimap    = true,
+        iconStyle        = "class",   -- "class" | "dot"
+        worldPinSize     = 1.0,
+        minimapPinSize   = 1.0,
+        showName         = true,
+        showLevel        = true,
+        showHP           = true,
     },
 }
 
@@ -141,6 +194,17 @@ end
 
 local function initDB()
     L3FToolsDB = L3FToolsDB or {}
+    -- One-time migration: older builds used a custom minimap button that
+    -- saved its angle under `angle`. LibDBIcon (now used by Minimap.lua)
+    -- reads/writes the angle under `minimapPos`. Carry the user's saved
+    -- position across the rename. Runs BEFORE deepCopyDefaults so the
+    -- default minimapPos=200 doesn't overwrite the migrated value.
+    if L3FToolsDB.minimap
+       and L3FToolsDB.minimap.minimapPos == nil
+       and L3FToolsDB.minimap.angle then
+        L3FToolsDB.minimap.minimapPos = L3FToolsDB.minimap.angle
+        L3FToolsDB.minimap.angle = nil
+    end
     deepCopyDefaults(L3FToolsDB, DEFAULTS)
     -- First-ever launch: enable Automarker for every NPC we know about.
     if not L3FToolsDB.automarker._initialized then
@@ -384,19 +448,43 @@ local function handleSlash(msg)
             (L3F.db.minimap.hide and "|cffff5555hidden|r" or "|cff00ff00shown|r"))
     elseif msg == "switcher" or msg == "wing" then
         if L3F.ToggleSwitcher then L3F.ToggleSwitcher() end
-    elseif msg == "automarker" or msg == "atlas" or msg == "settings" then
+    elseif msg == "automarker" or msg == "atlas" or msg == "map" or msg == "guild" or msg == "settings" then
         if not L3F.mainFrame then if L3F.BuildFrame then L3F.BuildFrame() end end
         if L3F.ShowTab then L3F.ShowTab(msg) end
         if L3F.mainFrame and not L3F.mainFrame:IsShown() then L3F.mainFrame:Show() end
+    elseif msg == "reset" or msg == "resetwindow" then
+        if L3F.ResetWindow then L3F.ResetWindow() end
+    elseif msg:match("^gm%s") or msg == "gm" then
+        -- /l3f gm <sub> - GuildMap debug commands. Hidden from /l3f help
+        -- until Phase 1 chunks land; intended for in-game verification
+        -- during chunk 3/4 testing.
+        local sub = msg:match("^gm%s+(.+)$") or ""
+        if sub == "dump" then
+            if L3F.GuildMap and L3F.GuildMap.DumpRoster then L3F.GuildMap.DumpRoster() end
+        elseif sub == "send" then
+            if L3F.GuildMap and L3F.GuildMap.BroadcastNow then
+                local ok = L3F.GuildMap.BroadcastNow()
+                print("|cffffd100L3FMap|r send: " .. (ok and "|cff00ff00ok|r" or "|cffff5555blocked|r"))
+            end
+        elseif sub == "privacy" then
+            if L3F.GuildMap and L3F.GuildMap.ShowPrivacyPopup then L3F.GuildMap.ShowPrivacyPopup() end
+        elseif sub == "resetprivacy" then
+            if L3F.GuildMap and L3F.GuildMap.ResetPrivacyAnswer then L3F.GuildMap.ResetPrivacyAnswer() end
+        else
+            print("|cffffd100L3FMap|r commands: dump | send | privacy | resetprivacy")
+        end
     elseif msg == "help" then
         print("|cffffd100L3FTools|r commands:")
         print("  /l3f                open the window")
         print("  /l3f automarker     open on Automarker tab")
         print("  /l3f atlas          open on Atlas tab")
+        print("  /l3f map            open on Map tab")
+        print("  /l3f guild          open on Guild tab")
         print("  /l3f settings       open on Settings tab")
         print("  /l3f toggle         master Automarker enable on/off")
         print("  /l3f minimap        hide/show the minimap button")
         print("  /l3f switcher       show/hide the wing switcher")
+        print("  /l3f reset          reset window size + position to defaults")
     else
         if L3F.ToggleFrame then L3F.ToggleFrame() end
     end
