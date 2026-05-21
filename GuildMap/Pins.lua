@@ -176,13 +176,16 @@ local function applyClassAndSource(frame, class, source)
     end
 end
 
--- Wrapper that adds the dead-broadcaster swap: when hp==0 the world-map
--- pin's class icon becomes the skull. Source-tinted ring + HP bar stay
--- on top so you can still see who and where. Re-runs on every roster
--- update + every 2s safety tick, so revival flips the icon back.
-local function applyWorldPinAppearance(frame, class, source, hp)
+-- Wrapper that adds the dead-broadcaster swap. The skull stays for the
+-- WHOLE death sequence - corpse (hp==0) AND ghost (UnitIsDeadOrGhost on
+-- the broadcaster side, carried as entry.dead in the packet). Ghosts
+-- have non-zero hp, so the hp==0 check alone would drop the skull the
+-- moment the player releases their spirit. Source-tinted ring + HP bar
+-- stay on top so you can still see who and where. Re-runs on every
+-- roster update + every 2s safety tick, so revival flips the icon back.
+local function applyWorldPinAppearance(frame, class, source, isDead)
     applyClassAndSource(frame, class, source)
-    if frame.icon and hp == 0 then
+    if frame.icon and isDead then
         frame.icon:SetTexture(SKULL_TEXTURE)
         frame.icon:SetTexCoord(0, 1, 0, 1)
         frame.icon:SetVertexColor(1, 1, 1, 1)
@@ -454,14 +457,19 @@ local function upsertPin(short, entry)
         wf._class = entry.class
         wf._hp    = entry.hp
 
-        applyWorldPinAppearance(wf, entry.class, entry.source or "guild", entry.hp)
+        -- "Dead" covers corpse (hp==0) AND ghost (entry.dead from the
+        -- broadcaster's UnitIsDeadOrGhost). Older clients on the 7-field
+        -- wire format won't set entry.dead, so we keep the hp==0 fallback.
+        local isDead = entry.dead or (entry.hp == 0)
+
+        applyWorldPinAppearance(wf, entry.class, entry.source or "guild", isDead)
 
         local sizeMul = gm.worldPinSize or 1.0
         wf:SetSize(22 * sizeMul, 22 * sizeMul)
         -- Dead broadcasters get a bigger skull so it reads as "dead" at a
         -- glance instead of just "icon swap". Skull overflows the source
         -- ring by a few px on each side - deliberate emphasis.
-        local iconBase = (entry.hp == 0) and 28 or 18
+        local iconBase = isDead and 28 or 18
         wf.icon:SetSize(iconBase * sizeMul, iconBase * sizeMul)
         wf.hpBg:SetSize(20 * sizeMul, 3 * sizeMul)
 

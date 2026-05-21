@@ -6,8 +6,13 @@
 --   * WHISPER - one targeted packet per online friend with L3FTools
 --
 -- Wire format (CSV, single packet, well under the 255-byte limit):
---   name,level,class,x,y,mapID,hp%
--- e.g.  "Willem,70,WARLOCK,0.412,0.587,84,98"
+--   name,level,class,x,y,mapID,hp%,dead
+-- e.g.  "Willem,70,WARLOCK,0.412,0.587,84,98,0"
+-- dead is "1" while the player is dead OR a ghost (UnitIsDeadOrGhost) so
+-- the receiver's pin keeps the skull icon for the whole death sequence;
+-- ghosts have non-zero hp so hp==0 alone wasn't enough.
+-- The dead field is appended at the END of the CSV, which keeps old
+-- clients (which only strsplit the first 7 fields) silently compatible.
 --
 -- Send conditions (the master gate + each channel independently):
 --   * not (pauseInInstance AND we are inside a raid instance or BG)
@@ -128,9 +133,14 @@ local function sendNow()
     local class = classFile or "UNKNOWN"
     local hpMax = UnitHealthMax("player") or 0
     local hp    = (hpMax > 0) and math.floor(UnitHealth("player") / hpMax * 100) or 100
+    -- UnitIsDeadOrGhost covers BOTH the post-kill corpse state (hp=0) and
+    -- the ghost-running-back state (hp>0 but still "dead"). Receivers
+    -- read this flag for the skull-icon swap so the icon doesn't vanish
+    -- the moment the player releases.
+    local dead  = (UnitIsDeadOrGhost and UnitIsDeadOrGhost("player")) and 1 or 0
 
-    local msg = string.format("%s,%d,%s,%.3f,%.3f,%d,%d",
-        name, level, class, x, y, mapID, hp)
+    local msg = string.format("%s,%d,%s,%.3f,%.3f,%d,%d,%d",
+        name, level, class, x, y, mapID, hp, dead)
 
     -- Both channels go through ChatThrottleLib so a wide friend fan-out
     -- can't blow the per-second cap and trip a disconnect. BULK priority
@@ -216,7 +226,7 @@ local function isSelf(sender)
     return short == UnitName("player")
 end
 
-local function ingest(senderShort, name, level, class, x, y, mapID, hp, source)
+local function ingest(senderShort, name, level, class, x, y, mapID, hp, dead, source)
     local nx = tonumber(x) or 0
     local ny = tonumber(y) or 0
     if nx < 0 or nx > 1 then nx = 0 end
@@ -237,6 +247,9 @@ local function ingest(senderShort, name, level, class, x, y, mapID, hp, source)
         y        = ny,
         mapID    = tonumber(mapID) or 0,
         hp       = tonumber(hp) or 100,
+        -- dead is "1" for dead OR ghost. Missing field (old clients on
+        -- the 7-field wire format) parses as nil -> evaluates to false.
+        dead     = (dead == "1"),
         lastSeen = GetTime(),
         source   = effectiveSource,
     }
@@ -257,10 +270,10 @@ recvFrame:SetScript("OnEvent", function(self, event, prefix, text, channel, send
     else
         return
     end
-    local name, level, class, x, y, mapID, hp = strsplit(",", text)
+    local name, level, class, x, y, mapID, hp, dead = strsplit(",", text)
     if not name then return end
     local short = Ambiguate(sender, "short")
-    ingest(short, name, level, class, x, y, mapID, hp, source)
+    ingest(short, name, level, class, x, y, mapID, hp, dead, source)
 end)
 
 
