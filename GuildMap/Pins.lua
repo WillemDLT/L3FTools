@@ -222,6 +222,8 @@ local function pinOnUpdate(self, elapsed)
     self._lerpAcc = 0
 
     if not self._nextX or not self._mapID then return end
+    -- No point burning HBD work while the world map is closed.
+    if not WorldMapFrame or not WorldMapFrame:IsShown() then return end
 
     local renderX, renderY
     if not self._prevX
@@ -231,6 +233,25 @@ local function pinOnUpdate(self, elapsed)
         renderX, renderY = computeLerped(self)
     end
 
+    -- Skip the HBD call if the rendered position hasn't moved enough to
+    -- be visible. Cuts the canvas-pool churn while a broadcaster is
+    -- standing still (the lerp clamps to nextPos and stays there).
+    if self._lastRenderedX and self._lastRenderedY
+       and math.abs(renderX - self._lastRenderedX) < 0.0005
+       and math.abs(renderY - self._lastRenderedY) < 0.0005 then
+        return
+    end
+    self._lastRenderedX, self._lastRenderedY = renderX, renderY
+
+    -- CRITICAL: Remove before Add. HBD's AddWorldMapIconMap goes
+    -- through worldmapProvider:HandlePin -> canvas:AcquirePin, which
+    -- pulls a fresh providerPin from the pool each call. Without a
+    -- preceding Remove, the previous providerPin is never released,
+    -- so it leaks one pin per OnUpdate tick into the canvas pool AND
+    -- the brief re-parent + canvas zoom-scale re-animation flashes
+    -- the icon larger (visible as Morphéours' "flashing larger" bug,
+    -- worse when zoomed in because the scale delta is bigger).
+    HBDPins:RemoveWorldMapIcon(REF_NAME, self)
     HBDPins:AddWorldMapIconMap(REF_NAME, self, self._mapID, renderX, renderY,
         HBD_PINS_WORLDMAP_SHOW_WORLD)
 end
@@ -447,8 +468,12 @@ local function upsertPin(short, entry)
         -- unconditionally Show() - that would un-hide a pin we deliberately
         -- hid as part of a cluster (until the next 0.3s cluster tick rehides).
         if not wf._isClusterMember then wf:Show() end
+        -- Remove first - see same comment in pinOnUpdate. Calling Add alone
+        -- leaks a providerPin into HBD's canvas pool every invocation.
+        HBDPins:RemoveWorldMapIcon(REF_NAME, wf)
         HBDPins:AddWorldMapIconMap(REF_NAME, wf, entry.mapID, curX, curY,
             HBD_PINS_WORLDMAP_SHOW_WORLD)
+        wf._lastRenderedX, wf._lastRenderedY = curX, curY
     elseif set.world then
         set.world._nextX = nil  -- stop the lerp OnUpdate from re-adding
         HBDPins:RemoveWorldMapIcon(REF_NAME, set.world)

@@ -56,6 +56,23 @@ local function inSuppressedInstance()
     return instanceType == "raid" or instanceType == "pvp"
 end
 
+-- Online guildies. Hoisted above sendNow because sendNow's dedup path
+-- needs it; we also use it from the GUILD_ROSTER_UPDATE cleanup further
+-- down (Lua local functions must be defined before any caller in the
+-- chain runs).
+local function snapshotOnlineGuildies()
+    local set = {}
+    if not IsInGuild() then return set end
+    local n = GetNumGuildMembers() or 0
+    for i = 1, n do
+        local name, _, _, _, _, _, _, _, online = GetGuildRosterInfo(i)
+        if name and online then
+            set[Ambiguate(name, "short")] = true
+        end
+    end
+    return set
+end
+
 -- Online friends from the local friend list. The list is the same one
 -- C_FriendList.ShowFriends() refreshes; we just iterate it.
 local function snapshotOnlineFriends()
@@ -250,18 +267,7 @@ end)
 -- =============================================================
 -- Guild roster cleanup: drop pins for anyone who went offline
 -- =============================================================
-local function snapshotOnlineGuildies()
-    local set = {}
-    if not IsInGuild() then return set end
-    local n = GetNumGuildMembers() or 0
-    for i = 1, n do
-        local name, _, _, _, _, _, _, _, online = GetGuildRosterInfo(i)
-        if name and online then
-            set[Ambiguate(name, "short")] = true
-        end
-    end
-    return set
-end
+-- snapshotOnlineGuildies lives above sendNow; see hoist comment there.
 
 local function requestRoster()
     if C_GuildInfo and C_GuildInfo.GuildRoster then
