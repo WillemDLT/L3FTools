@@ -276,11 +276,14 @@ local function buildRosterPanel(parent)
     end
 
     local function passesFilter(e)
+        -- Membership-based, not broadcast-channel based. A player who
+        -- is both a guildy and a friend should show in BOTH the Guild
+        -- filter and the Friends filter.
         if currentFilter == "all"        then return true end
-        if currentFilter == "guild"      then return e.source == "guild" end
-        if currentFilter == "friend"     then return e.source == "friend" end
+        if currentFilter == "guild"      then return e.isGuildie end
+        if currentFilter == "friend"     then return e.isFriend  end
         if currentFilter == "notrunning" then
-            return e.source == "guild" and not e.broadcasting
+            return e.isGuildie and not e.broadcasting
         end
         return true
     end
@@ -386,8 +389,11 @@ local function buildRosterPanel(parent)
                 -- ring colors in SOURCE_BORDER).
                 local GUILD_TAG  = "|cffffd100(Guildy)|r"
                 local FRIEND_TAG = "|cff9966ff(Friend)|r"
+                -- The "&" between tags sits OUTSIDE the color codes, so
+                -- it would inherit the FontString's default yellow. Wrap
+                -- it in a neutral gray to match the Level color.
                 if e.isGuildie and e.isFriend then
-                    suffix = "  " .. GUILD_TAG .. " & " .. FRIEND_TAG
+                    suffix = "  " .. GUILD_TAG .. " |cff888888&|r " .. FRIEND_TAG
                 elseif e.isFriend then
                     suffix = "  " .. FRIEND_TAG
                 elseif e.isGuildie then
@@ -482,9 +488,17 @@ local function buildMap(parent)
     local function setRole(ch, on)
         local gm = db()
         local r = gm.myRoles or ""
-        local hasT = (ch == "T") and on or (r:find("T", 1, true) ~= nil)
-        local hasH = (ch == "H") and on or (r:find("H", 1, true) ~= nil)
-        local hasD = (ch == "D") and on or (r:find("D", 1, true) ~= nil)
+        -- Per role: the one being toggled takes `on`; the other two
+        -- carry their current value. Earlier attempt used a
+        -- `(ch == "T") and on or (r:find(...))` ternary, which is broken
+        -- in Lua: when unchecking the toggled role the `and` produces
+        -- false, then `or` falls through to the lookup which still sees
+        -- the old char, so unchecks never took effect.
+        local function nextVal(target)
+            if target == ch then return on end
+            return r:find(target, 1, true) ~= nil
+        end
+        local hasT, hasH, hasD = nextVal("T"), nextVal("H"), nextVal("D")
         local out = ""
         if hasT then out = out .. "T" end
         if hasH then out = out .. "H" end

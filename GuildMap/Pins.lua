@@ -155,24 +155,16 @@ end
 -- stay transparent (which the old solid-color backdrop did not).
 local SKULL_TEXTURE = "Interface\\AddOns\\L3FTools\\Media\\Skull"
 
--- Role badges (LFG portrait icons). Self-assigned by the broadcaster
--- from the Map tab; arrive as entry.roles, a string of T/H/D chars in
--- canonical order. Each role lives in a fixed corner of the world pin
--- so the layout is predictable regardless of which combination a
--- player picks.
-local ROLE_TEXTURE = "Interface\\LFGFrame\\UI-LFG-ICON-PORTRAITROLES"
-local ROLE_TCOORDS = {
-    T = { 0,     19/64, 22/64, 41/64 },  -- Tank
-    H = { 20/64, 39/64, 1/64,  20/64 },  -- Healer
-    D = { 20/64, 39/64, 22/64, 41/64 },  -- DPS (Damager)
-}
+-- Role labels + colors. Self-assigned roles arrive as entry.roles,
+-- a string of T/H/D chars in canonical T-H-D order. Tested as
+-- world-pin corner badges originally but Morphéours preferred just the
+-- tooltip + roster suffix - badge code was removed.
 local ROLE_COLORS = {
     T = { 0.27, 0.42, 0.69 },  -- tank blue
     H = { 0.27, 0.62, 0.27 },  -- healer green
     D = { 0.78, 0.25, 0.27 },  -- dps red
 }
 local ROLE_LABELS = { T = "Tank", H = "Healer", D = "DPS" }
-local ROLE_BADGE_BASE = 10  -- multiplied by worldPinSize at runtime
 
 local function applyClassAndSource(frame, class, source)
     local c = SOURCE_BORDER[source] or SOURCE_BORDER.guild
@@ -225,12 +217,14 @@ local LERP_STALL = 6.0     -- after this long with no new sample, snap and stop 
 -- Pin trail (hover-only, world map only). updateLerpState pushes a
 -- sample into set.samples; showTrail walks those samples to draw a
 -- white-fading breadcrumb behind the hovered pin.
-local TRAIL_DURATION    = 30     -- seconds of history shown
-local TRAIL_DOT_SPACING = 1.0    -- one interpolated dot per second of broadcast gap
-local TRAIL_DOT_SIZE    = 4      -- px (pre-sizeMul; trails are uniform regardless of pin size)
-local SAMPLE_KEEP       = 60     -- seconds buffered (> TRAIL_DURATION for safety)
-local TRAIL_REF         = "L3FToolsTrail"
-local TRAIL_TEXTURE     = "Interface\\AddOns\\L3FTools\\Media\\Dot"
+local TRAIL_DURATION       = 30     -- seconds of history shown
+local TRAIL_DOT_SPACING    = 1.0    -- one interpolated dot per second of broadcast gap
+local TRAIL_DOT_SIZE       = 4      -- px (pre-sizeMul; trails are uniform regardless of pin size)
+local SAMPLE_KEEP          = 60     -- seconds buffered (> TRAIL_DURATION for safety)
+local TRAIL_HEAD_AGE_GAP   = 3.0    -- skip dots younger than this (clear the pin sprite)
+local TRAIL_HEAD_DIST_GAP  = 0.015  -- skip dots within this normalized distance of head
+local TRAIL_REF            = "L3FToolsTrail"
+local TRAIL_TEXTURE        = "Interface\\AddOns\\L3FTools\\Media\\Dot"
 
 local function lerp(a, b, t) return a + (b - a) * t end
 
@@ -338,24 +332,6 @@ end
 local function worldPinOnUpdate(self, elapsed)   pinTick(self, elapsed, applyWorldPinPosition)   end
 local function minimapPinOnUpdate(self, elapsed) pinTick(self, elapsed, applyMinimapPinPosition) end
 
--- Role-badge factory: builds a single corner badge texture with a
--- shared role-icon spritesheet. Returns the texture so we can show/hide
--- and resize per pin update.
-local function makeRoleBadge(frame, role, anchorPoint)
-    local t = frame:CreateTexture(nil, "OVERLAY")
-    t:SetTexture(ROLE_TEXTURE)
-    local tc = ROLE_TCOORDS[role]
-    if tc then t:SetTexCoord(tc[1], tc[2], tc[3], tc[4]) end
-    -- CENTER on the frame's corner = badge straddles the corner half
-    -- inside / half outside. Sits over the class circle's transparent
-    -- corner pixels, so no class-icon detail is occluded.
-    t:SetPoint("CENTER", frame, anchorPoint, 0, 0)
-    t:SetSize(ROLE_BADGE_BASE, ROLE_BADGE_BASE)
-    t:Hide()
-    return t
-end
-
-
 -- =============================================================
 -- Pin trail (hover-only, world map)
 -- =============================================================
@@ -415,6 +391,15 @@ local function rebuildTrail()
     local cutoff = now - TRAIL_DURATION
     local dotIdx = 0
 
+    -- Head buffer: don't render dots too close (in time OR position) to
+    -- where the pin currently sits, or they pile on top of the pin sprite
+    -- and look like a smear instead of a trail. Take the head position
+    -- from the lerp's "next" sample - that's where the pin is animating
+    -- toward and (within a tenth of a second) where it visibly is.
+    local L      = set.lerp or {}
+    local headX  = L.nextX
+    local headY  = L.nextY
+
     for i = 2, #set.samples do
         local a, b = set.samples[i - 1], set.samples[i]
         -- Skip segments that cross a map boundary - we don't try to
@@ -425,18 +410,26 @@ local function rebuildTrail()
             for j = 1, nDots do
                 local frac = j / nDots
                 local pt   = a.t + gap * frac
-                if pt >= cutoff then
-                    local px  = a.x + (b.x - a.x) * frac
-                    local py  = a.y + (b.y - a.y) * frac
-                    local age = now - pt
-                    dotIdx = dotIdx + 1
-                    local d = getTrailDot(dotIdx)
-                    -- Linear alpha fade: 1.0 at head (current) -> ~0 at tail
-                    -- (TRAIL_DURATION old). Floor at 0.05 so the oldest
-                    -- dots remain just barely visible.
-                    d:SetAlpha(math.max(0.05, 1 - age / TRAIL_DURATION))
-                    HBDPins:AddWorldMapIconMap(TRAIL_REF, d, a.mapID, px, py,
-                        HBD_PINS_WORLDMAP_SHOW_WORLD)
+                local age  = now - pt
+                if pt >= cutoff and age >= TRAIL_HEAD_AGE_GAP then
+                    local px = a.x + (b.x - a.x) * frac
+                    local py = a.y + (b.y - a.y) * frac
+                    -- Stationary broadcasters generate many samples at
+                    -- the same x/y - those dots ALL pile on the pin if we
+                    -- only filter by age. Also skip anything within
+                    -- HEAD_DIST_GAP normalized units of the head.
+                    local nearHead = headX and
+                        math.abs(px - headX) < TRAIL_HEAD_DIST_GAP and
+                        math.abs(py - headY) < TRAIL_HEAD_DIST_GAP
+                    if not nearHead then
+                        dotIdx = dotIdx + 1
+                        local d = getTrailDot(dotIdx)
+                        -- Linear alpha fade: 1.0 at head -> ~0 at tail.
+                        -- Floor at 0.05 so the oldest dots remain barely visible.
+                        d:SetAlpha(math.max(0.05, 1 - age / TRAIL_DURATION))
+                        HBDPins:AddWorldMapIconMap(TRAIL_REF, d, a.mapID, px, py,
+                            HBD_PINS_WORLDMAP_SHOW_WORLD)
+                    end
                 end
             end
         end
@@ -473,11 +466,6 @@ local function buildWorldPinFrame()
     f.icon = f:CreateTexture(nil, "ARTWORK")
     f.icon:SetPoint("CENTER", f, "CENTER", 0, 0)
     f.icon:SetSize(18, 18)
-
-    -- Role badges in fixed corners. Tank = TL, Healer = TR, DPS = BR.
-    f.roleBadgeT = makeRoleBadge(f, "T", "TOPLEFT")
-    f.roleBadgeH = makeRoleBadge(f, "H", "TOPRIGHT")
-    f.roleBadgeD = makeRoleBadge(f, "D", "BOTTOMRIGHT")
 
     -- Thin HP bar above the icon. Anchored to the frame top so it
     -- scales naturally with worldPinSize.
@@ -546,19 +534,6 @@ local function buildWorldPinFrame()
     return f
 end
 
-local function applyRoleBadges(frame, roles, sizeMul)
-    if not frame.roleBadgeT then return end
-    local size = ROLE_BADGE_BASE * (sizeMul or 1)
-    local map = { T = frame.roleBadgeT, H = frame.roleBadgeH, D = frame.roleBadgeD }
-    for k, badge in pairs(map) do
-        if roles and roles:find(k, 1, true) then
-            badge:SetSize(size, size)
-            badge:Show()
-        else
-            badge:Hide()
-        end
-    end
-end
 
 -- Minimap pin: the CheesePin icon (same one as the toggle buttons), no
 -- per-source tint. Morphéours' explicit ask - the source distinction
@@ -682,7 +657,6 @@ local function upsertPin(short, entry)
         local iconBase = isDead and 28 or 18
         wf.icon:SetSize(iconBase * sizeMul, iconBase * sizeMul)
         wf.hpBg:SetSize(20 * sizeMul, 3 * sizeMul)
-        applyRoleBadges(wf, wf._roles, sizeMul)
 
         if gm.showName then
             wf.nameText:Show(); wf.nameText:SetText(wf._name)
