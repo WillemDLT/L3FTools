@@ -224,12 +224,17 @@ local SAMPLE_KEEP       = 60     -- seconds buffered (> TRAIL_DURATION for safet
 local TRAIL_DEDUP_EPS   = 0.001  -- treat dots within this normalized distance as "same spot"
 local TRAIL_REF         = "L3FToolsTrail"
 local TRAIL_TEXTURE     = "Interface\\AddOns\\L3FTools\\Media\\Dot"
--- Pin-level type used for trail dots. The default for HBD pins is
--- PIN_FRAME_LEVEL_AREA_POI; GROUP_MEMBER sits below that in the canvas
--- z-order, so dots draw behind the player pin no matter the zoom. If
--- the constant isn't recognized on this client, HBD falls back to the
--- default layer and the trail draws on the same level (still works).
-local TRAIL_FRAME_LEVEL = "PIN_FRAME_LEVEL_GROUP_MEMBER"
+
+-- Z-order: we set numeric frame levels DIRECTLY on the providerPins
+-- rather than via the canvas's PIN_FRAME_LEVEL_* type system. Earlier
+-- attempts using the type system (0.11.5/0.11.7) didn't survive the
+-- canvas's automatic ApplyFrameLevel passes - the type registration
+-- order on TBC 2.5.x apparently doesn't put GROUP_MEMBER below
+-- AREA_POI the way Wrath does, so type-derived levels reordered our
+-- pins on map refresh events. Direct numeric assignment + a hook on
+-- RefreshAllPinFrameLevels gives us a hard guarantee.
+local TRAIL_PIN_FRAME_LEVEL  = 1     -- dots underneath everything else
+local PLAYER_PIN_FRAME_LEVEL = 500   -- well above any plausible canvas-assigned value
 
 -- Sonar-ping highlight (triggered by Map-tab roster left-click)
 local HIGHLIGHT_DURATION      = 2.0   -- total animation length
@@ -327,16 +332,13 @@ local function pinTick(self, elapsed, applyPosition)
     applyPosition(self, L.mapID, renderX, renderY)
 end
 
--- HBD's UseFrameLevelType stashes the type name on the providerPin
--- but doesn't apply the numeric frame level - the canvas only does
--- that on map-show / zoom-change events. So a newly-acquired pin
--- keeps whatever level the recycled pool pin had, and our
--- "trail goes below player pin" ordering never takes effect. Force
--- the apply by reaching the providerPin via icon:GetParent() and
--- calling its ApplyFrameLevel.
-local function forceApplyHBDFrameLevel(icon)
-    local pp = icon and icon:GetParent()
-    if pp and pp.ApplyFrameLevel then pp:ApplyFrameLevel() end
+-- Reach the providerPin via icon:GetParent() and force its numeric
+-- frame level. Bypasses HBD's type system entirely so we don't
+-- depend on PIN_FRAME_LEVEL_* registration order being what we hope.
+local function pinSetFrameLevel(icon, level)
+    if not icon then return end
+    local pp = icon:GetParent()
+    if pp and pp.SetFrameLevel then pp:SetFrameLevel(level) end
 end
 
 local function applyWorldPinPosition(self, mapID, x, y)
@@ -347,7 +349,7 @@ local function applyWorldPinPosition(self, mapID, x, y)
     -- canvas zoom-scale animation (the "flashing larger" bug).
     HBDPins:RemoveWorldMapIcon(REF_NAME, self)
     HBDPins:AddWorldMapIconMap(REF_NAME, self, mapID, x, y, HBD_PINS_WORLDMAP_SHOW_WORLD)
-    forceApplyHBDFrameLevel(self)
+    pinSetFrameLevel(self, PLAYER_PIN_FRAME_LEVEL)
 end
 
 local function applyMinimapPinPosition(self, mapID, x, y)
@@ -446,13 +448,12 @@ local function rebuildTrail()
                         -- Linear alpha fade: 1.0 at head -> ~0 at tail.
                         -- Floor at 0.05 so the oldest dots remain barely visible.
                         d:SetAlpha(math.max(0.05, 1 - age / TRAIL_DURATION))
-                        -- Register on a lower pin-level type so any dot
-                        -- that lands under the player's pin sprite is
-                        -- occluded (replaces the old time+distance
-                        -- buffer that didn't survive zoomed-out views).
+                        -- Register the dot, then force its providerPin to
+                        -- a low numeric frame level so it draws behind
+                        -- the player pin (set to PLAYER_PIN_FRAME_LEVEL).
                         HBDPins:AddWorldMapIconMap(TRAIL_REF, d, a.mapID, px, py,
-                            HBD_PINS_WORLDMAP_SHOW_WORLD, TRAIL_FRAME_LEVEL)
-                        forceApplyHBDFrameLevel(d)
+                            HBD_PINS_WORLDMAP_SHOW_WORLD)
+                        pinSetFrameLevel(d, TRAIL_PIN_FRAME_LEVEL)
                         lastX, lastY = px, py
                     end
                 end
@@ -479,6 +480,49 @@ end)
 
 GM.ShowTrail = showTrail
 GM.HideTrail = clearTrail
+
+
+-- =============================================================
+-- Frame-level lock: canvas refresh hook
+-- =============================================================
+-- The canvas calls WorldMapFrame:RefreshAllPinFrameLevels on map-show
+-- and zoom events, which walks every pin and calls ApplyFrameLevel -
+-- that derives the level from PIN_FRAME_LEVEL_* type registration.
+-- We've set the levels ourselves to numbers OUTSIDE any registered
+-- range; ApplyFrameLevel would silently overwrite them. Hook the
+-- refresh and re-apply our levels right after.
+local function reapplyFrameLevels()
+    for _, d in ipairs(trailDots) do
+        if d:IsShown() then pinSetFrameLevel(d, TRAIL_PIN_FRAME_LEVEL) end
+    end
+    for _, set in pairs(pins) do
+        if set.world and set.world:IsShown() then
+            pinSetFrameLevel(set.world, PLAYER_PIN_FRAME_LEVEL)
+        end
+    end
+end
+
+local frameLevelHooked = false
+local function installFrameLevelHook()
+    if frameLevelHooked then return end
+    if WorldMapFrame and WorldMapFrame.RefreshAllPinFrameLevels then
+        hooksecurefunc(WorldMapFrame, "RefreshAllPinFrameLevels", reapplyFrameLevels)
+        frameLevelHooked = true
+    end
+end
+
+-- WorldMapFrame may be lazy-loaded by Blizzard_WorldMap on some clients;
+-- hook at file-load if it's already there, otherwise retry on its load
+-- and once more on PLAYER_LOGIN as a final safety net.
+installFrameLevelHook()
+local hookEvents = CreateFrame("Frame")
+hookEvents:RegisterEvent("PLAYER_LOGIN")
+hookEvents:RegisterEvent("ADDON_LOADED")
+hookEvents:SetScript("OnEvent", function(_, event, name)
+    if frameLevelHooked then return end
+    if event == "ADDON_LOADED" and name ~= "Blizzard_WorldMap" then return end
+    installFrameLevelHook()
+end)
 
 
 -- =============================================================
@@ -805,7 +849,7 @@ local function upsertPin(short, entry)
         HBDPins:RemoveWorldMapIcon(REF_NAME, wf)
         HBDPins:AddWorldMapIconMap(REF_NAME, wf, entry.mapID, curX, curY,
             HBD_PINS_WORLDMAP_SHOW_WORLD)
-        forceApplyHBDFrameLevel(wf)
+        pinSetFrameLevel(wf, PLAYER_PIN_FRAME_LEVEL)
         wf._lastRenderedX, wf._lastRenderedY = curX, curY
     elseif set.world then
         set.world._nextX = nil  -- cluster code's "is live" check sees this and skips
