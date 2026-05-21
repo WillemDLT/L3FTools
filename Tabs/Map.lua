@@ -6,6 +6,13 @@
 -- tab is the user-facing surface: sharing toggles, display toggles,
 -- privacy reset, and a roster of who is currently broadcasting to
 -- you (sorted by class per Morphéours' B.3 answer).
+--
+-- Layout:
+--   * Title + hint anchored to the tab parent (always visible)
+--   * Left column wrapped in a scroll frame - keeps Privacy reachable
+--     no matter how short the window gets, and prevents the left drift
+--     that came from chaining elements to each others' BOTTOMLEFT
+--   * Right column: roster panel (its own scroll frame inside)
 -- =============================================================
 
 local addonName, L3F = ...
@@ -20,40 +27,81 @@ end
 
 
 -- =============================================================
--- Section helpers
+-- Stack helper - every widget anchors to scrollChild's TOPLEFT
+-- with a fixed x indent, and a running y cursor stacks them. This
+-- replaces the previous "anchor to previous BOTTOMLEFT with x=-4"
+-- pattern that caused the column to drift left as it grew.
 -- =============================================================
-local function header(parent, anchor, text, dx, dy)
-    local h = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    h:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", dx or 0, dy or -12)
-    h:SetText("|cffffd100" .. text .. "|r")
-    return h
-end
+local function newStack(parent, indent, cbIndent)
+    local s = {
+        parent   = parent,
+        indent   = indent or 12,
+        cbIndent = cbIndent or 12,
+        y        = 8,           -- top padding inside the scroll child
+    }
 
-local function checkbox(parent, anchor, label, getter, setter, dy)
-    local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
-    cb:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", -4, dy or -2)
-    cb:SetChecked(getter())
-    cb.text:SetText("  " .. label)
-    cb:SetScript("OnClick", function(self) setter(self:GetChecked()) end)
-    return cb
-end
+    function s:gap(px) self.y = self.y + (px or 8) end
 
-local function slider(parent, anchor, name, label, minV, maxV, step, getter, setter)
-    local s = CreateFrame("Slider", "L3FMapTab_" .. name, parent, "OptionsSliderTemplate")
-    s:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 4, -22)
-    s:SetWidth(220)
-    s:SetMinMaxValues(minV, maxV)
-    s:SetValueStep(step)
-    s:SetObeyStepOnDrag(true)
-    s:SetValue(getter())
-    _G[s:GetName() .. "Low"]:SetText(tostring(minV))
-    _G[s:GetName() .. "High"]:SetText(tostring(maxV))
-    _G[s:GetName() .. "Text"]:SetText(string.format("%s: %.1f", label, getter()))
-    s:SetScript("OnValueChanged", function(self, v)
-        setter(v)
-        _G[self:GetName() .. "Text"]:SetText(string.format("%s: %.1f", label, v))
-        refreshPins()
-    end)
+    function s:header(text)
+        local h = self.parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        h:SetPoint("TOPLEFT", self.parent, "TOPLEFT", self.indent, -self.y)
+        h:SetText("|cffffd100" .. text .. "|r")
+        self.y = self.y + 20
+        return h
+    end
+
+    function s:checkbox(label, getter, setter, onChanged)
+        local cb = CreateFrame("CheckButton", nil, self.parent, "UICheckButtonTemplate")
+        cb:SetPoint("TOPLEFT", self.parent, "TOPLEFT", self.cbIndent, -self.y)
+        cb:SetChecked(getter())
+        cb.text:SetText("  " .. label)
+        cb:SetScript("OnClick", function(self_)
+            setter(self_:GetChecked())
+            if onChanged then onChanged() end
+        end)
+        self.y = self.y + 24
+        return cb
+    end
+
+    function s:slider(name, label, minV, maxV, step, getter, setter, onChanged)
+        -- OptionsSliderTemplate's label sits ABOVE the slider, so we
+        -- pad y by 14 before placing the slider's own top-left.
+        local sl = CreateFrame("Slider", "L3FMapTab_" .. name, self.parent, "OptionsSliderTemplate")
+        sl:SetPoint("TOPLEFT", self.parent, "TOPLEFT", self.cbIndent + 4, -(self.y + 14))
+        sl:SetWidth(220)
+        sl:SetMinMaxValues(minV, maxV)
+        sl:SetValueStep(step)
+        sl:SetObeyStepOnDrag(true)
+        sl:SetValue(getter())
+        _G[sl:GetName() .. "Low"]:SetText(tostring(minV))
+        _G[sl:GetName() .. "High"]:SetText(tostring(maxV))
+        _G[sl:GetName() .. "Text"]:SetText(string.format("%s: %.1f", label, getter()))
+        sl:SetScript("OnValueChanged", function(self_, v)
+            setter(v)
+            _G[self_:GetName() .. "Text"]:SetText(string.format("%s: %.1f", label, v))
+            if onChanged then onChanged() end
+        end)
+        -- 14 (label above) + 17 (track) + 12 (Low/High labels below) + 4 pad
+        self.y = self.y + 14 + 17 + 12 + 4
+        return sl
+    end
+
+    function s:button(label, w, h, onClick)
+        local b = CreateFrame("Button", nil, self.parent, "UIPanelButtonTemplate")
+        b:SetSize(w or 220, h or 22)
+        b:SetPoint("TOPLEFT", self.parent, "TOPLEFT", self.cbIndent, -self.y)
+        b:SetText(label)
+        b:SetScript("OnClick", onClick)
+        self.y = self.y + (h or 22) + 4
+        return b
+    end
+
+    function s:finalize()
+        if self.parent.SetHeight then
+            self.parent:SetHeight(math.max(self.y + 8, 1))
+        end
+    end
+
     return s
 end
 
@@ -82,7 +130,6 @@ local function buildRosterPanel(parent)
     count:SetPoint("TOPRIGHT", box, "TOPRIGHT", -12, -10)
     count:SetText("0 players")
 
-    -- Scroll frame
     local sf = CreateFrame("ScrollFrame", "L3FMapTabRosterScroll", box, "UIPanelScrollFrameTemplate")
     sf:SetPoint("TOPLEFT",     box, "TOPLEFT",     8,  -28)
     sf:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -28, 8)
@@ -114,7 +161,6 @@ local function buildRosterPanel(parent)
         rowIdx = 0
         local roster = (L3F.GuildMap and L3F.GuildMap.GetRoster and L3F.GuildMap.GetRoster()) or {}
 
-        -- Bucket by class
         local byClass, total = {}, 0
         for _, entry in pairs(roster) do
             total = total + 1
@@ -132,14 +178,12 @@ local function buildRosterPanel(parent)
         end
         empty:Hide()
 
-        -- Sorted class order
         local classes = {}
         for c in pairs(byClass) do table.insert(classes, c) end
         table.sort(classes)
 
         local y = 4
         for _, cls in ipairs(classes) do
-            -- Class header
             local h = getRow()
             h:SetFontObject("GameFontNormal")
             local color = (RAID_CLASS_COLORS and RAID_CLASS_COLORS[cls])
@@ -149,7 +193,6 @@ local function buildRosterPanel(parent)
             h:SetPoint("TOPLEFT", child, "TOPLEFT", 4, -y)
             y = y + 18
 
-            -- Within-class: sort alphabetically by name
             table.sort(byClass[cls], function(a, b)
                 return (a.name or "") < (b.name or "")
             end)
@@ -166,9 +209,7 @@ local function buildRosterPanel(parent)
             y = y + 4
         end
 
-        -- Hide leftover rows from the pool
         for i = rowIdx + 1, #child._rows do child._rows[i]:Hide() end
-
         child:SetSize(sf:GetWidth(), math.max(y, sf:GetHeight()))
     end
 
@@ -184,77 +225,77 @@ local function buildMap(parent)
     title:SetPoint("TOPLEFT", parent, "TOPLEFT", 16, -16)
     title:SetText("Map")
 
-    -- Hint under the title
     local hint = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     hint:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4)
     hint:SetText("Live guild positions on the world map and minimap.")
 
-    -- ---------- LEFT COLUMN: controls ----------
-    -- Sharing
-    local sharingHdr = header(parent, hint, "Sharing")
+    -- ---------- LEFT COLUMN: scrollable control stack ----------
+    -- The scroll frame keeps Privacy reachable even when the window
+    -- is collapsed below the control stack's natural height.
+    local leftScroll = CreateFrame("ScrollFrame", "L3FMapTabLeftScroll", parent, "UIPanelScrollFrameTemplate")
+    leftScroll:SetPoint("TOPLEFT",     parent, "TOPLEFT",     8,  -52)
+    leftScroll:SetPoint("BOTTOMLEFT",  parent, "BOTTOMLEFT",  8,   16)
+    leftScroll:SetWidth(294)
 
-    local cbShare = checkbox(parent, sharingHdr,
+    local leftChild = CreateFrame("Frame", nil, leftScroll)
+    leftChild:SetSize(280, 1)
+    leftScroll:SetScrollChild(leftChild)
+
+    local S = newStack(leftChild, 4, 4)
+
+    -- Sharing
+    S:header("Sharing")
+    S:checkbox(
         "Share my position with guildmates",
         function() return db().shareWithGuild end,
         function(v)
             db().shareWithGuild = v
             print("|cffffd100L3FTools|r position sharing "
                 .. (v and "|cff00ff00enabled|r" or "|cffff5555disabled|r"))
-        end,
-        -4)
-
-    local cbPause = checkbox(parent, cbShare,
+        end)
+    S:checkbox(
         "Pause sharing inside raids and battlegrounds",
         function() return db().pauseInInstance end,
         function(v) db().pauseInInstance = v end)
 
+    S:gap(8)
+
     -- Display
-    local displayHdr = header(parent, cbPause, "Display")
-
-    local cbWorld = checkbox(parent, displayHdr,
-        "Pins on world map",
+    S:header("Display")
+    S:checkbox("Pins on world map",
         function() return db().showOnWorldMap end,
-        function(v) db().showOnWorldMap = v; refreshPins() end,
-        -4)
-
-    local cbMini = checkbox(parent, cbWorld,
-        "Pins on minimap",
+        function(v) db().showOnWorldMap = v end,
+        refreshPins)
+    S:checkbox("Pins on minimap",
         function() return db().showOnMinimap end,
-        function(v) db().showOnMinimap = v; refreshPins() end)
-
-    local cbName = checkbox(parent, cbMini,
-        "Show player name on pin",
+        function(v) db().showOnMinimap = v end,
+        refreshPins)
+    S:checkbox("Show player name on pin",
         function() return db().showName end,
-        function(v) db().showName = v; refreshPins() end)
-
-    local cbLevel = checkbox(parent, cbName,
-        "Show level on pin",
+        function(v) db().showName = v end,
+        refreshPins)
+    S:checkbox("Show level on pin",
         function() return db().showLevel end,
-        function(v) db().showLevel = v; refreshPins() end)
-
-    local cbHP = checkbox(parent, cbLevel,
-        "Show HP bar on pin",
+        function(v) db().showLevel = v end,
+        refreshPins)
+    S:checkbox("Show HP bar on pin",
         function() return db().showHP end,
-        function(v) db().showHP = v; refreshPins() end)
+        function(v) db().showHP = v end,
+        refreshPins)
+    S:slider("WorldSize", "World pin size", 0.5, 2.0, 0.1,
+        function() return db().worldPinSize or 0.8 end,
+        function(v) db().worldPinSize = v end,
+        refreshPins)
+    S:slider("MinimapSize", "Minimap pin size", 0.5, 2.0, 0.1,
+        function() return db().minimapPinSize or 0.8 end,
+        function(v) db().minimapPinSize = v end,
+        refreshPins)
 
-    local sWorld = slider(parent, cbHP, "WorldSize", "World pin size",
-        0.5, 2.0, 0.1,
-        function() return db().worldPinSize or 1.0 end,
-        function(v) db().worldPinSize = v end)
-
-    local sMini  = slider(parent, sWorld, "MinimapSize", "Minimap pin size",
-        0.5, 2.0, 0.1,
-        function() return db().minimapPinSize or 1.0 end,
-        function(v) db().minimapPinSize = v end)
+    S:gap(10)
 
     -- Privacy
-    local privacyHdr = header(parent, sMini, "Privacy", 0, -18)
-
-    local btnPrivacy = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    btnPrivacy:SetSize(220, 22)
-    btnPrivacy:SetPoint("TOPLEFT", privacyHdr, "BOTTOMLEFT", 0, -6)
-    btnPrivacy:SetText("Re-show first-install popup")
-    btnPrivacy:SetScript("OnClick", function()
+    S:header("Privacy")
+    S:button("Re-show first-install popup", 220, 22, function()
         if L3F.GuildMap and L3F.GuildMap.ResetPrivacyAnswer then
             L3F.GuildMap.ResetPrivacyAnswer()
         end
@@ -263,22 +304,22 @@ local function buildMap(parent)
         end
     end)
 
+    S:finalize()
+
     -- ---------- RIGHT COLUMN: roster ----------
     local roster, refreshRoster = buildRosterPanel(parent)
-    roster:SetPoint("TOPLEFT",     parent, "TOPLEFT",     310, -52)
+    roster:SetPoint("TOPLEFT",     parent, "TOPLEFT",     320, -52)
     roster:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -16,  16)
 
-    -- Refresh roster when the tab becomes visible, and periodically while
-    -- shown so new broadcasts surface within 2 seconds.
-    parent:HookScript("OnShow", function()
-        refreshRoster()
-    end)
+    parent:HookScript("OnShow", function() refreshRoster() end)
     if parent:IsShown() then refreshRoster() end
 
-    local ticker = C_Timer.NewTicker(2, function()
+    parent._mapTabTicker = C_Timer.NewTicker(2, function()
         if parent:IsShown() then refreshRoster() end
     end)
-    parent._mapTabTicker = ticker
 end
 
-L3F.RegisterTab("map", "Map", nil, buildMap)
+-- minWidth: enough for the 294-wide left scroll + the ~300-wide
+-- roster panel + chrome. minHeight: even with the scroll frame, we
+-- want the window to at least show the roster comfortably.
+L3F.RegisterTab("map", "Map", nil, buildMap, { minWidth = 720, minHeight = 460 })

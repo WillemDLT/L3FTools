@@ -170,8 +170,8 @@ local DEFAULTS = {
         showOnWorldMap   = true,
         showOnMinimap    = true,
         iconStyle        = "class",   -- "class" | "dot"
-        worldPinSize     = 1.0,
-        minimapPinSize   = 1.0,
+        worldPinSize     = 0.8,
+        minimapPinSize   = 0.8,
         showName         = true,
         showLevel        = true,
         showHP           = true,
@@ -219,6 +219,19 @@ local function initDB()
        and L3FToolsDB.guildMap.pauseInRaidInstance ~= nil then
         L3FToolsDB.guildMap.pauseInInstance = L3FToolsDB.guildMap.pauseInRaidInstance
         L3FToolsDB.guildMap.pauseInRaidInstance = nil
+    end
+    -- One-time migration: pin-size defaults dropped from 1.0 to 0.8 per
+    -- Morphéours' eye. If the user still has the OLD default (1.0) at this
+    -- point, bump them down to the new default. Guarded by a flag so a
+    -- user who later sets back to 1.0 on purpose isn't re-migrated.
+    if L3FToolsDB.guildMap and not L3FToolsDB.guildMap._pinSizeMigratedTo08 then
+        if L3FToolsDB.guildMap.worldPinSize == 1.0 then
+            L3FToolsDB.guildMap.worldPinSize = 0.8
+        end
+        if L3FToolsDB.guildMap.minimapPinSize == 1.0 then
+            L3FToolsDB.guildMap.minimapPinSize = 0.8
+        end
+        L3FToolsDB.guildMap._pinSizeMigratedTo08 = true
     end
     deepCopyDefaults(L3FToolsDB, DEFAULTS)
     -- First-ever launch: enable Automarker for every NPC we know about.

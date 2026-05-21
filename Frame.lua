@@ -10,7 +10,7 @@
 
 local addonName, L3F = ...
 
-local MIN_HEIGHT = 400
+local MIN_HEIGHT_FLOOR = 400  -- absolute floor; per-tab minHeight may raise it
 
 -- Dynamic minimum width. Combines:
 --   (a) Row 1 tab-strip floor: enough room for every top-level tab button.
@@ -40,14 +40,29 @@ local function getMinWidth()
     return _minWidthCache
 end
 
+-- Dynamic minimum height. The floor is MIN_HEIGHT_FLOOR, but any tab can
+-- raise it via opts.minHeight on RegisterTab so its content stops fitting
+-- before the resize grip lets the window collapse over the controls.
+local _minHeightCache
+local function getMinHeight()
+    if _minHeightCache then return _minHeightCache end
+    local contentMin = 0
+    for _, t in pairs(L3F.tabs) do
+        local m = t.minHeight or 0
+        if m > contentMin then contentMin = m end
+    end
+    _minHeightCache = math.max(contentMin, MIN_HEIGHT_FLOOR)
+    return _minHeightCache
+end
+
 -- Max size = UIParent minus a 20px margin on each side, so the resize
 -- grip stays grabbable. Computed dynamically each time it's needed - if
 -- the player resizes the WoW window between sessions, the bound updates
 -- next time they grab the grip.
 local function getMaxSize()
     local sw, sh = UIParent:GetSize()
-    return math.max(getMinWidth(), math.floor((sw or 1280) - 40)),
-           math.max(MIN_HEIGHT,    math.floor((sh or 768)  - 40))
+    return math.max(getMinWidth(),  math.floor((sw or 1280) - 40)),
+           math.max(getMinHeight(), math.floor((sh or 768)  - 40))
 end
 
 -- Tab registry. Each entry: { name, label, icon, builder, frame, built, parent }
@@ -64,10 +79,12 @@ function L3F.RegisterTab(name, label, icon, builder, opts)
         name = name, label = label, icon = icon,
         builder = builder, frame = nil, built = false,
         parent = parent,
-        -- Optional declared minimum content width. Feeds into getMinWidth()
-        -- above so the user can't shrink the window below what this tab
-        -- needs to render its UI without clipping.
-        minWidth = opts and opts.minWidth or nil,
+        -- Optional declared minimum content width/height. Feed into
+        -- getMinWidth() / getMinHeight() so the user can't shrink the
+        -- window below what this tab needs to render its UI without
+        -- clipping or overflowing.
+        minWidth  = opts and opts.minWidth  or nil,
+        minHeight = opts and opts.minHeight or nil,
     }
     if parent then
         L3F.subTabOrder[parent] = L3F.subTabOrder[parent] or {}
@@ -270,10 +287,11 @@ end
 local function applyResizeBounds(frame)
     local maxW, maxH = getMaxSize()
     local minW = getMinWidth()
+    local minH = getMinHeight()
     if frame.SetResizeBounds then
-        frame:SetResizeBounds(minW, MIN_HEIGHT, maxW, maxH)
+        frame:SetResizeBounds(minW, minH, maxW, maxH)
     elseif frame.SetMinResize then
-        frame:SetMinResize(minW, MIN_HEIGHT)
+        frame:SetMinResize(minW, minH)
         if frame.SetMaxResize then frame:SetMaxResize(maxW, maxH) end
     end
 end
@@ -316,8 +334,8 @@ function L3F.BuildFrame()
     -- Clamp saved size against the dynamic min in addition to the screen
     -- max, so a width saved before a new tab raised getMinWidth() snaps
     -- back up to the new minimum instead of starting clipped.
-    local loadW = math.max(getMinWidth(), math.min(L3F.db.window.width  or 900, maxW))
-    local loadH = math.max(MIN_HEIGHT,    math.min(L3F.db.window.height or 560, maxH))
+    local loadW = math.max(getMinWidth(),  math.min(L3F.db.window.width  or 900, maxW))
+    local loadH = math.max(getMinHeight(), math.min(L3F.db.window.height or 560, maxH))
     mainFrame:SetSize(loadW, loadH)
     -- DIALOG strata so add-on UI icons (WeakAuras, BigWigs bars, ...) at
     -- HIGH don't draw on top of our menu. The hover preview matches.
