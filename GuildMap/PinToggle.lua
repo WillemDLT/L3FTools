@@ -81,6 +81,16 @@ local function buildMinimapButton()
     if L3FToolsDB.guildMap.pinsButton.hide then LDBIcon:Hide(LDB_NAME)
     else                                        LDBIcon:Show(LDB_NAME) end
 
+    -- LibDBIcon anchors the icon at TOPLEFT (5.5, -5) but the disc
+    -- background sits at TOPLEFT (7, -5). The default offset compensates
+    -- for the tracking-ring's own asymmetry, but it leaves CheesePin
+    -- looking 1.5 px left of the disc center. Re-anchor to the disc.
+    local btn = _G["LibDBIcon10_" .. LDB_NAME]
+    if btn and btn.icon then
+        btn.icon:ClearAllPoints()
+        btn.icon:SetPoint("TOPLEFT", btn, "TOPLEFT", 7, -5)
+    end
+
     minimapRegistered = true
 end
 
@@ -121,11 +131,15 @@ local function buildWorldMapButton()
     b.Background:SetPoint("TOPLEFT", b, "TOPLEFT", 2, -4)
     b.Background:SetVertexColor(1, 1, 1, 1)
 
-    -- Icon
+    -- Icon. RareScanner's template uses (7.2, -6) which centers their
+    -- OriginalSkull glyph on the disc; CheesePin is centered differently
+    -- in its own canvas, so we anchor it on the disc CENTER instead:
+    -- background is 25x25 at (2, -4) -> center (14.5, -16.5), so a 20x20
+    -- icon centered on the disc lands at TOPLEFT (4.5, -6.5).
     b.Icon = b:CreateTexture(nil, "ARTWORK")
     b.Icon:SetTexture(ICON_PATH)
     b.Icon:SetSize(20, 20)
-    b.Icon:SetPoint("TOPLEFT", b, "TOPLEFT", 7.2, -6)
+    b.Icon:SetPoint("TOPLEFT", b, "TOPLEFT", 4.5, -6.5)
 
     -- Tracking-border ring (slightly larger than the button itself).
     b.Border = b:CreateTexture(nil, "OVERLAY", nil, 1)
