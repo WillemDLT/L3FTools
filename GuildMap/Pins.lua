@@ -226,6 +226,16 @@ local TRAIL_HEAD_DIST_GAP  = 0.015  -- skip dots within this normalized distance
 local TRAIL_REF            = "L3FToolsTrail"
 local TRAIL_TEXTURE        = "Interface\\AddOns\\L3FTools\\Media\\Dot"
 
+-- Sonar-ping highlight (triggered by Map-tab roster left-click)
+local HIGHLIGHT_DURATION      = 2.0   -- total animation length
+local HIGHLIGHT_RING_COUNT    = 3     -- staggered ripple waves
+local HIGHLIGHT_RING_INTERVAL = 0.5   -- start gap between consecutive rings
+local HIGHLIGHT_RING_GROW     = 1.0   -- per-ring grow duration
+local HIGHLIGHT_RING_MIN_SIZE = 24    -- px at t=0 of a ring
+local HIGHLIGHT_RING_MAX_SIZE = 80    -- px at t=GROW of a ring
+local HIGHLIGHT_REF           = "L3FToolsHighlight"
+local HIGHLIGHT_TEXTURE       = "Interface\\AddOns\\L3FTools\\Media\\Ring"
+
 local function lerp(a, b, t) return a + (b - a) * t end
 
 local function computeLerp(L, now)
@@ -454,6 +464,93 @@ end)
 
 GM.ShowTrail = showTrail
 GM.HideTrail = clearTrail
+
+
+-- =============================================================
+-- Sonar-ping highlight
+-- =============================================================
+-- "Where is this player on the map?" feedback. When the user
+-- left-clicks a roster row, the Map tab pans the world map to that
+-- player's zone, then calls HighlightPin(short) to draw a ripple of
+-- expanding white rings at the player's current world-coord position.
+-- HBD positions the rings exactly like a pin, so they show up at the
+-- right spot regardless of map zoom.
+local highlightRings   = {}  -- pool of ring frames
+local highlightStart           -- GetTime() when active animation began
+local highlightDriver  = CreateFrame("Frame")
+highlightDriver:Hide()
+
+local function getHighlightRing(i)
+    local f = highlightRings[i]
+    if not f then
+        f = CreateFrame("Frame", nil, UIParent)
+        f:SetSize(HIGHLIGHT_RING_MIN_SIZE, HIGHLIGHT_RING_MIN_SIZE)
+        f.tex = f:CreateTexture(nil, "OVERLAY")
+        f.tex:SetAllPoints()
+        f.tex:SetTexture(HIGHLIGHT_TEXTURE)
+        f.tex:SetVertexColor(1, 1, 1, 1)
+        highlightRings[i] = f
+    end
+    return f
+end
+
+local function clearHighlight()
+    if HBDPins.RemoveAllWorldMapIcons then
+        HBDPins:RemoveAllWorldMapIcons(HIGHLIGHT_REF)
+    end
+    for _, f in ipairs(highlightRings) do f:Hide() end
+    highlightStart = nil
+    highlightDriver:Hide()  -- stops OnUpdate
+end
+
+highlightDriver:SetScript("OnUpdate", function()
+    if not highlightStart then return end
+    local elapsed = GetTime() - highlightStart
+    if elapsed >= HIGHLIGHT_DURATION then
+        clearHighlight()
+        return
+    end
+    for i = 1, HIGHLIGHT_RING_COUNT do
+        local f = highlightRings[i]
+        if f then
+            local ringElapsed = elapsed - (i - 1) * HIGHLIGHT_RING_INTERVAL
+            if ringElapsed >= 0 and ringElapsed <= HIGHLIGHT_RING_GROW then
+                local t     = ringElapsed / HIGHLIGHT_RING_GROW
+                local size  = HIGHLIGHT_RING_MIN_SIZE
+                            + (HIGHLIGHT_RING_MAX_SIZE - HIGHLIGHT_RING_MIN_SIZE) * t
+                f:SetSize(size, size)
+                f:SetAlpha(1 - t)  -- linear fade as it expands
+                f:Show()
+            else
+                f:Hide()
+            end
+        end
+    end
+end)
+
+local function highlightPin(short)
+    clearHighlight()
+    if not short then return end
+    local set = pins[short]
+    if not set or not set.lerp then return end
+    local L = set.lerp
+    if not L.mapID or not L.nextX or not L.nextY then return end
+
+    highlightStart = GetTime()
+    -- Spawn N rings AT THE SAME WORLD COORD; they're separated in TIME
+    -- (driver staggers their grow phase) but HBD anchors them all to
+    -- the player's current head position so the ripple radiates from
+    -- one spot.
+    for i = 1, HIGHLIGHT_RING_COUNT do
+        local f = getHighlightRing(i)
+        f:Hide()  -- driver shows them when their time comes
+        HBDPins:AddWorldMapIconMap(HIGHLIGHT_REF, f, L.mapID, L.nextX, L.nextY,
+            HBD_PINS_WORLDMAP_SHOW_WORLD)
+    end
+    highlightDriver:Show()  -- starts OnUpdate
+end
+
+GM.HighlightPin = highlightPin
 
 
 local function buildWorldPinFrame()

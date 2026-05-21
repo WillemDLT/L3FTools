@@ -261,7 +261,18 @@ local function buildRosterPanel(parent)
                     -- Pan only makes sense for someone we're actively
                     -- receiving from; a "not running L3F" guildie has no
                     -- pin to pan to.
-                    if e.broadcasting and e.mapID then panWorldMapTo(e.mapID) end
+                    if e.broadcasting and e.mapID then
+                        panWorldMapTo(e.mapID)
+                        -- Sonar-ping the pin so you don't have to scan
+                        -- the map for it. Defer a frame so HBD has time
+                        -- to finish RefreshAllData for the new mapID
+                        -- before we register the ring icons.
+                        if L3F.GuildMap and L3F.GuildMap.HighlightPin then
+                            C_Timer.After(0.1, function()
+                                L3F.GuildMap.HighlightPin(e.short)
+                            end)
+                        end
+                    end
                 elseif button == "RightButton" then
                     if L3F.GuildMap and L3F.GuildMap.OpenPinContextMenu then
                         L3F.GuildMap.OpenPinContextMenu(e.name, e.class)
@@ -308,6 +319,7 @@ local function buildRosterPanel(parent)
         local entries = {}
         for short, entry in pairs(roster) do
             table.insert(entries, {
+                short        = short,
                 name         = entry.name or short,
                 level        = entry.level,
                 class        = entry.class,
@@ -322,6 +334,7 @@ local function buildRosterPanel(parent)
         for short, info in pairs(onlineG) do
             if not roster[short] then
                 table.insert(entries, {
+                    short        = short,
                     name         = info.name,
                     level        = info.level,
                     class        = info.class,
