@@ -137,14 +137,57 @@ L3F.FindUnitByName = findUnitByName
 
 -- Apply every saved player mark to its current unit token. Idempotent:
 -- skips units that already hold the right mark.
+--
+-- "Free-slot guard": before re-applying a sticky mark to its owner, check
+-- whether the mark is currently held by anyone else we can see (a nameplate
+-- or another raid/party unit). If yes, leave the mark alone so we don't
+-- yank it off a mob the raid leader is actively using or another player
+-- it has been intentionally placed on. The mark restores naturally when
+-- the holding mob dies (CLEU hook below calls this) or the user clears it
+-- and the next trigger fires.
 function L3F.ApplyPlayerMarks()
     if not L3F.db or not L3F.db.automarker then return end
     local marks = L3F.db.automarker.playerMarks
     if not marks then return end
+
+    local inUse = {}
+    for i = 1, 40 do
+        local u = "nameplate" .. i
+        if UnitExists(u) then
+            local m = GetRaidTargetIndex(u)
+            if m then inUse[m] = true end
+        end
+    end
+    if IsInRaid() then
+        for i = 1, 40 do
+            local u = "raid" .. i
+            if UnitExists(u) then
+                local m = GetRaidTargetIndex(u)
+                if m then inUse[m] = true end
+            end
+        end
+    elseif IsInGroup() then
+        for i = 1, 4 do
+            local u = "party" .. i
+            if UnitExists(u) then
+                local m = GetRaidTargetIndex(u)
+                if m then inUse[m] = true end
+            end
+        end
+    end
+
     for name, mark in pairs(marks) do
         local unit = findUnitByName(name)
-        if unit and UnitExists(unit) and GetRaidTargetIndex(unit) ~= mark then
-            SetRaidTarget(unit, mark)
+        if unit and UnitExists(unit) then
+            local current = GetRaidTargetIndex(unit)
+            if current == mark then
+                -- sticky owner already holds their mark; nothing to do
+            elseif inUse[mark] then
+                -- mark is on a visible mob or another player; leave it
+            else
+                -- mark slot is free; restore to the sticky owner
+                SetRaidTarget(unit, mark)
+            end
         end
     end
 end
@@ -199,16 +242,19 @@ end)
 
 
 -- =============================================================
--- CLEU PRUNE: drop dead mobs from the session ledger so their
--- mark slots free up for the next pack. Without this, after pack
--- 1 dies the ledger still considers pack 1's marks "in use" and
--- findFreeMark refuses to mark pack 2 if their priority list
--- collides. Triggered Morphéours's "have to Clear All between
--- packs" workaround.
+-- CLEU PRUNE + sticky player-mark restore
+-- =============================================================
+-- On every mob death we (a) drop the GUID from the session ledger so its
+-- mark slot frees up for the next pack (Morphéours's "have to Clear All
+-- between packs" fix), and (b) call ApplyPlayerMarks - if the dying mob
+-- was holding a sticky player's mark, the slot is now free and the
+-- sticky owner gets their mark back automatically. The free-slot guard
+-- inside ApplyPlayerMarks prevents yanking marks off anything that
+-- still legitimately holds them.
 --
--- UNIT_DIED covers most mob deaths; UNIT_DESTROYED catches
--- destructible objects and some pet/vehicle teardowns; PARTY_KILL
--- is a redundant safety net for player-credited kills.
+-- UNIT_DIED covers most mob deaths; UNIT_DESTROYED catches destructible
+-- objects and some pet/vehicle teardowns; PARTY_KILL is a redundant
+-- safety net for player-credited kills.
 -- =============================================================
 local cleu = CreateFrame("Frame")
 cleu:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
@@ -217,28 +263,6 @@ cleu:SetScript("OnEvent", function()
     if not destGUID then return end
     if sub == "UNIT_DIED" or sub == "UNIT_DESTROYED" or sub == "PARTY_KILL" then
         assignedGUIDs[destGUID] = nil
-    end
-end)
-
-
--- =============================================================
--- CLEU PRUNE: drop dead mobs from the session ledger so their
--- mark slots free up for the next pack. Without this, after pack
--- 1 dies the ledger still considers pack 1's marks "in use" and
--- findFreeMark refuses to mark pack 2 if their priority list
--- collides. Triggered Morphéours's "have to Clear All between
--- packs" workaround.
---
--- UNIT_DIED covers most mob deaths; UNIT_DESTROYED catches
--- destructible objects and some pet/vehicle teardowns; PARTY_KILL
--- is a redundant safety net for player-credited kills.
--- =============================================================
-local cleu = CreateFrame("Frame")
-cleu:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
-cleu:SetScript("OnEvent", function()
-    local _, sub, _, _, _, _, _, destGUID = CombatLogGetCurrentEventInfo()
-    if not destGUID then return end
-    if sub == "UNIT_DIED" or sub == "UNIT_DESTROYED" or sub == "PARTY_KILL" then
-        assignedGUIDs[destGUID] = nil
+        if L3F.ApplyPlayerMarks then L3F.ApplyPlayerMarks() end
     end
 end)
