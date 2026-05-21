@@ -14,16 +14,23 @@
 -- checkbox states.
 --
 -- Why the minimap button is NOT a LibDBIcon button:
--- Minimap-button collector addons (MinimapButtonButton, BBI, etc.)
--- pull every LibDBIcon-registered button into a single grouped
--- button by default. The only opt-out is the user manually
--- blacklisting the button by name via slash commands - there is no
--- self-opt-out hook from the addon side. Morpheours wants this
--- button to stay on the minimap rim independently. So we build a
--- custom button with a name that doesn't match any collector's
--- frame-name patterns ("L3FToolsMapPinsToggle" - no "Minimap"
--- substring, no "LibDBIcon10_" prefix, no trailing digit) and
--- register it directly on Minimap. Collectors leave it alone.
+-- Minimap-button collector addons (MinimapButtonButton, BBI,
+-- Chinchilla, SexyMap, MBF, etc.) pull every LibDBIcon-registered
+-- button into a single grouped button by default. Morpheours wants
+-- this button to stay on the minimap rim independently. Two-layer
+-- opt-out:
+--   1. Custom frame name "L3FToolsMapPinsToggle" - no "Minimap"
+--      substring, no "LibDBIcon10_" prefix, no trailing digit -
+--      defeats frame-name pattern matchers (MBB, BBI).
+--   2. Parent = UIParent, NOT Minimap - defeats collectors that
+--      walk Minimap:GetChildren() (Chinchilla, SexyMap, MBF).
+-- Rim placement is preserved by anchoring SetPoint to Minimap by
+-- reference (relational anchors don't care about parent), and a
+-- SetScale(Minimap.effective / UIParent.effective) matches Minimap-
+-- parented buttons' physical size. Rim offset (MM_BTN_RADIUS = -10)
+-- is empirically tuned for the UIParent-parented case - +5 looked
+-- right under Minimap parent but lands visibly too far out under
+-- UIParent + SetScale.
 -- The main L3F minimap button (Minimap.lua, "open the addon
 -- window") deliberately STAYS LibDBIcon - that one is a normal
 -- launcher and is fine to be collected.
@@ -43,7 +50,12 @@ if not GM then return end
 
 local ICON_PATH     = "Interface\\AddOns\\L3FTools\\Media\\CheesePin"
 local MM_BTN_NAME   = "L3FToolsMapPinsToggle"
-local MM_BTN_RADIUS = 5  -- matches LibDBIcon's lib.radius
+-- LibDBIcon uses +5 (button center 5 units outside the rim). With our
+-- UIParent reparent + SetScale fix, the math gives the same physical
+-- position in theory but lands visibly too far out in practice. -10
+-- (button center 10 units INSIDE the rim) restores rim-flush look that
+-- Morpheours expects. Iterate if a future Morpheours report needs it.
+local MM_BTN_RADIUS = -10
 
 -- Minimap-shape quadrant tables (from LibDBIcon - same shapes the
 -- minimap-shape addons advertise via the global GetMinimapShape).
@@ -205,20 +217,23 @@ local function buildMinimapButton()
     L3FToolsDB.guildMap.pinsButton = L3FToolsDB.guildMap.pinsButton or {}
     local saved = L3FToolsDB.guildMap.pinsButton
 
-    -- Parent: Minimap. Register on Minimap directly so the button
-    -- inherits MinimapCluster scale + auto-hides with the minimap, and
-    -- the rim math (SetPoint to Minimap:CENTER) renders flush against
-    -- the rim like every other LibDBIcon button.
-    --
-    -- Collector opt-out is via frame name only: collectors that
-    -- pattern-match "LibDBIcon10_*" prefixes or "Minimap" substrings
-    -- leave "L3FToolsMapPinsToggle" alone (covers MinimapButtonButton,
-    -- BBI). Collectors that walk Minimap:GetChildren() blindly will
-    -- still grab it - reparenting to UIParent to defeat those was
-    -- tried in 0.12.3/0.12.4 and broke the visuals (button no longer
-    -- flush against the rim like other minimap buttons), reverted.
-    local b = CreateFrame("Button", MM_BTN_NAME, Minimap)
+    -- Parent: UIParent, NOT Minimap. Universal opt-out against
+    -- collectors that walk Minimap:GetChildren() (Chinchilla, SexyMap,
+    -- MBF aggressive mode, etc.). The button still lives on the
+    -- minimap rim because every SetPoint below is ANCHORED to Minimap
+    -- by reference - relational anchors don't care about parent. Drag
+    -- math reads Minimap:GetCenter() too.
+    local b = CreateFrame("Button", MM_BTN_NAME, UIParent)
     b._db = saved
+    -- Match Minimap's effective scale. Without this, the 31x31 button
+    -- and rim offsets render in UIParent units (smaller), sitting the
+    -- button INSIDE the rim and visibly smaller than other minimap
+    -- buttons. With SetScale the button matches Minimap-parented
+    -- buttons' size; rim offset is empirically corrected by
+    -- MM_BTN_RADIUS = -10 above.
+    local mmScale = (Minimap.GetEffectiveScale and Minimap:GetEffectiveScale()) or 1
+    local upScale = (UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
+    if upScale > 0 then b:SetScale(mmScale / upScale) end
     b:SetFrameStrata("MEDIUM")
     b:SetSize(31, 31)
     b:SetFrameLevel(8)
@@ -276,7 +291,18 @@ local function buildMinimapButton()
 
     updateMinimapButtonPosition(b, saved.minimapPos or 220)
 
-    if saved.hide then b:Hide() end
+    -- Initial visibility: respect saved.hide AND Minimap's current
+    -- shown state (parented to UIParent, so we don't auto-hide with
+    -- the minimap any more; have to sync manually).
+    if saved.hide or not Minimap:IsShown() then b:Hide() else b:Show() end
+
+    -- Mirror Minimap visibility going forward. Without this, the
+    -- button stays on screen even when the user / a Minimap-managing
+    -- addon hides the minimap.
+    Minimap:HookScript("OnHide", function() b:Hide() end)
+    Minimap:HookScript("OnShow", function()
+        if not saved.hide then b:Show() end
+    end)
 
     minimapBuilt = true
 
