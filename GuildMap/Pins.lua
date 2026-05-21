@@ -229,8 +229,9 @@ local TRAIL_DEDUP_EPS        = 0.001  -- treat dots within this normalized dista
 -- scale, so a 25-px clear works at any zoom level (the old fixed
 -- 0.015 normalized was undersized at full zoom-out and oversized
 -- when zoomed in).
-local TRAIL_HEAD_AGE_GAP     = 3.0    -- skip dots younger than this (moving-broadcaster case)
-local TRAIL_HEAD_BUFFER_PX   = 15     -- desired clear gap from pin in screen pixels
+local TRAIL_HEAD_AGE_GAP        = 3.0    -- skip dots younger than this (moving-broadcaster case)
+local TRAIL_HEAD_BUFFER_PX_MAX  = 20     -- desired px clear at full zoom-out
+local TRAIL_HEAD_BUFFER_PX_MIN  = 15     -- desired px clear at full zoom-in
 local TRAIL_REF              = "L3FToolsTrail"
 local TRAIL_TEXTURE          = "Interface\\AddOns\\L3FTools\\Media\\Dot"
 
@@ -335,13 +336,23 @@ end
 -- GetCanvasContainer (the visible map area). Width times scale gives
 -- the effective pixel width that one full normalized unit covers; the
 -- buffer in normalized units is then desired-px divided by that.
+--
+-- The "desired px" is itself zoom-dependent: full zoom-out gets a bit
+-- more clearance (zoom-out compresses world distance into fewer
+-- screen pixels, so the same px gap feels less generous), and full
+-- zoom-in stays at the tighter value. GetCanvasZoomPercent returns
+-- 0 at zoom-out and 1 at zoom-in.
 local function computeHeadDistBuffer()
     if not WorldMapFrame then return 0.025 end
     local scale = (WorldMapFrame.GetCanvasScale and WorldMapFrame:GetCanvasScale()) or 1
     local container = WorldMapFrame.GetCanvasContainer and WorldMapFrame:GetCanvasContainer()
     local width = (container and container:GetWidth()) or 600
     if width <= 0 or scale <= 0 then return 0.025 end
-    return TRAIL_HEAD_BUFFER_PX / (width * scale)
+    local zoomPercent = (WorldMapFrame.GetCanvasZoomPercent
+        and WorldMapFrame:GetCanvasZoomPercent()) or 0
+    local bufferPx = TRAIL_HEAD_BUFFER_PX_MAX
+        + (TRAIL_HEAD_BUFFER_PX_MIN - TRAIL_HEAD_BUFFER_PX_MAX) * zoomPercent
+    return bufferPx / (width * scale)
 end
 
 local function applyWorldPinPosition(self, mapID, x, y)
