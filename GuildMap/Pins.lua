@@ -327,6 +327,18 @@ local function pinTick(self, elapsed, applyPosition)
     applyPosition(self, L.mapID, renderX, renderY)
 end
 
+-- HBD's UseFrameLevelType stashes the type name on the providerPin
+-- but doesn't apply the numeric frame level - the canvas only does
+-- that on map-show / zoom-change events. So a newly-acquired pin
+-- keeps whatever level the recycled pool pin had, and our
+-- "trail goes below player pin" ordering never takes effect. Force
+-- the apply by reaching the providerPin via icon:GetParent() and
+-- calling its ApplyFrameLevel.
+local function forceApplyHBDFrameLevel(icon)
+    local pp = icon and icon:GetParent()
+    if pp and pp.ApplyFrameLevel then pp:ApplyFrameLevel() end
+end
+
 local function applyWorldPinPosition(self, mapID, x, y)
     if not WorldMapFrame or not WorldMapFrame:IsShown() then return end
     -- Remove before Add: HBD's worldmap path pulls a fresh providerPin
@@ -335,6 +347,7 @@ local function applyWorldPinPosition(self, mapID, x, y)
     -- canvas zoom-scale animation (the "flashing larger" bug).
     HBDPins:RemoveWorldMapIcon(REF_NAME, self)
     HBDPins:AddWorldMapIconMap(REF_NAME, self, mapID, x, y, HBD_PINS_WORLDMAP_SHOW_WORLD)
+    forceApplyHBDFrameLevel(self)
 end
 
 local function applyMinimapPinPosition(self, mapID, x, y)
@@ -439,6 +452,7 @@ local function rebuildTrail()
                         -- buffer that didn't survive zoomed-out views).
                         HBDPins:AddWorldMapIconMap(TRAIL_REF, d, a.mapID, px, py,
                             HBD_PINS_WORLDMAP_SHOW_WORLD, TRAIL_FRAME_LEVEL)
+                        forceApplyHBDFrameLevel(d)
                         lastX, lastY = px, py
                     end
                 end
@@ -791,6 +805,7 @@ local function upsertPin(short, entry)
         HBDPins:RemoveWorldMapIcon(REF_NAME, wf)
         HBDPins:AddWorldMapIconMap(REF_NAME, wf, entry.mapID, curX, curY,
             HBD_PINS_WORLDMAP_SHOW_WORLD)
+        forceApplyHBDFrameLevel(wf)
         wf._lastRenderedX, wf._lastRenderedY = curX, curY
     elseif set.world then
         set.world._nextX = nil  -- cluster code's "is live" check sees this and skips
