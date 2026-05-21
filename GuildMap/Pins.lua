@@ -804,11 +804,11 @@ local function upsertPin(short, entry)
 
         local sizeMul = gm.worldPinSize or 1.0
         wf:SetSize(22 * sizeMul, 22 * sizeMul)
-        -- Dead broadcasters get a bigger skull so it reads as "dead" at a
-        -- glance instead of just "icon swap". AFK keeps the normal class-
-        -- icon size (less dramatic state). Skull overflows the source
-        -- ring by a few px on each side - deliberate emphasis.
-        local iconBase = isDead and 28 or 18
+        -- Dead + AFK both get the bigger 28-px icon so the state reads
+        -- at a glance. Icon overflows the source ring by a few px on
+        -- each side - deliberate emphasis. Minimap pin sizing is
+        -- untouched (CheesePin / MinimapAFK stay at 16 * sizeMul).
+        local iconBase = (isDead or isAfk) and 28 or 18
         wf.icon:SetSize(iconBase * sizeMul, iconBase * sizeMul)
         wf.hpBg:SetSize(20 * sizeMul, 3 * sizeMul)
 
