@@ -2,7 +2,7 @@
 ## Title: L3FTools
 ## Notes: Multi-tool suite for TBC Anniversary - Automarker, Atlas/Encyclopedia, more.
 ## Author: Willem
-## Version: 0.6.0
+## Version: 0.8.0
 ## SavedVariables: L3FToolsDB
 ## IconTexture: Interface\AddOns\L3FTools\Media\automarker
 
@@ -86,4 +86,5 @@ Tabs/Settings.lua
 GuildMap/Core.lua
 GuildMap/Broadcast.lua
 GuildMap/Pins.lua
+GuildMap/PinToggle.lua
 Minimap.lua

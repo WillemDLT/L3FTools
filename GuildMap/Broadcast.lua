@@ -10,7 +10,9 @@
 -- Send conditions (all must hold):
 --   * L3FToolsDB.guildMap.shareWithGuild == true
 --   * IsInGuild()
---   * not (pauseInRaidInstance is on AND we are inside a raid instance)
+--   * not (pauseInInstance is on AND we are inside a raid instance or BG)
+--     - Morphéours: pause inside BGs too; teammates are stacked anyway and
+--       BG positions leak useful intel to whoever runs L3FTools cross-faction
 --   * we have moved more than MOVE_THRESHOLD since the last send
 --     OR MAX_INTERVAL seconds have elapsed (heartbeat)
 --
@@ -43,9 +45,10 @@ C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
 local lastSentTime = 0
 local lastX, lastY, lastMap = nil, nil, nil
 
-local function inRaidInstance()
+local function inSuppressedInstance()
     local inInstance, instanceType = IsInInstance()
-    return inInstance and instanceType == "raid"
+    if not inInstance then return false end
+    return instanceType == "raid" or instanceType == "pvp"
 end
 
 local function shouldBroadcast()
@@ -53,7 +56,7 @@ local function shouldBroadcast()
     local gm = L3FToolsDB.guildMap
     if not gm.shareWithGuild then return false end
     if not IsInGuild() then return false end
-    if gm.pauseInRaidInstance and inRaidInstance() then return false end
+    if gm.pauseInInstance and inSuppressedInstance() then return false end
     return true
 end
 

@@ -52,9 +52,12 @@ local function buildSettings(parent)
         "  /l3f                  open the window\n" ..
         "  /l3f automarker       open on Automarker tab\n" ..
         "  /l3f atlas            open on Atlas tab\n" ..
+        "  /l3f map              open on Map tab\n" ..
+        "  /l3f guild            open on Guild tab\n" ..
         "  /l3f settings         open on Settings tab\n" ..
         "  /l3f toggle           master Automarker enable on/off\n" ..
-        "  /l3f minimap          hide/show the minimap button\n"
+        "  /l3f minimap          hide/show the main minimap button\n" ..
+        "  /l3f mappins          hide/show all guild-map pins\n"
     )
 
     local version = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")

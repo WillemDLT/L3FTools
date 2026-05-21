@@ -157,12 +157,14 @@ local DEFAULTS = {
     },
     -- Guild Map module (live position sharing on world map + minimap)
     guildMap = {
-        privacyAnswered     = false,  -- set true after the user has answered the first-run popup
-        shareWithGuild      = false,  -- broadcast position to guild members with L3FTools
-        shareWithGroup      = false,  -- broadcast position to group/raid members (Phase 1.5)
-        shareWithFriends    = false,  -- whisper-broadcast position to char-friends (Phase 1.5)
-        pauseInRaidInstance = true,   -- pause broadcasting while inside a raid instance
-        blockedPlayers      = {},     -- characters this client refuses to share with
+        privacyAnswered  = false,  -- set true after the user has answered the first-run popup
+        shareWithGuild   = false,  -- broadcast position to guild members with L3FTools
+        shareWithGroup   = false,  -- broadcast position to group/raid members (Phase 1.5)
+        shareWithFriends = false,  -- whisper-broadcast position to char-friends (Phase 1.5)
+        -- Auto-pause broadcasting inside any raid instance OR battleground.
+        -- (Pre-rename name was pauseInRaidInstance; migrated below.)
+        pauseInInstance  = true,
+        blockedPlayers   = {},     -- characters this client refuses to share with
         -- Display preferences (used by chunks 4-5; saved here so the panel
         -- can reach them through a single namespace).
         showOnWorldMap   = true,
@@ -173,6 +175,11 @@ local DEFAULTS = {
         showName         = true,
         showLevel        = true,
         showHP           = true,
+        -- Master visibility toggle, flipped by the pin-visibility buttons
+        -- (LibDBIcon minimap + WorldMapFrame button, see GuildMap/PinToggle).
+        -- Takes precedence over showOnWorldMap / showOnMinimap.
+        pinsHidden       = false,
+        pinsButton       = { hide = false, minimapPos = 230 },  -- LibDBIcon state
     },
 }
 
@@ -204,6 +211,14 @@ local function initDB()
        and L3FToolsDB.minimap.angle then
         L3FToolsDB.minimap.minimapPos = L3FToolsDB.minimap.angle
         L3FToolsDB.minimap.angle = nil
+    end
+    -- One-time migration: pauseInRaidInstance -> pauseInInstance (now covers
+    -- raid AND BG instances per Morphéours B.4). Keep the user's prior choice.
+    if L3FToolsDB.guildMap
+       and L3FToolsDB.guildMap.pauseInInstance == nil
+       and L3FToolsDB.guildMap.pauseInRaidInstance ~= nil then
+        L3FToolsDB.guildMap.pauseInInstance = L3FToolsDB.guildMap.pauseInRaidInstance
+        L3FToolsDB.guildMap.pauseInRaidInstance = nil
     end
     deepCopyDefaults(L3FToolsDB, DEFAULTS)
     -- First-ever launch: enable Automarker for every NPC we know about.
@@ -446,6 +461,10 @@ local function handleSlash(msg)
         if L3F.RefreshMinimap then L3F.RefreshMinimap() end
         print("|cffffd100L3FTools|r minimap button " ..
             (L3F.db.minimap.hide and "|cffff5555hidden|r" or "|cff00ff00shown|r"))
+    elseif msg == "mappins" then
+        if L3F.GuildMap and L3F.GuildMap.TogglePinsHidden then
+            L3F.GuildMap.TogglePinsHidden()
+        end
     elseif msg == "switcher" or msg == "wing" then
         if L3F.ToggleSwitcher then L3F.ToggleSwitcher() end
     elseif msg == "automarker" or msg == "atlas" or msg == "map" or msg == "guild" or msg == "settings" then
@@ -482,7 +501,8 @@ local function handleSlash(msg)
         print("  /l3f guild          open on Guild tab")
         print("  /l3f settings       open on Settings tab")
         print("  /l3f toggle         master Automarker enable on/off")
-        print("  /l3f minimap        hide/show the minimap button")
+        print("  /l3f minimap        hide/show the main minimap button")
+        print("  /l3f mappins        hide/show all guild-map pins")
         print("  /l3f switcher       show/hide the wing switcher")
         print("  /l3f reset          reset window size + position to defaults")
     else
