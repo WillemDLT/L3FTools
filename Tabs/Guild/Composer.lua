@@ -266,55 +266,57 @@ local DEBUFFS_LIST = {
 
 -- TBC max-rank spell IDs used by the buff/debuff tooltip on hover.
 -- GameTooltip:SetSpellByID resolves these to the canonical, localized
--- in-game tooltip (rank, mana, range, cast time, description). Any ID
--- that doesn't resolve falls back to a plain-text tooltip with just
--- the name - easy per-entry correction when a beta tester flags one.
+-- in-game tooltip (rank, mana, range, cast time, description). IDs
+-- verified against Wowhead /tbc/ + multiple secondary databases
+-- (wowclassicdb.com, cavernoftime.com) in 0.16.3 - Morphéours saw
+-- rank-1 tooltips on several entries because earlier IDs pointed at
+-- talent rank 1 / spell rank 1 instead of the max-rank variant.
 local SPELL_IDS = {
     -- Buffs
-    ["Arcane Intellect"]              = 27126,
-    ["Battle Shout"]                  = 25289,
-    ["Blessing of Kings"]             = 20217,
-    ["Blessing of Sanctuary"]         = 27168,
-    ["Bloodlust"]                     =  2825,
-    ["Commanding Shout"]              = 25289,  -- TBC Anniversary may map to a distinct spell ID
-    ["Devotion Aura"]                 = 27149,
-    ["Divine Spirit"]                 = 25312,
-    ["Earth Shield"]                  = 32594,
-    ["Ferocious Inspiration"]         = 34460,
-    ["Improved Healthstone"]          = 18692,
-    ["Improved Imp"]                  = 18696,
-    ["Improved Mark of the Wild"]     = 17051,
-    ["Innervate"]                     = 29166,
-    ["Leader of the Pack"]            = 24932,
-    ["Mana Tide Totem"]               = 16191,
-    ["Mark of the Wild"]              = 26990,
-    ["Moonkin Form"]                  = 24858,
-    ["Pain Suppression"]              = 33206,
-    ["Power Word: Fortitude"]         = 25389,
-    ["Sanctity Aura"]                 = 31870,
-    ["Shadow Protection"]             = 25433,
-    ["Totem of Wrath"]                = 30706,
-    ["Tree of Life"]                  = 33891,
-    ["Trueshot Aura"]                 = 27066,
-    ["Unleashed Rage"]                = 30802,
+    ["Arcane Intellect"]              = 27126,  -- Rank 6 (TBC max)
+    ["Battle Shout"]                  = 25289,  -- Rank 8 (TBC max)
+    ["Blessing of Kings"]             = 20217,  -- Single rank
+    ["Blessing of Sanctuary"]         = 27168,  -- Rank 6 (TBC max)
+    ["Bloodlust"]                     =  2825,  -- Single rank
+    ["Commanding Shout"]              =   469,  -- TBC warrior lvl 68; was incorrectly 25289 (Battle Shout)
+    ["Devotion Aura"]                 = 27149,  -- Rank 8 (TBC max)
+    ["Divine Spirit"]                 = 25312,  -- Rank 5 (TBC max)
+    ["Earth Shield"]                  = 32594,  -- Rank 3 (TBC max)
+    ["Ferocious Inspiration"]         = 34460,  -- Rank 3 talent (TBC max)
+    ["Improved Healthstone"]          = 18692,  -- Rank 2 talent (TBC max)
+    ["Improved Imp"]                  = 18696,  -- Rank 3 talent (TBC max)
+    ["Improved Mark of the Wild"]     = 17051,  -- Rank 5 talent (TBC max)
+    ["Innervate"]                     = 29166,  -- Single rank
+    ["Leader of the Pack"]            = 24932,  -- Aura
+    ["Mana Tide Totem"]               = 16190,  -- Single TBC rank; was 16191 (didn't exist)
+    ["Mark of the Wild"]              = 26990,  -- Rank 8 (TBC max)
+    ["Moonkin Form"]                  = 24858,  -- Single rank
+    ["Pain Suppression"]              = 33206,  -- Single rank
+    ["Power Word: Fortitude"]         = 25389,  -- Rank 7 (TBC max)
+    ["Sanctity Aura"]                 = 20218,  -- Base aura single rank; was 31870 (Imp SA talent rank 2)
+    ["Shadow Protection"]             = 25433,  -- Rank 4 (TBC max)
+    ["Totem of Wrath"]                = 30706,  -- Single rank talent
+    ["Tree of Life"]                  = 33891,  -- Single rank talent
+    ["Trueshot Aura"]                 = 27066,  -- Rank 4 (TBC max)
+    ["Unleashed Rage"]                = 30802,  -- Rank 5 talent (TBC max)
     -- Debuffs
-    ["Blood Frenzy"]                  = 29859,
-    ["Expose Weakness"]               = 34503,
-    ["Faerie Fire"]                   = 26993,
-    ["Hemorrhage"]                    = 16511,
-    ["Improved Demoralizing Shout"]   = 12879,
-    ["Improved Expose Armor"]         = 14169,
-    ["Improved Faerie Fire"]          = 33602,
-    ["Improved Scorch"]               = 22959,
-    ["Improved Seal of the Crusader"] = 20335,
-    ["Improved Shadow Bolt"]          = 17800,
-    ["Improved Thunder Clap"]         = 12666,
-    ["Insect Swarm"]                  = 27013,
-    ["Malediction"]                   = 32379,
-    ["Mangle"]                        = 33878,
-    ["Scorpid Sting"]                 =  3043,
-    ["Shadow Weaving"]                = 15334,
-    ["Winter's Chill"]                = 28593,
+    ["Blood Frenzy"]                  = 29859,  -- Rank 2 talent (TBC max)
+    ["Expose Weakness"]               = 34503,  -- Rank 3 talent (TBC max)
+    ["Faerie Fire"]                   =  9907,  -- Rank 5 (TBC max); was 26993 (doesn't exist)
+    ["Hemorrhage"]                    = 26864,  -- Rank 4 (TBC max); was 16511 (talent / rank 1)
+    ["Improved Demoralizing Shout"]   = 12879,  -- Rank 5 talent (TBC max)
+    ["Improved Expose Armor"]         = 14169,  -- Rank 2 talent (TBC max)
+    ["Improved Faerie Fire"]          = 33602,  -- Rank 3 talent (TBC max)
+    ["Improved Scorch"]               = 22959,  -- Rank 5 talent (TBC max)
+    ["Improved Seal of the Crusader"] = 33557,  -- Rank 3 talent (TBC max); was 20335 (Seal rank 1)
+    ["Improved Shadow Bolt"]          = 17800,  -- Rank 5 talent (TBC max)
+    ["Improved Thunder Clap"]         = 12666,  -- Rank 3 talent (TBC max)
+    ["Insect Swarm"]                  = 27013,  -- Rank 6 (TBC max)
+    ["Malediction"]                   = 32379,  -- Rank 3 talent (TBC max)
+    ["Mangle"]                        = 33917,  -- The Mangle talent itself; was 33878 (Mangle Bear rank 1)
+    ["Scorpid Sting"]                 =  3043,  -- Single rank
+    ["Shadow Weaving"]                = 15334,  -- Rank 5 talent (TBC max)
+    ["Winter's Chill"]                = 28593,  -- Rank 5 talent (TBC max)
 }
 
 local SPEC_LOOKUP = {}
