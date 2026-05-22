@@ -85,6 +85,11 @@ function L3F.RegisterTab(name, label, icon, builder, opts)
         -- clipping or overflowing.
         minWidth  = opts and opts.minWidth  or nil,
         minHeight = opts and opts.minHeight or nil,
+        -- 0.16.0: each tab can declare its preferred display size. When
+        -- the tab is shown, the main window auto-grows (never shrinks)
+        -- to meet these. Clamped to screen size minus a small margin.
+        preferredWidth  = opts and opts.preferredWidth  or nil,
+        preferredHeight = opts and opts.preferredHeight or nil,
     }
     if parent then
         L3F.subTabOrder[parent] = L3F.subTabOrder[parent] or {}
@@ -219,6 +224,27 @@ local function showTab(name)
             contentTab.built = true
         end
         if contentTab.frame then contentTab.frame:Show() end
+
+        -- Auto-grow the main window to fit the new tab if needed. The
+        -- window NEVER shrinks here - a user who manually enlarged the
+        -- frame keeps their size. Saves the user from having to drag
+        -- the resize grip every time they open a content-rich tab.
+        local pw = contentTab.preferredWidth  or 0
+        local ph = contentTab.preferredHeight or 0
+        if (pw > 0 or ph > 0) and mainFrame then
+            local maxW, maxH = getMaxSize()
+            local minW = getMinWidth()
+            local minH = getMinHeight()
+            local cw, ch = mainFrame:GetWidth(), mainFrame:GetHeight()
+            local targetW = math.max(cw, math.min(math.max(pw, minW), maxW))
+            local targetH = math.max(ch, math.min(math.max(ph, minH), maxH))
+            if targetW > cw + 1 or targetH > ch + 1 then
+                mainFrame:SetSize(targetW, targetH)
+                L3F.db.window.width  = math.floor(targetW + 0.5)
+                L3F.db.window.height = math.floor(targetH + 0.5)
+                if L3F.OnFrameResized then L3F.OnFrameResized() end
+            end
+        end
     end
 
     updateStripVisibility()

@@ -733,4 +733,7 @@ end
 -- minWidth: keybind row ("Hold-to-mark key:" label + button +
 -- "Clear-marks key:" label + button) is the widest single row inside
 -- the tab; ~700 keeps it from clipping.
-L3F.RegisterTab("automarker", "Automarker", nil, buildAutomarker, { minWidth = 700 })
+L3F.RegisterTab("automarker", "Automarker", nil, buildAutomarker, {
+    minWidth = 700,
+    preferredWidth = 900, preferredHeight = 600,
+})

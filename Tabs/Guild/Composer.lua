@@ -324,12 +324,29 @@ for _, s in ipairs(SPECS) do SPEC_LOOKUP[s.key] = s end
 -- =============================================================
 -- 2. PROFILE STATE
 -- =============================================================
+-- 0.16.0 limits: 1-5 groups visible, 0-5 benches visible. Defaults to
+-- a full 5-group raid + a single 5-slot bench so the player lands on
+-- the standard 25-man-plus-substitutes layout without needing to add
+-- anything by hand.
+local GROUP_MIN, GROUP_MAX = 1, 5
+local BENCH_MIN, BENCH_MAX = 0, 5
+local DEFAULT_GROUP_COUNT = 5
+local DEFAULT_BENCH_COUNT = 1
+
 local function newEmptyProfile()
-    local p = { groups = {}, groupCount = 3 }
-    for g = 1, 9 do
+    local p = {
+        groups = {}, groupCount = DEFAULT_GROUP_COUNT,
+        benches = {}, benchCount = DEFAULT_BENCH_COUNT,
+    }
+    for g = 1, GROUP_MAX do
         local slots = {}
         for i = 1, 5 do slots[i] = nil end
         p.groups[g] = { name = "Group " .. g, slots = slots }
+    end
+    for b = 1, BENCH_MAX do
+        local slots = {}
+        for i = 1, 5 do slots[i] = nil end
+        p.benches[b] = { name = (b == 1) and "Bench" or ("Bench " .. b), slots = slots }
     end
     return p
 end
@@ -348,15 +365,26 @@ local function ensureComposerState()
             L3F.db.composer.profiles[L3F.db.composer.activeProfile] or newEmptyProfile()
     end
     local p = L3F.db.composer.profiles[L3F.db.composer.activeProfile]
-    p.groupCount = math.max(1, math.min(9, p.groupCount or 3))
+    p.groupCount = math.max(GROUP_MIN, math.min(GROUP_MAX, p.groupCount or DEFAULT_GROUP_COUNT))
     p.groups = p.groups or {}
-    for g = 1, 9 do
+    for g = 1, GROUP_MAX do
         p.groups[g] = p.groups[g] or { name = "Group " .. g, slots = {} }
         for i = 1, 5 do p.groups[g].slots[i] = p.groups[g].slots[i] or nil end
     end
-    -- 0.15.1: bench removed; silently strip from any pre-existing profile
-    -- so SavedVariables don't accumulate dead fields.
-    p.bench = nil
+    -- Heal benches array. Pre-0.16.0 profiles may have a singleton
+    -- `bench` field (0.15.0) or nothing (0.15.1) - migrate either to
+    -- the new `benches[1..BENCH_MAX]` array, keeping the legacy bench's
+    -- name + slots as benches[1] if it existed.
+    p.benches = p.benches or {}
+    if p.bench and type(p.bench) == "table" then
+        p.benches[1] = p.benches[1] or p.bench
+        p.bench = nil
+    end
+    p.benchCount = math.max(BENCH_MIN, math.min(BENCH_MAX, p.benchCount or DEFAULT_BENCH_COUNT))
+    for b = 1, BENCH_MAX do
+        p.benches[b] = p.benches[b] or { name = (b == 1) and "Bench" or ("Bench " .. b), slots = {} }
+        for i = 1, 5 do p.benches[b].slots[i] = p.benches[b].slots[i] or nil end
+    end
 end
 
 local function currentProfile()
@@ -368,10 +396,34 @@ end
 -- =============================================================
 -- 3. BUFF/DEBUFF COVERAGE
 -- =============================================================
+-- Walk every filled slot. Group slots feed both raid-wide coverage
+-- AND per-group party-aura icons. Bench slots feed ONLY the per-bench
+-- aura icons (a hint of what auras would activate if subbed in) -
+-- benched players are inactive by definition, so their buffs/debuffs
+-- do NOT light up the global coverage panel.
 local function computeCoverage()
     local covered = { buffs = {}, debuffs = {} }
     local groupAuras = {}
+    local benchAuras = {}
     local p = currentProfile()
+
+    local function tallyAurasOnly(slots, into)
+        local seen = {}
+        for _, slot in pairs(slots) do
+            if slot and slot.specKey then
+                local s = SPEC_LOOKUP[slot.specKey]
+                if s then
+                    for _, a in ipairs(s.partyAuras or {}) do
+                        if not seen[a.name] then
+                            seen[a.name] = true
+                            table.insert(into, a)
+                        end
+                    end
+                end
+            end
+        end
+    end
+
     for g = 1, p.groupCount do
         groupAuras[g] = {}
         local seenAura = {}
@@ -391,7 +443,11 @@ local function computeCoverage()
             end
         end
     end
-    return covered, groupAuras
+    for b = 1, p.benchCount do
+        benchAuras[b] = {}
+        tallyAurasOnly(p.benches[b].slots, benchAuras[b])
+    end
+    return covered, groupAuras, benchAuras
 end
 
 
@@ -400,27 +456,39 @@ end
 -- =============================================================
 local LibDeflate = LibStub and LibStub("LibDeflate", true)
 
--- Wire format: COMP1|NAME|GC|G1S1,..,G1S5|G2..|...|G9..|GN1//GN2//...//GN9
--- (the bench row + bench name from 0.15.0 are gone in 0.15.1; the
--- decoder still tolerates strings that include them by silently
--- discarding those fields).
+-- Wire format (COMP2): NAME|GC|BC|G1..G5|B1..B5|GN1//..//GN5|BN1//..//BN5
+-- Each Gx/Bx slot row is 5 comma-separated "speckey:label" cells.
+-- COMP1 (older 0.15.x) is still accepted by the decoder for forward
+-- compatibility - it doesn't carry the bench count or per-bench rows.
 local function serializeProfile(name, profile)
     local function encodeSlot(slot)
         if not slot or not slot.specKey then return "" end
         local label = (slot.label or ""):gsub("|", "/"):gsub(",", " ")
         return slot.specKey .. ":" .. label
     end
-    local parts = { name:gsub("|", "/"), tostring(profile.groupCount or 3) }
-    for g = 1, 9 do
+    local parts = {
+        name:gsub("|", "/"),
+        tostring(profile.groupCount or DEFAULT_GROUP_COUNT),
+        tostring(profile.benchCount or DEFAULT_BENCH_COUNT),
+    }
+    for g = 1, GROUP_MAX do
         local row = {}
         for i = 1, 5 do row[i] = encodeSlot(profile.groups[g] and profile.groups[g].slots[i]) end
         table.insert(parts, table.concat(row, ","))
     end
-    local nameRow = {}
-    for g = 1, 9 do nameRow[g] = (profile.groups[g].name or ("Group " .. g)):gsub("|", "/") end
-    table.insert(parts, table.concat(nameRow, "//"))
+    for b = 1, BENCH_MAX do
+        local row = {}
+        for i = 1, 5 do row[i] = encodeSlot(profile.benches[b] and profile.benches[b].slots[i]) end
+        table.insert(parts, table.concat(row, ","))
+    end
+    local gNames = {}
+    for g = 1, GROUP_MAX do gNames[g] = (profile.groups[g].name or ("Group " .. g)):gsub("|", "/") end
+    table.insert(parts, table.concat(gNames, "//"))
+    local bNames = {}
+    for b = 1, BENCH_MAX do bNames[b] = (profile.benches[b].name or ("Bench " .. b)):gsub("|", "/") end
+    table.insert(parts, table.concat(bNames, "//"))
 
-    local inner = "COMP1|" .. table.concat(parts, "|")
+    local inner = "COMP2|" .. table.concat(parts, "|")
     if LibDeflate then
         local compressed = LibDeflate:CompressDeflate(inner)
         return "L3F2C:" .. LibDeflate:EncodeForPrint(compressed)
@@ -444,15 +512,18 @@ local function deserializeProfile(str)
     else
         return nil, "Invalid format (expected L3F1C: or L3F2C:)"
     end
-    if not inner:match("^COMP1|") then return nil, "Not a Composer profile string" end
-    inner = inner:sub(7)
+    local version
+    if inner:match("^COMP2|") then version = 2; inner = inner:sub(7)
+    elseif inner:match("^COMP1|") then version = 1; inner = inner:sub(7)
+    else return nil, "Not a Composer profile string" end
+
     local parts = {}
     for piece in (inner .. "|"):gmatch("([^|]*)|") do table.insert(parts, piece) end
-    if #parts < 11 then return nil, "Truncated profile string" end
+
     local p = newEmptyProfile()
     local function decodeRow(row, into)
         local i = 0
-        for slotStr in (row .. ","):gmatch("([^,]*),") do
+        for slotStr in ((row or "") .. ","):gmatch("([^,]*),") do
             i = i + 1
             if i > 5 then break end
             if slotStr ~= "" then
@@ -463,26 +534,51 @@ local function deserializeProfile(str)
             end
         end
     end
-    p.groupCount = math.max(1, math.min(9, tonumber(parts[2]) or 3))
-    for g = 1, 9 do decodeRow(parts[2 + g], p.groups[g].slots) end
-    -- 0.15.0 strings have a bench row at parts[12] and bench name at
-    -- parts[14]. The group-names row was at parts[13] there, here at
-    -- parts[12]. Try the new position first, fall back to the legacy
-    -- one if the new position holds something that looks like a slot
-    -- (legacy bench row).
-    local nameRow
-    if parts[12] and parts[12]:find("//") then
-        nameRow = parts[12]
-    elseif parts[13] and parts[13]:find("//") then
-        nameRow = parts[13]
-    end
-    if nameRow and nameRow ~= "" then
-        local g = 0
-        for nm in (nameRow .. "//"):gmatch("([^/][^/]*)//") do
-            g = g + 1
-            if g > 9 then break end
-            p.groups[g].name = nm
+
+    if version == 2 then
+        if #parts < 3 + GROUP_MAX + BENCH_MAX then
+            return nil, "Truncated COMP2 string"
         end
+        p.groupCount = math.max(GROUP_MIN, math.min(GROUP_MAX, tonumber(parts[2]) or DEFAULT_GROUP_COUNT))
+        p.benchCount = math.max(BENCH_MIN, math.min(BENCH_MAX, tonumber(parts[3]) or DEFAULT_BENCH_COUNT))
+        for g = 1, GROUP_MAX do decodeRow(parts[3 + g], p.groups[g].slots) end
+        for b = 1, BENCH_MAX do decodeRow(parts[3 + GROUP_MAX + b], p.benches[b].slots) end
+        local gNameRow = parts[4 + GROUP_MAX + BENCH_MAX]
+        local bNameRow = parts[5 + GROUP_MAX + BENCH_MAX]
+        if gNameRow and gNameRow ~= "" then
+            local g = 0
+            for nm in (gNameRow .. "//"):gmatch("([^/][^/]*)//") do
+                g = g + 1; if g > GROUP_MAX then break end
+                p.groups[g].name = nm
+            end
+        end
+        if bNameRow and bNameRow ~= "" then
+            local b = 0
+            for nm in (bNameRow .. "//"):gmatch("([^/][^/]*)//") do
+                b = b + 1; if b > BENCH_MAX then break end
+                p.benches[b].name = nm
+            end
+        end
+    else
+        -- Legacy COMP1: only groups + optional group-names row at parts[12]
+        -- (0.15.1) or parts[13] (0.15.0 with bench row at parts[12]).
+        if #parts < 11 then return nil, "Truncated COMP1 string" end
+        p.groupCount = math.max(GROUP_MIN, math.min(GROUP_MAX, tonumber(parts[2]) or DEFAULT_GROUP_COUNT))
+        for g = 1, math.min(9, #parts - 2) do
+            if g <= GROUP_MAX then decodeRow(parts[2 + g], p.groups[g].slots) end
+        end
+        local nameRow
+        if parts[12] and parts[12]:find("//") then nameRow = parts[12]
+        elseif parts[13] and parts[13]:find("//") then nameRow = parts[13] end
+        if nameRow then
+            local g = 0
+            for nm in (nameRow .. "//"):gmatch("([^/][^/]*)//") do
+                g = g + 1; if g > GROUP_MAX then break end
+                p.groups[g].name = nm
+            end
+        end
+        -- Legacy strings carry no bench count; we keep the default.
+        p.benchCount = DEFAULT_BENCH_COUNT
     end
     return parts[1] or "Imported", p
 end
@@ -543,6 +639,12 @@ local function findSlotUnderFrame(frame)
     return nil
 end
 
+-- Short inline-text prompt (group/bench name, slot label, profile name).
+-- TBC Anniversary popups use `self.EditBox` (capitalised) - using the
+-- lowercase form silently no-ops and was the 0.15.0 "save doesn't
+-- work" bug. The popup is keyed L3FCOMPOSER_TEXT and reused across
+-- every short prompt; the data table carries the prompt/preset and
+-- the onAccept callback.
 StaticPopupDialogs["L3FCOMPOSER_TEXT"] = {
     text = "",
     button1 = OKAY or "Okay",
@@ -551,19 +653,20 @@ StaticPopupDialogs["L3FCOMPOSER_TEXT"] = {
     maxLetters = 32,
     timeout = 0, whileDead = true, hideOnEscape = true,
     OnShow = function(self, data)
-        self.editBox:SetText(data.preset or "")
-        self.editBox:HighlightText()
+        self.EditBox:SetText(data.preset or "")
+        self.EditBox:HighlightText()
+        self.EditBox:SetFocus()
         self.text:SetText(data.prompt or "Enter text:")
     end,
     OnAccept = function(self, data)
-        local txt = self.editBox:GetText() or ""
-        if data.onAccept then data.onAccept(txt) end
+        local txt = self.EditBox:GetText() or ""
+        if data and data.onAccept then data.onAccept(txt) end
     end,
     EditBoxOnEnterPressed = function(self)
-        local parent = self:GetParent()
-        local data = parent.data
+        local p = self:GetParent()
+        local data = p.data
         if data and data.onAccept then data.onAccept(self:GetText() or "") end
-        parent:Hide()
+        p:Hide()
     end,
     EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
 }
@@ -572,50 +675,6 @@ local function promptText(prompt, preset, onAccept)
     StaticPopup_Show("L3FCOMPOSER_TEXT", nil, nil,
         { prompt = prompt, preset = preset, onAccept = onAccept })
 end
-
-StaticPopupDialogs["L3FCOMPOSER_EXPORT"] = {
-    text = "Copy this string to share the profile:",
-    button1 = CLOSE or "Close",
-    hasEditBox = true,
-    editBoxWidth = 280,
-    maxLetters = 0,
-    timeout = 0, whileDead = true, hideOnEscape = true,
-    OnShow = function(self, data)
-        self.editBox:SetText(data.payload or "")
-        self.editBox:HighlightText()
-        self.editBox:SetFocus()
-    end,
-    EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
-}
-
-StaticPopupDialogs["L3FCOMPOSER_IMPORT"] = {
-    text = "Paste a Composer profile string:",
-    button1 = OKAY or "Okay",
-    button2 = CANCEL or "Cancel",
-    hasEditBox = true,
-    editBoxWidth = 280,
-    maxLetters = 0,
-    timeout = 0, whileDead = true, hideOnEscape = true,
-    OnShow = function(self) self.editBox:SetText(""); self.editBox:SetFocus() end,
-    OnAccept = function(self)
-        local str = self.editBox:GetText() or ""
-        local name, profile = deserializeProfile(str)
-        if not name then
-            print("|cffffd100L3FComp|r import failed: " .. tostring(profile))
-            return
-        end
-        local base, idx = name, 1
-        while L3F.db.composer.profiles[name] do
-            idx = idx + 1
-            name = base .. " (" .. idx .. ")"
-        end
-        L3F.db.composer.profiles[name] = profile
-        L3F.db.composer.activeProfile = name
-        if refresh then refresh() end
-        print("|cffffd100L3FComp|r imported profile '" .. name .. "'")
-    end,
-    EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
-}
 
 local SLOT_W, SLOT_H = 178, 22
 local GROUP_W = 200
@@ -768,7 +827,11 @@ local function buildSlotRow(parent, target, idx, y)
     end
 end
 
-local function buildGroupFrame(parent, target, x, y, idxLabel)
+-- Generic group/bench frame builder. `kind` is "group" or "bench" and
+-- determines (a) the remove-button condition (groups can't fall below
+-- 1, benches can go to 0) and (b) which aura map feeds the per-frame
+-- party-aura strip (groupAuras or benchAuras).
+local function buildSquadFrame(parent, target, x, y, idxLabel, kind, auras)
     local f = CreateFrame("Frame", nil, parent)
     f:SetSize(GROUP_W, 220)
     f:SetPoint("TOPLEFT", parent, "TOPLEFT", x, -y)
@@ -777,24 +840,53 @@ local function buildGroupFrame(parent, target, x, y, idxLabel)
     hdr:SetSize(GROUP_W - 22, 18)
     hdr:SetPoint("TOPLEFT", f, "TOPLEFT", 0, 0)
     local hdrTxt = hdr:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    hdrTxt:SetPoint("LEFT", hdr, "LEFT", 4, 0); hdrTxt:SetText(target.name or "Group")
+    hdrTxt:SetPoint("LEFT", hdr, "LEFT", 4, 0)
+    hdrTxt:SetText(target.name or (kind == "bench" and "Bench" or "Group"))
+    -- Bench labels render in a slightly dimmer cyan to telegraph that
+    -- the slots inside don't contribute to raid-wide buff coverage.
+    if kind == "bench" then hdrTxt:SetTextColor(0.55, 0.85, 1.0) end
     hdr:SetScript("OnClick", function()
-        promptText("Rename group:", target.name or "", function(txt)
+        promptText(kind == "bench" and "Rename bench:" or "Rename group:",
+            target.name or "", function(txt)
             if txt and txt ~= "" then target.name = txt; refresh() end
         end)
     end)
 
-    if idxLabel and idxLabel >= 2 then
+    -- Remove button. Groups can be removed down to GROUP_MIN (1);
+    -- benches down to BENCH_MIN (0). The shown-vs-hidden decision
+    -- factors in the current count so the last group never offers
+    -- a minus, but the last bench (when count > 0) does.
+    local p = currentProfile()
+    local canRemove
+    if kind == "group" then
+        canRemove = p.groupCount > GROUP_MIN
+    else
+        canRemove = p.benchCount > BENCH_MIN
+    end
+    if canRemove then
         local rm = CreateFrame("Button", nil, f)
         rm:SetSize(16, 16)
         rm:SetPoint("TOPRIGHT", f, "TOPRIGHT", -2, -1)
         rm:SetNormalTexture("Interface\\Buttons\\UI-MinusButton-Up")
         rm:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+        rm:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText("Remove this " .. kind)
+            GameTooltip:Show()
+        end)
+        rm:SetScript("OnLeave", function() GameTooltip:Hide() end)
         rm:SetScript("OnClick", function()
-            local p = currentProfile()
-            for g = idxLabel, 8 do p.groups[g] = p.groups[g + 1] end
-            p.groups[9] = { name = "Group 9", slots = { nil, nil, nil, nil, nil } }
-            p.groupCount = math.max(1, p.groupCount - 1)
+            local pp = currentProfile()
+            local arr = (kind == "bench") and pp.benches or pp.groups
+            local maxN = (kind == "bench") and BENCH_MAX or GROUP_MAX
+            for i = idxLabel, maxN - 1 do arr[i] = arr[i + 1] end
+            arr[maxN] = { name = (kind == "bench" and "Bench " .. maxN or "Group " .. maxN),
+                          slots = { nil, nil, nil, nil, nil } }
+            if kind == "bench" then
+                pp.benchCount = math.max(BENCH_MIN, pp.benchCount - 1)
+            else
+                pp.groupCount = math.max(GROUP_MIN, pp.groupCount - 1)
+            end
             refresh()
         end)
     end
@@ -805,17 +897,19 @@ local function buildGroupFrame(parent, target, x, y, idxLabel)
         yy = yy + SLOT_H + 2
     end
 
-    local _, groupAurasMap = computeCoverage()
+    -- Party-aura strip. Bench strips show the auras that WOULD activate
+    -- if the player were subbed in - useful planning info; never tallied
+    -- into the global coverage panel.
     local strip = CreateFrame("Frame", nil, f)
     strip:SetSize(GROUP_W - 4, 26)
     strip:SetPoint("TOPLEFT", f, "TOPLEFT", 6, -(yy + 4))
     local stripBg = strip:CreateTexture(nil, "BACKGROUND")
     stripBg:SetAllPoints(); stripBg:SetColorTexture(0, 0, 0, 0.18)
-    local auras = (idxLabel and groupAurasMap[idxLabel]) or {}
+    auras = auras or {}
     if #auras == 0 then
         local txt = strip:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         txt:SetPoint("LEFT", strip, "LEFT", 4, 0)
-        txt:SetText("No active group buffs")
+        txt:SetText(kind == "bench" and "Bench (inactive)" or "No active group buffs")
     else
         local ax = 4
         for _, a in ipairs(auras) do
@@ -828,12 +922,23 @@ local function buildGroupFrame(parent, target, x, y, idxLabel)
             ib:SetScript("OnEnter", function(self)
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                 GameTooltip:SetText(a.name)
+                if kind == "bench" then
+                    GameTooltip:AddLine("(inactive while benched)", 0.7, 0.7, 0.7, true)
+                end
                 GameTooltip:Show()
             end)
             ib:SetScript("OnLeave", function() GameTooltip:Hide() end)
             ax = ax + 26
         end
     end
+end
+
+local function buildGroupFrame(parent, target, x, y, idxLabel, groupAurasMap)
+    buildSquadFrame(parent, target, x, y, idxLabel, "group", groupAurasMap[idxLabel])
+end
+
+local function buildBenchFrame(parent, target, x, y, idxLabel, benchAurasMap)
+    buildSquadFrame(parent, target, x, y, idxLabel, "bench", benchAurasMap[idxLabel])
 end
 
 -- Single buff/debuff list row. Returns the row Button so the caller
@@ -918,111 +1023,171 @@ end
 
 
 -- =============================================================
--- 6. TOP STRIP (profile + Share / Import / Reset)
+-- 6. TOP STRIP  (profile dropdown + Save As / Delete / Export / Import)
 -- =============================================================
+-- Buttons mirror the Automarker tab's profile strip exactly (same
+-- order, same widths, same gaps) for cross-tab consistency. The
+-- "Save As" button captures the current comp under a new name (also
+-- the rename path - the old profile can be Delete'd after).
 local function buildTopStrip(parent)
-    local profLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    local profLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     profLabel:SetPoint("TOPLEFT", parent, "TOPLEFT", 16, -16)
     profLabel:SetText("Profile:")
 
     local profDD = CreateFrame("Frame", "L3FComposerProfileDD", parent, "UIDropDownMenuTemplate")
     profDD:SetPoint("LEFT", profLabel, "RIGHT", -8, -4)
-    UIDropDownMenu_SetWidth(profDD, 140)
-    UIDropDownMenu_SetText(profDD, L3F.db.composer.activeProfile or "Default")
-    UIDropDownMenu_Initialize(profDD, function(self, level)
-        for name, _ in pairs(L3F.db.composer.profiles) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = name
-            info.checked = (name == L3F.db.composer.activeProfile)
-            info.func = function()
-                L3F.db.composer.activeProfile = name
-                refresh()
-            end
-            UIDropDownMenu_AddButton(info, level)
-        end
-    end)
+    UIDropDownMenu_SetWidth(profDD, 160)
 
-    local function smallBtn(label, anchor, dx, onClick, tooltip)
+    local function refreshProfileDD()
+        UIDropDownMenu_Initialize(profDD, function(self, level)
+            -- Sort alphabetically so the dropdown order is stable across
+            -- reloads (pairs() ordering is undefined).
+            local names = {}
+            for name in pairs(L3F.db.composer.profiles) do table.insert(names, name) end
+            table.sort(names)
+            for _, name in ipairs(names) do
+                local info = UIDropDownMenu_CreateInfo()
+                info.text = name
+                info.checked = (name == L3F.db.composer.activeProfile)
+                info.func = function()
+                    L3F.db.composer.activeProfile = name
+                    refresh()
+                end
+                UIDropDownMenu_AddButton(info, level)
+            end
+        end)
+        UIDropDownMenu_SetText(profDD, L3F.db.composer.activeProfile or "(unsaved)")
+    end
+    refreshProfileDD()
+
+    local function mkBtn(label, anchor, dx, width, onClick)
         local b = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-        b:SetSize(64, 22); b:SetText(label)
-        b:SetPoint("LEFT", anchor, "RIGHT", dx, 0)
+        b:SetSize(width or 70, 22); b:SetText(label)
+        b:SetPoint("LEFT", anchor, "RIGHT", dx or 2, 0)
         b:SetScript("OnClick", onClick)
-        if tooltip then
-            b:SetScript("OnEnter", function(self)
-                GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-                GameTooltip:SetText(tooltip)
-                GameTooltip:Show()
-            end)
-            b:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        end
         return b
     end
 
-    local newBtn = smallBtn("New", profDD, -4, function()
-        promptText("New profile name:", "", function(txt)
-            if not txt or txt == "" then return end
-            if L3F.db.composer.profiles[txt] then
-                print("|cffffd100L3FComp|r a profile named '" .. txt .. "' already exists.")
-                return
-            end
-            L3F.db.composer.profiles[txt] = newEmptyProfile()
-            L3F.db.composer.activeProfile = txt
-            refresh()
-        end)
-    end, "Create a new empty profile")
+    -- Save As: prompts for a new profile name and writes the CURRENT
+    -- comp state under it. If the name already exists, overwrites
+    -- (saving an updated comp under the same name is the expected
+    -- "save" workflow; the user knows what they typed).
+    local saveBtn = mkBtn("Save As", profDD, -8, 70, function()
+        StaticPopupDialogs["L3F_COMP_SAVE"] = {
+            text = "Save current comp as profile:",
+            button1 = "Save", button2 = "Cancel",
+            hasEditBox = true, maxLetters = 32,
+            OnAccept = function(self)
+                local name = self.EditBox:GetText():gsub("^%s+",""):gsub("%s+$","")
+                if name == "" then return end
+                -- Deep-copy the active profile so subsequent edits don't
+                -- bleed back into the saved snapshot (or vice versa).
+                local src = L3F.db.composer.profiles[L3F.db.composer.activeProfile]
+                local copy = newEmptyProfile()
+                copy.groupCount = src.groupCount
+                copy.benchCount = src.benchCount
+                for g = 1, GROUP_MAX do
+                    copy.groups[g].name = src.groups[g].name
+                    for i = 1, 5 do
+                        local s = src.groups[g].slots[i]
+                        copy.groups[g].slots[i] = s and { specKey = s.specKey, label = s.label } or nil
+                    end
+                end
+                for b = 1, BENCH_MAX do
+                    copy.benches[b].name = src.benches[b].name
+                    for i = 1, 5 do
+                        local s = src.benches[b].slots[i]
+                        copy.benches[b].slots[i] = s and { specKey = s.specKey, label = s.label } or nil
+                    end
+                end
+                L3F.db.composer.profiles[name] = copy
+                L3F.db.composer.activeProfile = name
+                refreshProfileDD()
+                refresh()
+                print("|cffffd100L3FComp|r saved profile '" .. name .. "'.")
+            end,
+            EditBoxOnEnterPressed = function(self)
+                local b = self:GetParent().button1; if b then b:Click() end
+            end,
+            OnShow = function(self)
+                self.EditBox:SetText(L3F.db.composer.activeProfile or "")
+                self.EditBox:HighlightText()
+                self.EditBox:SetFocus()
+            end,
+            timeout = 0, whileDead = true, hideOnEscape = true,
+        }
+        StaticPopup_Show("L3F_COMP_SAVE")
+    end)
 
-    local delBtn = smallBtn("Delete", newBtn, 0, function()
-        local cur = L3F.db.composer.activeProfile
-        if not cur then return end
+    local delBtn = mkBtn("Delete", saveBtn, 2, 60, function()
+        local active = L3F.db.composer.activeProfile
+        if not active then
+            print("|cffffd100L3FComp|r no profile selected.")
+            return
+        end
         local count = 0
         for _ in pairs(L3F.db.composer.profiles) do count = count + 1 end
         if count <= 1 then
             print("|cffffd100L3FComp|r can't delete the last profile.")
             return
         end
-        L3F.db.composer.profiles[cur] = nil
-        L3F.db.composer.activeProfile = next(L3F.db.composer.profiles)
-        refresh()
-    end, "Delete the active profile")
-
-    local renameBtn = smallBtn("Rename", delBtn, 0, function()
-        local cur = L3F.db.composer.activeProfile
-        if not cur then return end
-        promptText("Rename profile:", cur, function(txt)
-            if not txt or txt == "" or txt == cur then return end
-            if L3F.db.composer.profiles[txt] then
-                print("|cffffd100L3FComp|r '" .. txt .. "' already exists.")
-                return
-            end
-            L3F.db.composer.profiles[txt] = L3F.db.composer.profiles[cur]
-            L3F.db.composer.profiles[cur] = nil
-            L3F.db.composer.activeProfile = txt
-            refresh()
-        end)
-    end, "Rename the active profile")
-
-    local resetBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    resetBtn:SetSize(64, 22); resetBtn:SetText("Reset")
-    resetBtn:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -16, -16)
-    resetBtn:SetScript("OnClick", function()
-        local cur = L3F.db.composer.activeProfile
-        if not cur then return end
-        L3F.db.composer.profiles[cur] = newEmptyProfile()
-        refresh()
+        StaticPopupDialogs["L3F_COMP_DEL"] = {
+            text = "Delete profile '" .. active .. "'? Cannot be undone.",
+            button1 = "Delete", button2 = "Cancel",
+            OnAccept = function()
+                L3F.db.composer.profiles[active] = nil
+                L3F.db.composer.activeProfile = next(L3F.db.composer.profiles)
+                refreshProfileDD()
+                refresh()
+                print("|cffffd100L3FComp|r deleted '" .. active .. "'.")
+            end,
+            timeout = 0, whileDead = true, hideOnEscape = true,
+        }
+        StaticPopup_Show("L3F_COMP_DEL")
     end)
 
-    local importBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    importBtn:SetSize(64, 22); importBtn:SetText("Import")
-    importBtn:SetPoint("RIGHT", resetBtn, "LEFT", -4, 0)
-    importBtn:SetScript("OnClick", function() StaticPopup_Show("L3FCOMPOSER_IMPORT") end)
+    local expBtn = mkBtn("Export", delBtn, 2, 60, function()
+        local active = L3F.db.composer.activeProfile
+        local profile = active and L3F.db.composer.profiles[active]
+        if not profile then
+            print("|cffffd100L3FComp|r save the current comp as a profile first.")
+            return
+        end
+        if L3F.ShowStringDialog then
+            L3F.ShowStringDialog({
+                title = "Profile export - Ctrl+A then Ctrl+C to copy:",
+                text = serializeProfile(active, profile),
+                acceptText = "Close",
+                showCancel = false,
+                selectAll = true,
+            })
+        end
+    end)
 
-    local shareBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    shareBtn:SetSize(64, 22); shareBtn:SetText("Share")
-    shareBtn:SetPoint("RIGHT", importBtn, "LEFT", -4, 0)
-    shareBtn:SetScript("OnClick", function()
-        local cur = L3F.db.composer.activeProfile
-        local payload = serializeProfile(cur, L3F.db.composer.profiles[cur])
-        StaticPopup_Show("L3FCOMPOSER_EXPORT", nil, nil, { payload = payload })
+    local _impBtn = mkBtn("Import", expBtn, 2, 60, function()
+        if not L3F.ShowStringDialog then return end
+        L3F.ShowStringDialog({
+            title = "Paste a profile export string, then Import:",
+            text = "",
+            acceptText = "Import",
+            showCancel = true,
+            onAccept = function(str)
+                local name, profile = deserializeProfile(str)
+                if not name then
+                    print("|cffff5555L3FComp|r import failed: " .. tostring(profile))
+                    return
+                end
+                local base, idx = name, 1
+                while L3F.db.composer.profiles[name] do
+                    idx = idx + 1; name = base .. " (" .. idx .. ")"
+                end
+                L3F.db.composer.profiles[name] = profile
+                L3F.db.composer.activeProfile = name
+                refreshProfileDD()
+                refresh()
+                print("|cffffd100L3FComp|r imported '" .. name .. "'.")
+            end,
+        })
     end)
 end
 
@@ -1056,44 +1221,104 @@ local function buildComposer(parent)
         palLabel:SetText("Specs (Drag & Drop or Click to Add)")
         buildPalette(body, 16, palY + 18)
 
+        -- "Clear" button parks in the empty palette real estate: same y
+        -- as row 2 (the Rogue/Shaman/Warlock/Warrior row), x aligned
+        -- with the Priest column from row 1. Wipes the active profile's
+        -- group + bench slots back to default (5 groups + 1 bench, all
+        -- empty). The profile name + dropdown selection are preserved.
+        do
+            local row2Y = palY + 18 + (PALETTE_ICON + PALETTE_GAP) + 4
+            -- 5 classes per row x (3 icons * (icon+gap) + class-gap) = 100px each
+            local classW = 3 * (PALETTE_ICON + PALETTE_GAP) + PALETTE_CLASS_GAP
+            local clearX = 16 + 4 * classW + 2  -- past 4 row-2 classes
+            local clearBtn = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
+            clearBtn:SetSize(80, 26); clearBtn:SetText("Clear")
+            clearBtn:SetPoint("TOPLEFT", body, "TOPLEFT", clearX, -row2Y)
+            clearBtn:SetScript("OnClick", function()
+                local cur = L3F.db.composer.activeProfile
+                if not cur then return end
+                L3F.db.composer.profiles[cur] = newEmptyProfile()
+                refresh()
+            end)
+            clearBtn:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+                GameTooltip:SetText("Clear all groups and benches in the active profile")
+                GameTooltip:AddLine("Profile name + selection are kept.", 0.7, 0.7, 0.7, true)
+                GameTooltip:Show()
+            end)
+            clearBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        end
+
         local p = currentProfile()
         local gridY = palY + 18 + (PALETTE_ICON + PALETTE_GAP) * 2 + 16
         local colGap = 12
         local rowH = 230
         local groupColumns = 3
-        -- Place each visible group in a 3-column grid on the LEFT.
-        -- Bench was removed in 0.15.1; the empty space to the right is
-        -- now reserved for the buffs/debuffs sidebar.
+
+        -- Cells = groups[1..groupCount] then benches[1..benchCount], in
+        -- a 3-column grid on the LEFT. Bench cells get a distinct cyan
+        -- header and don't contribute to raid-wide buff coverage.
+        local _, groupAurasMap, benchAurasMap = computeCoverage()
+        local cells = {}
         for g = 1, p.groupCount do
-            local row = math.floor((g - 1) / groupColumns)
-            local col = (g - 1) % groupColumns
+            cells[#cells + 1] = { kind = "group", idx = g, target = p.groups[g] }
+        end
+        for b = 1, p.benchCount do
+            cells[#cells + 1] = { kind = "bench", idx = b, target = p.benches[b] }
+        end
+        for i, cell in ipairs(cells) do
+            local row = math.floor((i - 1) / groupColumns)
+            local col = (i - 1) % groupColumns
             local cx = 16 + col * (GROUP_W + colGap)
             local cy = gridY + row * rowH
-            buildGroupFrame(body, p.groups[g], cx, cy, g)
+            if cell.kind == "group" then
+                buildGroupFrame(body, cell.target, cx, cy, cell.idx, groupAurasMap)
+            else
+                buildBenchFrame(body, cell.target, cx, cy, cell.idx, benchAurasMap)
+            end
         end
 
-        local rows = math.ceil(p.groupCount / groupColumns)
+        local rows = math.ceil(#cells / groupColumns)
         local afterGridY = gridY + rows * rowH + 4
-        if p.groupCount < 9 then
-            local addBtn = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
-            addBtn:SetSize(GROUP_W, 28); addBtn:SetText("+ Add Group")
-            addBtn:SetPoint("TOPLEFT", body, "TOPLEFT", 16, -afterGridY)
-            addBtn:SetScript("OnClick", function()
+
+        -- Side-by-side "+ Add Group" and "+ Add Bench" buttons beneath the
+        -- grid. Each only appears when the corresponding count is below
+        -- its max - the buttons disappear entirely at saturation rather
+        -- than going grey.
+        local addX = 16
+        if p.groupCount < GROUP_MAX then
+            local addG = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
+            addG:SetSize(GROUP_W, 28); addG:SetText("+ Add Group")
+            addG:SetPoint("TOPLEFT", body, "TOPLEFT", addX, -afterGridY)
+            addG:SetScript("OnClick", function()
                 local pp = currentProfile()
-                pp.groupCount = math.min(9, pp.groupCount + 1)
+                pp.groupCount = math.min(GROUP_MAX, pp.groupCount + 1)
                 refresh()
             end)
+            addX = addX + GROUP_W + colGap
+        end
+        if p.benchCount < BENCH_MAX then
+            local addB = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
+            addB:SetSize(GROUP_W, 28); addB:SetText("+ Add Bench")
+            addB:SetPoint("TOPLEFT", body, "TOPLEFT", addX, -afterGridY)
+            addB:SetScript("OnClick", function()
+                local pp = currentProfile()
+                pp.benchCount = math.min(BENCH_MAX, pp.benchCount + 1)
+                refresh()
+            end)
+        end
+        if p.groupCount < GROUP_MAX or p.benchCount < BENCH_MAX then
             afterGridY = afterGridY + 34
         end
 
         -- Right-side sidebar: buffs + debuffs sections stacked vertically.
-        -- Starts at the same y as the groups, fills the empty space.
+        -- Starts at the same y as the groups grid, fills the empty space
+        -- (no longer parked below everything).
         local covered = computeCoverage()
         local sidebarX = 16 + groupColumns * (GROUP_W + colGap) + 4
         local sidebarW = 290
         local sidebarH = buildBuffPanel(body, covered, sidebarX, gridY, sidebarW)
 
-        -- Scroll body height = tallest of (groups column) and (sidebar).
         local groupsBottom = afterGridY
         local sidebarBottom = gridY + sidebarH
         body:SetHeight(math.max(groupsBottom, sidebarBottom) + 24)
@@ -1102,4 +1327,11 @@ local function buildComposer(parent)
     refresh()
 end
 
-L3F.RegisterTab("guild.composer", "Composer", nil, buildComposer, { parent = "guild" })
+L3F.RegisterTab("guild.composer", "Composer", nil, buildComposer, {
+    parent = "guild",
+    -- Default 5 groups + 1 bench in a 3-col grid (2 rows) + the
+    -- buffs/debuffs sidebar drives the natural width and a fairly
+    -- generous height. The scroll view inside still handles anything
+    -- taller than the auto-resized window.
+    preferredWidth = 1000, preferredHeight = 720,
+})

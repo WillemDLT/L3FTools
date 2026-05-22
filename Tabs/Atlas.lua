@@ -1734,4 +1734,7 @@ end
 -- infoHost >= 188, detailPane >= 444, mainFrame >= 872. We keep 960 as
 -- the floor so the buttons feel comfortable rather than crammed and so
 -- existing saved window widths don't trigger an unexpected resize.
-L3F.RegisterTab("atlas", "Atlas", nil, buildAtlas, { minWidth = 960 })
+L3F.RegisterTab("atlas", "Atlas", nil, buildAtlas, {
+    minWidth = 960,
+    preferredWidth = 1000, preferredHeight = 640,
+})

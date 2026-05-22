@@ -619,4 +619,7 @@ end
 -- minWidth: enough for the 294-wide left scroll + the ~300-wide
 -- roster panel + chrome. minHeight: even with the scroll frame, we
 -- want the window to at least show the roster comfortably.
-L3F.RegisterTab("map", "Map", nil, buildMap, { minWidth = 720, minHeight = 460 })
+L3F.RegisterTab("map", "Map", nil, buildMap, {
+    minWidth = 720, minHeight = 460,
+    preferredWidth = 820, preferredHeight = 560,
+})
