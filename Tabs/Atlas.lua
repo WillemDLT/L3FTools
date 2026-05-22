@@ -798,12 +798,15 @@ local function buildListPane(parent)
         return y + rowH + 2
     end
 
-    -- Spell-kind bonus row. Used by Professions sections that hold
-    -- spell ids (Enchanting Enchants / Mining Smelting / Alchemy
-    -- Transmutes / known oddballs like Disenchant + Void Shatter).
-    -- GetSpellTexture is synchronous on Classic; we fall back to a
-    -- question-mark icon if the spell id is unknown to the client.
-    -- No cross-link / click handler - spells don't have NPC sources.
+    -- Spell-kind bonus row. Every Professions section uses this
+    -- renderer because Morpheours's spreadsheet stores recipe spell
+    -- ids (a recipe-tracking export), not item ids. GetSpellTexture
+    -- returns the recipe's icon - for crafting spells that's the
+    -- result item's icon, so the visual matches what the player
+    -- expects (flask icon for the flask recipe etc.). Synchronous on
+    -- Classic; falls back to a question-mark icon if the spell id is
+    -- unknown to the client. No cross-link / click handler - recipes
+    -- don't have NPC sources.
     local function addBonusSpellRow(spellID, displayName, skill, y)
         local rowH = 24
         local row = CreateFrame("Frame", nil, npcList)
