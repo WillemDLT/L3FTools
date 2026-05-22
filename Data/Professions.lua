@@ -1,14 +1,16 @@
 -- L3FTools - Atlas/Professions
--- Auto-generated from Data-Professions.ods (Morpheours's curated list).
--- Regenerate via: python _migration/professions_ingest/build_professions_lua.py \
---                 Data-Professions.ods L3FTools/Data/Professions.lua
+-- Auto-generated from Data-Professions.ods (Morpheours's curated list)
+-- plus _migration/professions_ingest/supplements.json (Wowhead-skill-page
+-- additions Willem greenlit during the 0.19.1 reconciliation pass).
+-- Regenerate via:
+--   python _migration/professions_ingest/build_professions_lua.py \
+--          Data-Professions.ods L3FTools/Data/Professions.lua
 --
--- Layout is 1:1 with the spreadsheet: one section per profession holding
--- every entry in the order Morpheours arranged them. Every section is
--- flagged kind = "spell" because the IDs in Morpheours's spreadsheet are
--- recipe spell ids (not item ids) - the Atlas renders rows via
--- SetSpellByID + GetSpellTexture so the tooltip + icon match the recipe.
--- To add or remove entries: edit the ODS and re-run this script.
+-- Layout: one section per profession holding every entry in the order
+-- Morpheours arranged them, with supplements appended at the END of the
+-- matching profession's list. Every section is flagged kind = "spell"
+-- because the IDs are recipe spell ids - the Atlas renders rows via
+-- SetSpellByID + result-item icon lookup (L3F.professionRecipeMap).
 -- Hand-edits will be lost on the next regen.
 
 local _, L3F = ...
@@ -1036,6 +1038,21 @@ L3F.RegisterBonusCategory("professions", "Professions", {
                     { id = 2387, name = "Linen Cloak", skill = 1 },
                     { id = 2393, name = "White Linen Shirt", skill = 1 },
                     { id = 2963, name = "Bolt of Linen Cloth", skill = 1 },
+                    { id = 36665, name = "Netherflame Robe", skill = 0 },
+                    { id = 36667, name = "Netherflame Belt", skill = 0 },
+                    { id = 36668, name = "Netherflame Boots", skill = 0 },
+                    { id = 36669, name = "Lifeblood Leggings", skill = 0 },
+                    { id = 36670, name = "Lifeblood Belt", skill = 0 },
+                    { id = 36672, name = "Lifeblood Bracers", skill = 0 },
+                    { id = 31461, name = "Heavy Netherweave Net", skill = 0 },
+                    { id = 12062, name = "Stormcloth Pants", skill = 0 },
+                    { id = 12063, name = "Stormcloth Gloves", skill = 0 },
+                    { id = 12068, name = "Stormcloth Vest", skill = 0 },
+                    { id = 12083, name = "Stormcloth Headband", skill = 0 },
+                    { id = 12087, name = "Stormcloth Shoulders", skill = 0 },
+                    { id = 12090, name = "Stormcloth Boots", skill = 0 },
+                    { id = 8778, name = "Boots of Darkness", skill = 0 },
+                    { id = 7636, name = "Green Woolen Robe", skill = 0 },
                 },
             },
         },
