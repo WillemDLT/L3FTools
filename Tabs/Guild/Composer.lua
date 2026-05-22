@@ -322,6 +322,20 @@ local SPELL_IDS = {
 local SPEC_LOOKUP = {}
 for _, s in ipairs(SPECS) do SPEC_LOOKUP[s.key] = s end
 
+-- Spec -> role for the Display popup's role-count footer. Anything
+-- not listed here counts as "dps". Feral Druid is treated as dps
+-- (cat) by default - most TBC raids run cats; bear-tanking comps
+-- will be miscounted by exactly one per bear, acceptable.
+local SPEC_ROLE = {
+    protpala    = "tank",
+    protwar     = "tank",
+    holypala    = "healer",
+    discpriest  = "healer",
+    holypriest  = "healer",
+    restodruid  = "healer",
+    restosham   = "healer",
+}
+
 
 -- =============================================================
 -- 2. PROFILE STATE
@@ -1217,12 +1231,166 @@ end
 
 
 -- =============================================================
--- 6. TOP STRIP  (profile dropdown + Save As / Delete / Export / Import)
+-- 6. DISPLAY POPUP  (clean screenshot view of the active comp)
 -- =============================================================
--- Buttons mirror the Automarker tab's profile strip exactly (same
--- order, same widths, same gaps) for cross-tab consistency. The
--- "Save As" button captures the current comp under a new name (also
--- the rename path - the old profile can be Delete'd after).
+-- A floating window the user can position anywhere on screen,
+-- showing only the groups + non-empty benches in a 3-column grid
+-- with a role-count footer. No buffs/debuffs panel, no buttons in
+-- slots, no aura icons - just the comp roster, intended for a
+-- Discord screenshot.
+local snapshotFrame
+
+local function isBenchEmpty(bench)
+    if not bench or not bench.slots then return true end
+    for i = 1, 5 do if bench.slots[i] then return false end end
+    return true
+end
+
+local function ensureSnapshotFrame()
+    if snapshotFrame then return snapshotFrame end
+    local f = CreateFrame("Frame", "L3FComposerSnapshot", UIParent,
+        "BasicFrameTemplateWithInset")
+    f:SetSize(720, 400)
+    f:SetPoint("CENTER")
+    -- FULLSCREEN_DIALOG sits above the main L3FTools window
+    -- (DIALOG strata) so the popup is always on top and easy to
+    -- frame for a screenshot.
+    f:SetFrameStrata("FULLSCREEN_DIALOG")
+    f:SetMovable(true); f:EnableMouse(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    f:SetScript("OnDragStop",  function(self) self:StopMovingOrSizing() end)
+    f:Hide()
+
+    -- Inner host so we can wipe content without nuking the template's
+    -- own children (title text, close button, inset textures).
+    f.host = CreateFrame("Frame", nil, f)
+    f.host:SetPoint("TOPLEFT",     f, "TOPLEFT",      4, -28)
+    f.host:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -4, 4)
+
+    snapshotFrame = f
+    return f
+end
+
+local function rebuildSnapshot()
+    local f = ensureSnapshotFrame()
+    -- Clear ONLY the host (template's title + close button stay).
+    for _, c in ipairs({f.host:GetChildren()}) do c:Hide(); c:SetParent(nil) end
+    for _, r in ipairs({f.host:GetRegions()}) do
+        r:Hide(); r:ClearAllPoints()
+        if r.SetText then r:SetText("") end
+    end
+
+    local profileName = L3F.db.composer.activeProfile or "(unsaved)"
+    local profile = L3F.db.composer.profiles[profileName]
+    if not profile then return end
+
+    f.TitleText:SetText(profileName)
+
+    -- Cells: every visible group, plus benches that aren't empty.
+    local cells = {}
+    for g = 1, profile.groupCount do
+        table.insert(cells, { obj = profile.groups[g], isBench = false })
+    end
+    for b = 1, profile.benchCount do
+        if not isBenchEmpty(profile.benches[b]) then
+            table.insert(cells, { obj = profile.benches[b], isBench = true })
+        end
+    end
+
+    -- 3-column grid layout inside f.host.
+    local CELL_W, CELL_H = 224, 152
+    local COL_GAP, ROW_GAP = 12, 12
+    local MARGIN_X, TOP_Y = 8, 8
+    for i, cell in ipairs(cells) do
+        local col = (i - 1) % 3
+        local row = math.floor((i - 1) / 3)
+        local cx = MARGIN_X + col * (CELL_W + COL_GAP)
+        local cy = TOP_Y    + row * (CELL_H + ROW_GAP)
+        local cellF = CreateFrame("Frame", nil, f.host)
+        cellF:SetSize(CELL_W, CELL_H)
+        cellF:SetPoint("TOPLEFT", f.host, "TOPLEFT", cx, -cy)
+        local bg = cellF:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints(); bg:SetColorTexture(0, 0, 0, 0.30)
+
+        local hdr = cellF:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        hdr:SetPoint("TOPLEFT", cellF, "TOPLEFT", 6, -4)
+        hdr:SetText(cell.obj.name or (cell.isBench and "Bench" or "Group"))
+        if cell.isBench then hdr:SetTextColor(0.55, 0.85, 1.0) end
+
+        local yy = 22
+        for s = 1, 5 do
+            local slot = cell.obj.slots[s]
+            local sr = CreateFrame("Frame", nil, cellF)
+            sr:SetSize(CELL_W - 12, 22)
+            sr:SetPoint("TOPLEFT", cellF, "TOPLEFT", 6, -yy)
+
+            local icon = sr:CreateTexture(nil, "ARTWORK")
+            icon:SetSize(20, 20); icon:SetPoint("LEFT", sr, "LEFT", 0, 0)
+            local lbl = sr:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            lbl:SetPoint("LEFT",  icon, "RIGHT", 6, 0)
+            lbl:SetPoint("RIGHT", sr,   "RIGHT", -2, 0)
+            lbl:SetJustifyH("LEFT"); lbl:SetWordWrap(false)
+
+            if slot then
+                local spec = SPEC_LOOKUP[slot.specKey]
+                if spec then
+                    icon:SetTexture(spec.icon)
+                    icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+                    lbl:SetText(slot.label or spec.label)
+                    lbl:SetTextColor(1, 0.82, 0.30)  -- gold
+                end
+            else
+                icon:SetColorTexture(0.10, 0.10, 0.10)
+                lbl:SetText("(empty)")
+                lbl:SetTextColor(0.40, 0.40, 0.40)
+            end
+            yy = yy + 24
+        end
+    end
+
+    -- Role-count footer (group slots only - benches are inactive).
+    local tanks, healers, dps = 0, 0, 0
+    for g = 1, profile.groupCount do
+        for s = 1, 5 do
+            local slot = profile.groups[g].slots[s]
+            if slot then
+                local role = SPEC_ROLE[slot.specKey] or "dps"
+                if     role == "tank"   then tanks   = tanks   + 1
+                elseif role == "healer" then healers = healers + 1
+                else                          dps    = dps    + 1 end
+            end
+        end
+    end
+    local footer = f.host:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    footer:SetPoint("BOTTOM", f.host, "BOTTOM", 0, 8)
+    footer:SetText(("%d tank%s  ·  %d healer%s  ·  %d dps  ·  %d total"):format(
+        tanks, tanks == 1 and "" or "s",
+        healers, healers == 1 and "" or "s",
+        dps, tanks + healers + dps))
+
+    -- Resize the popup to fit the grid + footer.
+    local rows = math.max(1, math.ceil(#cells / 3))
+    local gridH = rows * CELL_H + (rows - 1) * ROW_GAP
+    local footerBand = 28
+    local hostH = TOP_Y + gridH + footerBand
+    local hostW = MARGIN_X * 2 + 3 * CELL_W + 2 * COL_GAP
+    f:SetSize(hostW + 8, hostH + 32)
+end
+
+local function showSnapshot()
+    rebuildSnapshot()
+    snapshotFrame:Show()
+    snapshotFrame:Raise()
+end
+
+
+-- =============================================================
+-- 7. TOP STRIP  (profile dropdown + New Profile / Delete / Export / Import / Display)
+-- =============================================================
+-- Buttons mirror the Automarker tab's profile strip pattern (same
+-- widths, same gaps) for cross-tab consistency. New Profile creates
+-- an empty profile; Display opens the clean screenshot popup.
 local function buildTopStrip(parent)
     local profLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     profLabel:SetPoint("TOPLEFT", parent, "TOPLEFT", 16, -16)
@@ -1343,7 +1511,7 @@ local function buildTopStrip(parent)
         end
     end)
 
-    local _impBtn = mkBtn("Import", expBtn, 2, 60, function()
+    local impBtn = mkBtn("Import", expBtn, 2, 60, function()
         if not L3F.ShowStringDialog then return end
         L3F.ShowStringDialog({
             title = "Paste a profile export string, then Import:",
@@ -1368,11 +1536,22 @@ local function buildTopStrip(parent)
             end,
         })
     end)
+
+    -- Display: opens the clean snapshot popup for screenshotting.
+    local dispBtn = mkBtn("Display", impBtn, 2, 70, showSnapshot)
+    dispBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:SetText("Open a clean screenshot view of this comp")
+        GameTooltip:AddLine("Drag the popup anywhere, then screenshot.",
+            0.7, 0.7, 0.7, true)
+        GameTooltip:Show()
+    end)
+    dispBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 end
 
 
 -- =============================================================
--- 7. MAIN BUILDER
+-- 8. MAIN BUILDER
 -- =============================================================
 local function buildComposer(parent)
     composerRoot = parent
