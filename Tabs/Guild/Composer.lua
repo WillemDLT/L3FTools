@@ -647,9 +647,9 @@ dragDriver:SetScript("OnUpdate", function()
     follower:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x / s, y / s)
 end)
 
--- Diagnostic toggle. When true, prints to chat what the cursor was
--- over at drop time so we can see why a drop misses.
-local DEBUG_DROP = true
+-- Diagnostic toggle. Flip back to true if drop ever stops working
+-- and we need to see what the cursor was over at release.
+local DEBUG_DROP = false
 
 -- Live list of all currently rendered slot row frames. Wiped at the
 -- start of each refresh() pass and re-populated by buildSlotRow.
@@ -678,11 +678,18 @@ local function findSlotAtCursor()
 end
 
 -- Shared end-of-drag handler. Uses coordinate-based hit-testing
--- (findSlotAtCursor) rather than GetMouseFocus, which the
--- diagnostic in 0.16.8 proved returns nil at drop time. Move-or-
--- place semantics: if dragging from a slot, the source is cleared
--- on a hit (move) or on an off-slot drop (remove); drop on the
--- same slot is a no-op.
+-- (findSlotAtCursor) rather than GetMouseFocus.
+--
+-- Semantics (per Morphéours 0.16.10):
+--   * palette  -> empty slot     : place
+--   * palette  -> occupied slot  : REJECT (no silent overwrite; user
+--                                  must hit the slot's X first - this
+--                                  avoids accidental delete when the
+--                                  player misses their target)
+--   * slot A   -> empty slot B   : move (A cleared, B filled)
+--   * slot A   -> occupied slot B: SWAP (A and B exchange contents)
+--   * slot A   -> off any slot   : remove A (intentional yeet)
+--   * slot A   -> same slot A    : no-op
 local function finishDrag()
     if not dragState.spec then follower:Hide(); return end
     local sp = dragState.spec
@@ -703,15 +710,31 @@ local function finishDrag()
             hit and ("slot " .. tostring(hit.idx)) or "NIL"))
     end
 
-    if hit then
-        if fromTarget and (fromTarget ~= hit.target or fromIdx ~= hit.idx) then
-            fromTarget.slots[fromIdx] = nil
-        end
+    local function pack()
         local s = SPEC_LOOKUP[sp.key]
-        if s then
-            hit.target.slots[hit.idx] = { specKey = sp.key, label = sp.label or s.label }
+        return s and { specKey = sp.key, label = sp.label or s.label } or nil
+    end
+
+    if hit then
+        local sameSlot = fromTarget == hit.target and fromIdx == hit.idx
+        if sameSlot then
+            -- drop on self, no-op
+        elseif fromTarget then
+            -- slot -> slot: swap if target occupied, otherwise move
+            local existing = hit.target.slots[hit.idx]
+            hit.target.slots[hit.idx]   = pack()
+            fromTarget.slots[fromIdx]   = existing  -- nil if target was empty
+        else
+            -- palette -> slot: only fill if target is empty
+            if hit.target.slots[hit.idx] then
+                print("|cffffd100L3FComp|r slot " .. hit.idx
+                    .. " is already taken - clear it with the red X first.")
+            else
+                hit.target.slots[hit.idx] = pack()
+            end
         end
     elseif fromTarget then
+        -- dragged a filled slot off any target: yeet
         fromTarget.slots[fromIdx] = nil
     end
 
