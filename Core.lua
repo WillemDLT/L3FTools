@@ -81,6 +81,46 @@ function L3F.RegisterConsumables(items)
     end
 end
 
+-- =============================================================
+-- BONUS CATEGORIES  (Atlas-only: Factions / Pre-BiS / PvP / Professions /
+-- Collections). These are reference lists of items grouped into sections
+-- (Friendly/Honored/Revered/Exalted for factions, slot-grouped for Pre-BiS,
+-- recipe-grouped for Professions, etc.). The Automarker never reads them.
+--
+-- bonusCategories preserves registration order so the Atlas tree shows
+-- the categories in the order the .toc loads them. bonusLookup is the
+-- O(1) reverse map used by the search + cross-link paths.
+-- =============================================================
+L3F.bonusCategories = {}        -- ordered { { key, label, entries }, ... }
+L3F.bonusLookup    = {}         -- catKey -> { entryKey -> entry }
+-- Inverse: item ID -> { {catKey=..., entry=..., sectionName=...}, ... }.
+-- Populated by RegisterBonusCategory so the Atlas's global search can find
+-- bonus items by ID and so the detail pane can label an item's source
+-- ("Honored reward from Cenarion Expedition") without re-scanning.
+L3F.bonusItemLookup = {}
+
+function L3F.RegisterBonusCategory(catKey, displayName, entries)
+    table.insert(L3F.bonusCategories,
+        { key = catKey, label = displayName, entries = entries })
+    L3F.bonusLookup[catKey] = L3F.bonusLookup[catKey] or {}
+    for _, entry in ipairs(entries) do
+        L3F.bonusLookup[catKey][entry.key] = entry
+        for _, section in ipairs(entry.sections or {}) do
+            for _, item in ipairs(section.items or {}) do
+                if item.id then
+                    L3F.bonusItemLookup[item.id] = L3F.bonusItemLookup[item.id] or {}
+                    table.insert(L3F.bonusItemLookup[item.id], {
+                        catKey      = catKey,
+                        catLabel    = displayName,
+                        entry       = entry,
+                        sectionName = section.name,
+                    })
+                end
+            end
+        end
+    end
+end
+
 local function buildLookup()
     L3F.npcLookup = {}
     L3F.itemLookup = {}

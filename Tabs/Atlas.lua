@@ -46,7 +46,7 @@ local CAT_CONSUMABLES = "Consumables"
 
 local treePane, listPane, detailPane
 local treeList, npcList, searchBox
-local currentNPC, currentConsumable
+local currentNPC, currentConsumable, currentBonusItem
 local subTabButtons = {}
 local consumableSubTabButtons = {}
 local subTabContent
@@ -445,12 +445,56 @@ local function buildTreePane(parent)
                         selectKey(subKey)
                         currentConsumable = nil
                         currentNPC = nil
+                        currentBonusItem = nil
                         L3F.RefreshTree()
                         L3F.RefreshNPCList()
                         L3F.RefreshDetailPane()
                     end,
                 }
                 y = y + 20
+            end
+        end
+
+        -- BONUS CATEGORIES  (Factions / Pre-BiS / PvP / Professions /
+        -- Collections). Order follows L3F.bonusCategories which is the
+        -- .toc load order. Each top-level row expands into entry leaves
+        -- (e.g. faction names, class/spec rows, arena seasons). Selecting
+        -- an entry shows section-grouped items in the middle list pane.
+        for _, cat in ipairs(L3F.bonusCategories or {}) do
+            local catBonusKey = "cat:bonus:" .. cat.key
+            local bonusExpanded = isExpanded(catBonusKey)
+            addRow{
+                indent = 0, y = y,
+                key = catBonusKey, label = cat.label,
+                font = "GameFontNormal",
+                hasArrow = true, expanded = bonusExpanded,
+                onClickRow = function()
+                    setExpanded(catBonusKey, not bonusExpanded)
+                    L3F.RefreshTree()
+                end,
+            }
+            y = y + 20
+
+            if bonusExpanded then
+                for _, entry in ipairs(cat.entries) do
+                    local entryKey = "bonus:" .. cat.key .. ":" .. entry.key
+                    addRow{
+                        indent = 16, y = y,
+                        key = entryKey, label = entry.name,
+                        font = "GameFontNormalSmall",
+                        hasArrow = false,
+                        onClickRow = function()
+                            selectKey(entryKey)
+                            currentNPC = nil
+                            currentConsumable = nil
+                            currentBonusItem = nil
+                            L3F.RefreshTree()
+                            L3F.RefreshNPCList()
+                            L3F.RefreshDetailPane()
+                        end,
+                    }
+                    y = y + 20
+                end
             end
         end
 
@@ -508,6 +552,7 @@ local function buildListPane(parent)
         row:SetScript("OnClick", function()
             currentNPC = npc
             currentConsumable = nil
+            currentBonusItem = nil
             L3F.db.atlas.lastSelectedNPC = npc.id
             if L3F.RefreshNPCList then L3F.RefreshNPCList() end
             if L3F.RefreshDetailPane then L3F.RefreshDetailPane() end
@@ -557,6 +602,7 @@ local function buildListPane(parent)
         row:SetScript("OnClick", function()
             currentConsumable = item
             currentNPC = nil
+            currentBonusItem = nil
             if L3F.RefreshNPCList then L3F.RefreshNPCList() end
             if L3F.RefreshDetailPane then L3F.RefreshDetailPane() end
         end)
@@ -577,14 +623,91 @@ local function buildListPane(parent)
         return y + rowH + 2
     end
 
-    -- Search-result row. Renders four kinds of hits in a unified layout:
+    -- Bonus-category section header (e.g. "Exalted" within a faction's
+    -- list; "Head" within a Pre-BiS slot list). Rendered above the rows
+    -- belonging to that section.
+    local function addBonusSectionHeader(name, y)
+        local h = npcList:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        h:SetPoint("TOPLEFT", npcList, "TOPLEFT", 6, -y - 2)
+        h:SetText(name:upper())
+        return y + 16
+    end
+
+    -- Bonus-category item row. Same async icon+name pattern as the
+    -- consumable rows, plus a click handler that prefers the cross-link
+    -- (jump to a dropping NPC when L3F.itemLookup[id] resolves; otherwise
+    -- show the bonus-item card in the detail pane).
+    local function addBonusItemRow(itemID, y)
+        local rowH = 24
+        local row = CreateFrame("Button", nil, npcList)
+        row:SetSize(170, rowH)
+        row:SetPoint("TOPLEFT", npcList, "TOPLEFT", 0, -y)
+        local rbg = row:CreateTexture(nil, "BACKGROUND")
+        rbg:SetAllPoints()
+        local active = currentBonusItem and currentBonusItem.id == itemID
+        rbg:SetColorTexture(active and 0.30 or 0, active and 0.65 or 0, active and 1 or 0, active and 0.25 or 0)
+
+        local icon = row:CreateTexture(nil, "ARTWORK")
+        icon:SetSize(18, 18)
+        icon:SetPoint("LEFT", row, "LEFT", 4, 0)
+        icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+
+        local txt = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        txt:SetPoint("LEFT", icon, "RIGHT", 6, 0)
+        txt:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+        txt:SetJustifyH("LEFT")
+        txt:SetWordWrap(false)
+        txt:SetText("Item #" .. itemID)
+        queueItemUI(itemID, txt, icon)
+
+        row:SetScript("OnClick", function()
+            -- Cross-link: if this item is dropped by a known NPC, jump there
+            -- and land on the Drops sub-tab. This is the killer Phase C path
+            -- for Pre-BiS items - one click takes the player straight to
+            -- the boss they need to farm. Items that have no drop source
+            -- (vendor / crafted / PvP-only) fall through to the bonus card.
+            if L3F.itemLookup and L3F.itemLookup[itemID]
+               and L3F.itemLookup[itemID][1] then
+                local link = L3F.itemLookup[itemID][1]
+                currentNPC = link.npc
+                currentConsumable = nil
+                currentBonusItem = nil
+                L3F.db.atlas.lastSelectedNPC = link.npc.id
+                L3F.db.atlas.lastActiveSubTab = "drops"
+            else
+                currentBonusItem = { id = itemID }
+                currentNPC = nil
+                currentConsumable = nil
+            end
+            if L3F.RefreshNPCList then L3F.RefreshNPCList() end
+            if L3F.RefreshDetailPane then L3F.RefreshDetailPane() end
+        end)
+        row:SetScript("OnEnter", function(self)
+            if not active then rbg:SetColorTexture(1, 1, 1, 0.07) end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            if GameTooltip.SetItemByID then GameTooltip:SetItemByID(itemID)
+            else GameTooltip:SetHyperlink("item:" .. itemID) end
+            GameTooltip:Show()
+        end)
+        row:SetScript("OnLeave", function()
+            if active then rbg:SetColorTexture(0.30, 0.65, 1.0, 0.25)
+            else rbg:SetColorTexture(0, 0, 0, 0) end
+            GameTooltip:Hide()
+        end)
+        return y + rowH + 2
+    end
+
+    -- Search-result row. Renders five kinds of hits in a unified layout:
     --   kind = "npc"        -> bare NPC name (with location subtitle)
     --   kind = "drop"       -> item icon + drop name + "from NPC"
     --   kind = "spell"      -> spell icon + spell name + "by NPC"
     --   kind = "consumable" -> item icon + name + "Consumable - <category>"
+    --   kind = "bonus"      -> item icon + name + "<Category> - <Entry>"
     -- Clicking a drop/spell result selects the underlying NPC AND switches
     -- the detail pane to the matching sub-tab. Clicking a consumable
     -- selects it (clears the current NPC) and renders the consumable card.
+    -- Clicking a bonus result jumps to a known dropping NPC if the item is
+    -- in L3F.itemLookup; otherwise shows the bonus-item card.
     local function addSearchHit(hit, y)
         local rowH = 30
         local row = CreateFrame("Button", nil, npcList)
@@ -595,6 +718,8 @@ local function buildListPane(parent)
         local active = false
         if hit.kind == "consumable" then
             active = currentConsumable and currentConsumable == hit.consumable
+        elseif hit.kind == "bonus" then
+            active = currentBonusItem and currentBonusItem.id == hit.itemID
         else
             active = currentNPC and currentNPC.id == hit.npc.id
         end
@@ -613,6 +738,8 @@ local function buildListPane(parent)
                 if tex then icon:SetTexture(tex) end
             elseif hit.kind == "consumable" and hit.consumable.id then
                 queueItemUI(hit.consumable.id, nil, icon)
+            elseif hit.kind == "bonus" then
+                queueItemUI(hit.itemID, nil, icon)
             end
             textX = 24
         end
@@ -629,6 +756,8 @@ local function buildListPane(parent)
             queueItemUI(hit.drop.id, title, nil)
         elseif hit.kind == "consumable" and hit.consumable.id then
             queueItemUI(hit.consumable.id, title, nil)
+        elseif hit.kind == "bonus" then
+            queueItemUI(hit.itemID, title, nil)
         else
             title:SetTextColor(active and 1 or 0.85, active and 1 or 0.85, active and 1 or 0.85, 1)
         end
@@ -644,9 +773,29 @@ local function buildListPane(parent)
             if hit.kind == "consumable" then
                 currentConsumable = hit.consumable
                 currentNPC = nil
+                currentBonusItem = nil
+            elseif hit.kind == "bonus" then
+                -- Bonus-item search hit. Prefer the cross-link: if the item
+                -- also has a known NPC drop entry, jump there (the player
+                -- usually cares MORE about "where do I farm this" than "the
+                -- vendor list it's in"). Otherwise show the bonus-item card.
+                if L3F.itemLookup and L3F.itemLookup[hit.itemID]
+                   and L3F.itemLookup[hit.itemID][1] then
+                    local link = L3F.itemLookup[hit.itemID][1]
+                    currentNPC = link.npc
+                    currentConsumable = nil
+                    currentBonusItem = nil
+                    L3F.db.atlas.lastSelectedNPC = link.npc.id
+                    L3F.db.atlas.lastActiveSubTab = "drops"
+                else
+                    currentBonusItem = { id = hit.itemID }
+                    currentNPC = nil
+                    currentConsumable = nil
+                end
             else
                 currentNPC = hit.npc
                 currentConsumable = nil
+                currentBonusItem = nil
                 L3F.db.atlas.lastSelectedNPC = hit.npc.id
                 -- Land on the sub-tab that contains the matched item so
                 -- the player sees the drop / spell they searched for.
@@ -757,6 +906,41 @@ local function buildListPane(parent)
                 end
             end
 
+            -- 5. Bonus-category item matches (Factions / Pre-BiS / PvP /
+            -- Professions / Collections). These items have no `name` field
+            -- in the Lua - GetItemInfo resolves it. We try the cached name
+            -- first; otherwise we let a pure-digit search match the item ID
+            -- directly (e.g. typing "32486" finds it regardless of cache
+            -- state). Each unique item is hit once per registration (an
+            -- item that appears in BOTH a faction list and a Pre-BiS list
+            -- gets two hits with different subtitles, which is the desired
+            -- behaviour - the player picks the relevant context).
+            local numericSearch = tonumber(search)
+            for itemID, sources in pairs(L3F.bonusItemLookup or {}) do
+                local cachedName = GetItemInfo(itemID)
+                local matched = false
+                if numericSearch and numericSearch == itemID then
+                    matched = true
+                elseif cachedName and cachedName:lower():find(search, 1, true) then
+                    matched = true
+                end
+                if matched then
+                    -- One hit per source entry so the user sees which list
+                    -- the item lives in (Honored from Cenarion Expedition,
+                    -- Pre-BiS Druid Balance / Head, etc.).
+                    for _, src in ipairs(sources) do
+                        table.insert(hits, {
+                            kind     = "bonus",
+                            itemID   = itemID,
+                            source   = src,
+                            label    = cachedName or ("Item #" .. itemID),
+                            subtitle = src.catLabel .. " - " .. src.entry.name
+                                       .. (src.sectionName and (" / " .. src.sectionName) or ""),
+                        })
+                    end
+                end
+            end
+
             if #hits == 0 then
                 local txt = npcList:CreateFontString(nil, "OVERLAY", "GameFontDisable")
                 txt:SetPoint("TOPLEFT", npcList, "TOPLEFT", 8, -8)
@@ -840,6 +1024,27 @@ local function buildListPane(parent)
             local items = L3F.consumables[catName] or {}
             for _, item in ipairs(items) do
                 y = addConsumableRow(item, y)
+            end
+
+        elseif sel:sub(1, 6) == "bonus:" then
+            -- Bonus-category entry selected -> render each section as a
+            -- dim uppercase header followed by its item rows. Format key:
+            --   bonus:<catKey>:<entryKey>
+            local rest = sel:sub(7)
+            local catKey, entryKey = rest:match("^([^:]+):(.+)$")
+            local entry = catKey and entryKey
+                and L3F.bonusLookup and L3F.bonusLookup[catKey]
+                and L3F.bonusLookup[catKey][entryKey]
+            if entry and entry.sections then
+                for _, section in ipairs(entry.sections) do
+                    if section.items and #section.items > 0 then
+                        y = addBonusSectionHeader(section.name or "", y)
+                        for _, item in ipairs(section.items) do
+                            if item.id then y = addBonusItemRow(item.id, y) end
+                        end
+                        y = y + 4
+                    end
+                end
             end
         end
 
@@ -1014,6 +1219,7 @@ local function buildDetailPane(parent)
     L3F.RefreshDetailPane = function()
         local npc = currentNPC
         local item = currentConsumable
+        local bonus = currentBonusItem
         for k, btn in pairs(subTabButtons) do
             local active = (k == L3F.db.atlas.lastActiveSubTab)
             btn.label:SetTextColor(active and 1 or 0.7, active and 1 or 0.7, active and 1 or 0.7, 1)
@@ -1095,6 +1301,68 @@ local function buildDetailPane(parent)
             end
 
             subTabContent.body:SetHeight(math.max(y, 1))
+            return
+        end
+
+        -- ---------------------------------------------------------
+        -- BONUS-ITEM PATH - rendered when a player clicks a bonus list item
+        -- that DOESN'T resolve to a known NPC drop (vendor / crafted / PvP
+        -- exclusive items). Reuses the consumable icon scaffold; both
+        -- sub-tab strips stay hidden because a bonus item has no sub-tabs
+        -- to show. The body lists the item's source contexts (the catLabel
+        -- and entry it came from) so the player can flip between, say, the
+        -- Pre-BiS entry that recommends the item and the Faction page that
+        -- sells it.
+        -- ---------------------------------------------------------
+        if bonus then
+            viewer.frame:Hide()
+            subStrip:Hide()
+            consumableSubStrip:Hide()
+            detailPane.consumableIcon:Show()
+            detailPane.consumableIcon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+            local cachedName = GetItemInfo(bonus.id) or ("Item #" .. bonus.id)
+            npcTitle:SetText(cachedName)
+            queueItemUI(bonus.id, npcTitle, detailPane.consumableIcon)
+
+            -- Build the source list from L3F.bonusItemLookup. Multiple
+            -- entries are possible (e.g. an item that's both a Faction
+            -- reward and a Pre-BiS recommendation).
+            local sources = L3F.bonusItemLookup and L3F.bonusItemLookup[bonus.id] or {}
+            if sources[1] then
+                local s = sources[1]
+                npcMeta:SetText(s.catLabel .. " - " .. s.entry.name)
+            else
+                npcMeta:SetText("")
+            end
+
+            local y2 = 8
+            local function addBlock(text, fontObj)
+                local fs = subTabContent.body:CreateFontString(nil, "OVERLAY", fontObj or "GameFontNormal")
+                fs:SetPoint("TOPLEFT",  subTabContent.body, "TOPLEFT",  4, -y2)
+                fs:SetPoint("TOPRIGHT", subTabContent.body, "TOPRIGHT", -4, -y2)
+                fs:SetJustifyH("LEFT")
+                fs:SetWordWrap(true)
+                fs:SetText(text)
+                y2 = y2 + math.max(fs:GetStringHeight() + 6, 18)
+            end
+
+            if #sources == 0 then
+                addBlock("Source info not registered for this item.")
+            else
+                addBlock("Listed in:", "GameFontHighlight")
+                for _, src in ipairs(sources) do
+                    local line = "- " .. src.catLabel .. " - " .. src.entry.name
+                    if src.sectionName and src.sectionName ~= "" then
+                        line = line .. " / " .. src.sectionName
+                    end
+                    addBlock(line)
+                end
+            end
+            addBlock(" ")
+            addBlock("Hover the item in the list on the left for the full "
+                .. "in-game tooltip with stats and source.", "GameFontDisable")
+
+            subTabContent.body:SetHeight(math.max(y2, 1))
             return
         end
 
@@ -1315,6 +1583,11 @@ local function buildAtlas(parent)
             if heroicName then setExpanded("heroic:" .. heroicName, true) end
         elseif sel:sub(1, 15) == "consumable-cat:" then
             setExpanded("cat:" .. CAT_CONSUMABLES, true)
+        elseif sel:sub(1, 6) == "bonus:" then
+            -- bonus:<catKey>:<entryKey> - expand the matching top-level
+            -- bonus category so the entry leaf is visible on first build.
+            local catKey = sel:sub(7):match("^([^:]+):")
+            if catKey then setExpanded("cat:bonus:" .. catKey, true) end
         end
     end
 
