@@ -16,16 +16,24 @@ Multi-tool successor to AutomarkerL3F for TBC Classic (Interface 20505). Bundles
 - `Sections/<Raid>.lua` — spatial wing layout per raid; calls `L3F:RegisterSections{ raid, mapID, sections={...} }`. Build with the `wing-section-raid` skill (its Progress section tracks which raids are done)
 - `Frame.lua` — main window scaffold, resizable, tab system
 - `Tabs/Automarker.lua` — Automarker tab UI + profile strip
-- `Tabs/Atlas.lua` — Atlas tab UI (raid dropdown, NPC grid, sub-tabs)
+- `Tabs/Atlas.lua` — Atlas tab UI (tree + list + detail, Drops/Spells/Notes sub-tabs)
+- `Tabs/Map.lua` — Guild Map tab (world map + minimap pin sharing)
+- `Tabs/Guild.lua` — parent tab; sub-tabs live in `Tabs/Guild/*`
+- `Tabs/Guild/Composer.lua` — Raid Composer (drag-drop palette + groups + bench grid)
+- `Tabs/Guild/Crafts.lua` / `RaidPlanner.lua` / `Planner.lua` — placeholder stubs
 - `Tabs/Settings.lua` — settings tab
+- `GuildMap/*.lua` — shared map-pin infrastructure (Core, Broadcast, Pins, PinToggle)
 - `UI/HoverPreview.lua` — Model tooltip + pin
 - `UI/ModelViewer.lua` — interactive zoom/rotate/pop-out model panel
+- `UI/PlayerMarksDialog.lua` — sticky per-player mark assignment dialog
 - `Minimap.lua` — minimap button
-- `Data/<Raid>.lua` — 9 raid NPC registries plus `Stockade.lua` (mirror AutomarkerL3F's `Data/`)
+- `Data/<Raid>.lua` — 9 raid NPC registries (mirror AutomarkerL3F's `Data/`); each NPC also carries `kind = "boss"|"trash"` for the Atlas Bosses/Trash split
 - `Data/Drops/<Raid>.lua` — 9 drop tables (`L3F.RegisterDrops(npcID, dropList)`)
-- `Data/Heroics/<Dungeon>.lua` — 16 heroic dungeon NPC catalogs
+- `Data/Heroics/<Dungeon>.lua` — 16 heroic dungeon NPC catalogs with inline drops (Normal + Heroic difficulties)
+- `Data/Consumables/*.lua` — 10 category files (Flasks, Battle Elixirs, etc.), `L3F.RegisterConsumables`
+- `Data/Factions.lua` / `Data/Collections.lua` — bonus Atlas categories, `L3F.RegisterBonusCategory`
 - `Media/` — icons
-- `verify.sh` — pre-commit checker: brace/paren balance, NULL bytes, suspicious last line, Lua block balance, key-function presence, TOC load order, duplicate NPC id/name
+- `verify.sh` — pre-commit checker: brace/paren balance, NULL bytes, suspicious last line, Lua block balance, key-function presence, TOC load order, duplicate NPC id/name, Sections-vs-Data cross-check, `luac5.1 -p` syntax pass
 
 ## Schemas
 
@@ -63,10 +71,14 @@ L3F.RegisterDrops(17535, {
 - Author: Willem (willem-YT@hotmail.com). GitHub display name: WillemDLT.
 
 ## Project status
-- Version 0.6.0 (`.toc`). Both addons on `dev`, in sync, working tree clean.
-- **Wing-aware marking** (`Sections.lua` + `Sections/`) is built and shipped on `dev` — engine, instance detection, on-screen wing switcher, per-wing mark config, 6h memory. Treated as correct unless in-game verification by Morphéours proves otherwise.
-- Per-raid spatial sectioning done: Tempest Keep, Serpentshrine Cavern. Remaining 7 (Karazhan, Black Temple, Gruul's Lair, Magtheridon's Lair, Hyjal Summit, Zul'Aman, Sunwell Plateau) each await a section list, built via the `wing-section-raid` skill.
-- Open punch-list: bundled default profiles deferred.
+- Version 0.17.1 (`.toc`). All work lands on `dev`; Morphéours pulls the beta zip and reports back.
+- **Wing-aware marking** + spatial sectioning for all 9 raids: shipped.
+- **Atlas tab** complete: Raids / Heroic Dungeons / Consumables / Factions / Collections in a 3-pane tree → list → detail layout with sub-tabs Drops / Spells / Notes. Heroic dungeons carry Normal + Heroic drop tables. Bonus-category items use coordinate-based search + cross-link to NPC sources. Pre-BiS / PvP / Professions were wiped in 0.14.2 (Morphéours rejected AtlasLoot-dump quality; will hand-curate later — see [[atlas-data-source]]).
+- **Composer tab** (Tabs/Guild/Composer.lua) complete: 27-spec palette, drag-drop or click-to-add, 5 groups + 1 bench default (groups [1, 5], benches [0, 5]), per-group party-aura icons, raid-wide buffs/debuffs sidebar with hover tooltips, multiple named profiles, L3F2C share/import strings. Personal-only — permissions framework was dropped per Willem's 0.15.0 scope-in (see [[project-l3ftools-composer-official]]). See [[project-l3ftools-composer-complete]] for the build details + the drag-drop machinery's quirks.
+- **Map tab** complete on a previous session (universal minimap-button collector opt-out). See [[project-l3ftools-map-complete]].
+- **AutomarkerL3F** shipped to main, hands-off (see [[project-automarkerl3f-complete]]).
+- Remaining Guild sub-tabs not yet started: Crafts (Phase 3), Raid Planner (Phase 4), Planner (Phase 5 — free-form spreadsheet per [[project-l3ftools-planner-spreadsheet]]).
+- Per-tab `preferredWidth`/`preferredHeight` in `RegisterTab` opts auto-grows the main window on tab open.
 
 ## Atlas / WoW Data
 The master reference behind the in-game Atlas tab lives at `C:\Users\pc\Downloads\WoW Addons\WoW Data\` (JSON, organised by category folder: `raids/<Raid>.json`, `consumables/`, `dungeons/`, ...). The addon's `Data/`, `Data/Drops/` and `Sections/` files are *derived* from it on a reviewed pull — never auto-edited. Extend the master via the `atlas` skill (one chunk per run); Gruul's Lair is the first pilot raid signed off.

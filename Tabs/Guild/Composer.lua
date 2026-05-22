@@ -36,6 +36,21 @@ local SPECS = {
       partyAuras = {
           { name = "Leader of the Pack", icon = "Interface\\Icons\\Spell_Nature_UnyeildingStamina" },
       } },
+    -- Bear-form sibling of Feral. Identical buff/debuff coverage (same
+    -- talent tree, same auras) - the only differences are the spell
+    -- icon (Bear Form 5487 vs Cat Form 768) and the role count (tank
+    -- vs dps). Hidden from the palette: the Feral palette icon
+    -- handles the swap via right-click. Slot rows toggle in place via
+    -- right-click too. Both keys round-trip through serialize/import.
+    { key = "feralbear", class = "Druid", spec = "Feral",
+      label = "Feral Druid (Bear)",
+      icon = "Interface\\Icons\\Ability_Racial_BearForm",
+      buffs   = { "Mark of the Wild", "Innervate", "Leader of the Pack" },
+      debuffs = { "Faerie Fire", "Mangle" },
+      partyAuras = {
+          { name = "Leader of the Pack", icon = "Interface\\Icons\\Spell_Nature_UnyeildingStamina" },
+      },
+      hiddenFromPalette = true },
     { key = "restodruid", class = "Druid", spec = "Restoration",
       label = "Restoration Druid",
       icon = "Interface\\Icons\\Spell_Nature_Healingtouch",
@@ -323,18 +338,29 @@ local SPEC_LOOKUP = {}
 for _, s in ipairs(SPECS) do SPEC_LOOKUP[s.key] = s end
 
 -- Spec -> role for the Display popup's role-count footer. Anything
--- not listed here counts as "dps". Feral Druid is treated as dps
--- (cat) by default - most TBC raids run cats; bear-tanking comps
--- will be miscounted by exactly one per bear, acceptable.
+-- not listed here counts as "dps". `feral` (Cat) defaults to dps;
+-- `feralbear` (the right-click toggle's other half) is a tank.
 local SPEC_ROLE = {
     protpala    = "tank",
     protwar     = "tank",
+    feralbear   = "tank",
     holypala    = "healer",
     discpriest  = "healer",
     holypriest  = "healer",
     restodruid  = "healer",
     restosham   = "healer",
 }
+
+-- Resolves the currently-active Feral form spec key based on the
+-- per-account `L3F.db.composer.feralForm` toggle. The Feral palette
+-- icon and any newly placed Feral slot use this; existing slots keep
+-- whichever key they were stored with until the user right-clicks.
+local function activeFeralKey()
+    if L3F.db and L3F.db.composer and L3F.db.composer.feralForm == "bear" then
+        return "feralbear"
+    end
+    return "feral"
+end
 
 
 -- =============================================================
@@ -369,6 +395,12 @@ end
 
 local function ensureComposerState()
     L3F.db.composer = L3F.db.composer or {}
+    -- Feral Cat/Bear toggle - account-wide setting. Cat is the more
+    -- common spec; bear stays sticky once selected so a tank-build
+    -- raider doesn't have to toggle every session.
+    if L3F.db.composer.feralForm ~= "bear" then
+        L3F.db.composer.feralForm = "cat"
+    end
     if not L3F.db.composer.profiles or not next(L3F.db.composer.profiles) then
         L3F.db.composer.profiles = { ["Default"] = newEmptyProfile() }
         L3F.db.composer.activeProfile = "Default"
@@ -849,12 +881,23 @@ clickAddSpec = function(spec)
 end
 
 local function buildPaletteIcon(parent, spec, x, y)
+    -- Feral palette icon swaps in place between Cat (spec.key="feral")
+    -- and Bear (spec.key="feralbear") via the `feralForm` toggle.
+    -- Every script that needs the "what would this drop / display now"
+    -- spec calls `effective()` instead of capturing `spec` once.
+    local isFeral = (spec.key == "feral")
+    local function effective()
+        if isFeral then return SPEC_LOOKUP[activeFeralKey()] or spec end
+        return spec
+    end
+    local eff = effective()
+
     local btn = CreateFrame("Button", nil, parent)
     btn:SetSize(PALETTE_ICON, PALETTE_ICON)
     btn:SetPoint("TOPLEFT", parent, "TOPLEFT", x, -y)
     local tex = btn:CreateTexture(nil, "ARTWORK")
     tex:SetAllPoints()
-    tex:SetTexture(spec.icon)
+    tex:SetTexture(eff.icon)
     tex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
     btn:SetNormalTexture(tex)
     local hl = btn:CreateTexture(nil, "HIGHLIGHT")
@@ -866,43 +909,70 @@ local function buildPaletteIcon(parent, spec, x, y)
     --     (click-to-add).
     -- See the block above the dragDriver definition for why this is
     -- the correct pattern.
+    --
+    -- Feral icon additionally registers RightButtonUp so right-clicking
+    -- it cycles the cat/bear toggle (OnClick handler branches on
+    -- `button`).
     btn:EnableMouse(true)
     btn:RegisterForDrag("LeftButton")
-    btn:RegisterForClicks("LeftButtonUp")
+    if isFeral then
+        btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    else
+        btn:RegisterForClicks("LeftButtonUp")
+    end
 
     btn:SetScript("OnEnter", function(self)
+        local s = effective()
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText(spec.label)
-        if #spec.buffs > 0 then
-            GameTooltip:AddLine("Buffs: " .. table.concat(spec.buffs, ", "), 0.7, 0.9, 0.7, true)
+        GameTooltip:SetText(s.label)
+        if #s.buffs > 0 then
+            GameTooltip:AddLine("Buffs: " .. table.concat(s.buffs, ", "), 0.7, 0.9, 0.7, true)
         end
-        if #spec.debuffs > 0 then
-            GameTooltip:AddLine("Debuffs: " .. table.concat(spec.debuffs, ", "), 0.9, 0.7, 0.7, true)
+        if #s.debuffs > 0 then
+            GameTooltip:AddLine("Debuffs: " .. table.concat(s.debuffs, ", "), 0.9, 0.7, 0.7, true)
         end
-        GameTooltip:AddLine("Drag onto a slot or click to add.", 0.6, 0.6, 0.6, true)
+        if isFeral then
+            GameTooltip:AddLine("Drag onto a slot or click to add.", 0.6, 0.6, 0.6, true)
+            GameTooltip:AddLine("Right-click to toggle Cat / Bear.", 0.55, 0.8, 1.0, true)
+        else
+            GameTooltip:AddLine("Drag onto a slot or click to add.", 0.6, 0.6, 0.6, true)
+        end
         GameTooltip:Show()
     end)
     btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     btn:SetScript("OnDragStart", function()
-        dragState.spec = { key = spec.key, label = spec.label }
+        local s = effective()
+        dragState.spec = { key = s.key, label = s.label }
         dragState.fromTarget = nil  -- palette drag has no source slot
         dragState.fromIdx = nil
-        followerTex:SetTexture(spec.icon)
+        followerTex:SetTexture(s.icon)
         follower:Show()
         if DEBUG_DROP then
-            print("|cffffd100L3FComp|r drag from palette: " .. spec.label)
+            print("|cffffd100L3FComp|r drag from palette: " .. s.label)
         end
     end)
     btn:SetScript("OnDragStop", finishDrag)
-    btn:SetScript("OnClick", function() clickAddSpec(spec) end)
+    btn:SetScript("OnClick", function(self, button)
+        if isFeral and button == "RightButton" then
+            L3F.db.composer.feralForm =
+                (L3F.db.composer.feralForm == "bear") and "cat" or "bear"
+            refresh()
+            return
+        end
+        clickAddSpec(effective())
+    end)
 end
 
 local function buildPalette(parent, x, y)
     local byClass = {}
     for _, s in ipairs(SPECS) do
-        byClass[s.class] = byClass[s.class] or {}
-        table.insert(byClass[s.class], s)
+        -- hiddenFromPalette specs (currently just feralbear) are
+        -- reachable via right-click toggle on their visible sibling.
+        if not s.hiddenFromPalette then
+            byClass[s.class] = byClass[s.class] or {}
+            table.insert(byClass[s.class], s)
+        end
     end
     local rowBreak = 5
     local cursorX, cursorY = x, y
@@ -989,6 +1059,27 @@ local function buildSlotRow(parent, target, idx, y)
             end
         end)
         row:SetScript("OnDragStop", finishDrag)
+
+        -- Right-click on a Feral slot toggles Cat <-> Bear in place.
+        -- The label updates only when it still matches the previous
+        -- form's default - user-typed labels (player names) are kept
+        -- verbatim. Left-button OnMouseUp is intentionally ignored so
+        -- the drag flow above stays the source of truth for moves.
+        if slot.specKey == "feral" or slot.specKey == "feralbear" then
+            row:SetScript("OnMouseUp", function(self, button)
+                if button ~= "RightButton" then return end
+                local newKey = (slot.specKey == "feral") and "feralbear" or "feral"
+                local oldSpec = SPEC_LOOKUP[slot.specKey]
+                local newSpec = SPEC_LOOKUP[newKey]
+                if not newSpec then return end
+                if not slot.label or slot.label == "" or
+                   (oldSpec and slot.label == oldSpec.label) then
+                    slot.label = newSpec.label
+                end
+                slot.specKey = newKey
+                refresh()
+            end)
+        end
     else
         icon:SetColorTexture(0.08, 0.08, 0.08, 1)
         lbl:SetText("")
