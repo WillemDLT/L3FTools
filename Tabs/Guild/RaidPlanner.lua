@@ -182,13 +182,38 @@ local function bgTexture(slug)
     return "Interface\\AddOns\\L3FTools\\Media\\RaidPlanner\\" .. slug
 end
 
--- Opens the WoW client's built-in ColorPickerFrame. `initialHex` is
--- six lowercase hex chars (no '#'); `onAccept` is called with the
--- new hex when the user clicks OK or cancel (cancel restores). Works
--- on TBC 2.5.x; the previousValues table convention is what TBC's
--- cancelFunc expects.
+-- Wraps `refresh()` in a single-shot per-frame schedule. Why: many
+-- refresh() callers run inside WoW event callbacks (OnDragStop,
+-- OnClick, picker callbacks). refresh() destroys + rebuilds the
+-- palette + props + canvas, which can synchronously orphan the
+-- callback's own enclosing frame. In 0.20.1 this manifested as a
+-- 263x stack overflow when palette OnDragStop's refresh() tore down
+-- a palette button while that button's closure was still on the
+-- stack. C_Timer.After(0, ...) defers to the NEXT frame, so the
+-- current event callback finishes before refresh runs.
+local refresh  -- forward decl
+local refreshScheduled = false
+local function scheduleRefresh()
+    if refreshScheduled then return end
+    refreshScheduled = true
+    if C_Timer and C_Timer.After then
+        C_Timer.After(0, function()
+            refreshScheduled = false
+            if refresh then refresh() end
+        end)
+    else
+        refreshScheduled = false
+        if refresh then refresh() end
+    end
+end
+
+-- Opens the WoW client's built-in color picker via the canonical
+-- OpenColorPicker(info) Blizzard helper. `initialHex` is six
+-- lowercase hex chars (no '#'); `onAccept(hex)` is called as the
+-- user drags the picker AND on cancel (cancel restores the
+-- previous values). The helper writes `previousValues = {r=r,
+-- g=g, b=b, opacity=op}` for us, so cancelFunc can read by key.
 local function openColorPicker(initialHex, onAccept)
-    if not ColorPickerFrame then return end
     initialHex = (initialHex and #initialHex == 6) and initialHex or "ffffff"
     local r = tonumber(initialHex:sub(1, 2), 16) / 255
     local g = tonumber(initialHex:sub(3, 4), 16) / 255
@@ -200,25 +225,36 @@ local function openColorPicker(initialHex, onAccept)
             math.floor((ng or 1) * 255 + 0.5),
             math.floor((nb or 1) * 255 + 0.5))
     end
-    local function applyCurrent()
-        onAccept(rgbToHex(ColorPickerFrame:GetColorRGB()))
-    end
 
-    ColorPickerFrame.hasOpacity = false
-    ColorPickerFrame.opacity = 1
-    ColorPickerFrame.previousValues = { r, g, b }
-    ColorPickerFrame.func = applyCurrent
-    ColorPickerFrame.opacityFunc = applyCurrent
-    ColorPickerFrame.cancelFunc = function(prev)
-        if prev and prev.r then
-            onAccept(rgbToHex(prev.r, prev.g, prev.b))
-        else
-            onAccept(initialHex)
-        end
+    -- Use OpenColorPicker when available (TBC 2.5.x has it); fall
+    -- back to the field-set + :Show() pattern as a safety net.
+    local info = {
+        r = r, g = g, b = b,
+        hasOpacity = false,
+        swatchFunc = function()
+            onAccept(rgbToHex(ColorPickerFrame:GetColorRGB()))
+        end,
+        cancelFunc = function(prev)
+            if prev and prev.r then
+                onAccept(rgbToHex(prev.r, prev.g, prev.b))
+            else
+                onAccept(initialHex)
+            end
+        end,
+    }
+    if type(OpenColorPicker) == "function" then
+        OpenColorPicker(info)
+    elseif ColorPickerFrame then
+        ColorPickerFrame:Hide()
+        ColorPickerFrame.hasOpacity = false
+        ColorPickerFrame.opacity = 1
+        ColorPickerFrame.previousValues = { r = r, g = g, b = b }
+        ColorPickerFrame.func = info.swatchFunc
+        ColorPickerFrame.opacityFunc = info.swatchFunc
+        ColorPickerFrame.cancelFunc = info.cancelFunc
+        ColorPickerFrame:SetColorRGB(r, g, b)
+        ColorPickerFrame:Show()
     end
-    ColorPickerFrame:Hide()  -- force the OnShow handlers to fire on re-show
-    ColorPickerFrame:SetColorRGB(r, g, b)
-    ColorPickerFrame:Show()
 end
 
 
@@ -289,38 +325,49 @@ end
 
 -- Build a placed-icon Frame bound to one entry in plan.icons.
 --
--- Why a Frame and not a Button: in TBC 2.5.x, mixing OnClick with
--- OnDragStart/OnDragStop on the same Button produces weird transient
--- states - drags fire on tiny accidental movements, then OnClick
--- doesn't, then refreshIcons rebuilds while the user is mid-gesture
--- and the new btn re-enters the same drag, "consuming" only part of
--- the requested movement (the "sticky" symptom Morpheours reported).
--- Frames cleanly separate the two: OnDragStart fires only when WoW
--- thinks the user is dragging, and OnMouseUp fires only when they
--- weren't dragging. That's enough to disambiguate click-vs-drag.
+-- Two big changes from 0.20.1:
+--   1. Drag uses WoW's StartMoving / StopMovingOrSizing instead of a
+--      follower-icon dance. The frame itself moves under the cursor;
+--      on release we read its final GetCenter() to compute the new
+--      fractional position. This eliminates the f:Hide() call in
+--      OnDragStart that was *cancelling the active drag* in TBC 2.5.x
+--      (hiding a drag source aborts the gesture; OnDragStop never
+--      fires; the icon stays stuck mid-flight - the "sticky" symptom).
+--   2. kind="boss" icons render a PlayerModel (small 3D portrait of
+--      npc.npcID) instead of a texture. Same drag/click affordances.
 local function buildPlacedIcon(plan, iconData, idx)
     local f = CreateFrame("Frame", nil, placedHost)
     f:SetSize(PLACED_DEFAULT_SIZE, PLACED_DEFAULT_SIZE)
     local ax, ay = relToAbs(iconData.x or 0.5, iconData.y or 0.5)
     f:SetPoint("CENTER", placedHost, "TOPLEFT", ax, -ay)
 
-    local tex = f:CreateTexture(nil, "ARTWORK")
-    tex:SetAllPoints()
-    tex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-    local path
-    if iconData.iconTex then
-        path = iconData.iconTex
-    elseif iconData.variant then
-        path = KEY_TO_TEX[iconData.key .. ":" .. iconData.variant]
-    end
-    path = path or KEY_TO_TEX[iconData.key]
-    if path then tex:SetTexture(path) end
-
-    if iconData.color and iconData.color ~= "ffffff" then
-        local r = tonumber(iconData.color:sub(1, 2), 16)
-        local g = tonumber(iconData.color:sub(3, 4), 16)
-        local b = tonumber(iconData.color:sub(5, 6), 16)
-        if r and g and b then tex:SetVertexColor(r/255, g/255, b/255, 1) end
+    local path  -- texture path; nil for boss-kind (uses model instead)
+    if iconData.kind == "boss" and iconData.npcID then
+        local model = CreateFrame("PlayerModel", nil, f)
+        model:SetAllPoints()
+        model:EnableMouse(false)  -- click pass-through to the parent f
+        pcall(function()
+            model:SetCreature(iconData.npcID)
+            model:SetCamDistanceScale(1.8)
+            model:SetPortraitZoom(0.9)
+        end)
+    else
+        local tex = f:CreateTexture(nil, "ARTWORK")
+        tex:SetAllPoints()
+        tex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        if iconData.iconTex then
+            path = iconData.iconTex
+        elseif iconData.variant then
+            path = KEY_TO_TEX[iconData.key .. ":" .. iconData.variant]
+        end
+        path = path or KEY_TO_TEX[iconData.key]
+        if path then tex:SetTexture(path) end
+        if iconData.color and iconData.color ~= "ffffff" then
+            local r = tonumber(iconData.color:sub(1, 2), 16)
+            local g = tonumber(iconData.color:sub(3, 4), 16)
+            local b = tonumber(iconData.color:sub(5, 6), 16)
+            if r and g and b then tex:SetVertexColor(r/255, g/255, b/255, 1) end
+        end
     end
 
     if currentSelection == idx then
@@ -347,14 +394,13 @@ local function buildPlacedIcon(plan, iconData, idx)
     end
 
     f:EnableMouse(true)
+    f:SetMovable(true)
+    f:SetClampedToScreen(false)
     f:RegisterForDrag("LeftButton")
-    f:SetMovable(false)
 
     -- OnMouseUp only fires when WoW didn't escalate the gesture into
-    -- a drag (drag would have routed to OnDragStart/OnDragStop and
-    -- swallowed OnMouseUp). So a left-click here is a pure click,
-    -- safe to use as "select"; a right-click is always a non-drag
-    -- because RegisterForDrag only watches LeftButton.
+    -- a drag. Pure click -> select / context menu. (RegisterForDrag
+    -- only watches LeftButton, so right-clicks always come here.)
     f:SetScript("OnMouseUp", function(self, button)
         if button == "RightButton" then
             openContextMenu(self, idx)
@@ -365,36 +411,28 @@ local function buildPlacedIcon(plan, iconData, idx)
 
     f:SetScript("OnDragStart", function()
         if iconData.locked then return end
-        dragState.active   = true
-        dragState.fromIcon = iconData
-        followerTex:SetTexture(path or QUILL)
-        follower:Show()
-        f:Hide()
+        f:StartMoving()  -- WoW now moves f under the cursor; no
+                         -- follower / Hide / dragState manipulation.
     end)
 
     f:SetScript("OnDragStop", function()
-        -- Guard: only this frame's OnDragStop applies if THIS frame
-        -- started the drag. fromIcon mismatch means stale event.
-        if not dragState.active or dragState.fromIcon ~= iconData then
-            return
-        end
-        local cx, cy = GetCursorPosition()
-        local scale = UIParent:GetEffectiveScale()
-        cx, cy = cx / scale, cy / scale
+        f:StopMovingOrSizing()
+        local cx, cy = f:GetCenter()
         local l, r = canvasFrame:GetLeft(), canvasFrame:GetRight()
         local t, b = canvasFrame:GetTop(), canvasFrame:GetBottom()
-        if l and cx >= l and cx <= r and cy >= b and cy <= t then
+        if cx and l and cx >= l and cx <= r and cy >= b and cy <= t then
             iconData.x = (cx - l) / (r - l)
             iconData.y = 1 - (cy - b) / (t - b)
         else
             for i, ic in ipairs(plan.icons) do
-                if ic == iconData then table.remove(plan.icons, i); break end
+                if ic == iconData then
+                    table.remove(plan.icons, i); break
+                end
             end
         end
-        dragState.active = false
-        dragState.fromIcon = nil
-        follower:Hide()
-        refreshIcons()
+        -- Defer the rebuild - never recurse from inside the
+        -- OnDragStop callback.
+        scheduleRefresh()
     end)
 
     return f
@@ -442,6 +480,26 @@ refreshDrawings = function()
     end
 end
 
+-- Incremental: draw ONLY the new segment from prevPt to newPt. Used
+-- while the user is mid-stroke so we don't rebuild the whole drawings
+-- layer on every cursor move. The previous full-rebuild approach was
+-- O(N) per point - long strokes would lag and the renderer would
+-- silently stop adding segments when the texture count grew large
+-- (Morpheours's "stops showing after a certain length" report).
+local function appendStrokeSegment(stroke, prevPt, newPt)
+    if not drawingHost then return end
+    local w, h = canvasSizePx()
+    if w == 0 then return end
+    local hex = stroke.color or "ffffff"
+    local r = tonumber(hex:sub(1, 2), 16) / 255
+    local g = tonumber(hex:sub(3, 4), 16) / 255
+    local b = tonumber(hex:sub(5, 6), 16) / 255
+    local size = stroke.size or 4
+    drawSegment(drawingHost,
+        prevPt.x * w, prevPt.y * h, newPt.x * w, newPt.y * h,
+        size, r, g, b, 1)
+end
+
 
 -- =============================================================
 -- 8. LEFT PANEL (mode toggle + palette / pen controls)
@@ -469,17 +527,22 @@ local function placeIconAt(kind, key, relX, relY, options)
         x       = relX or 0.5,
         y       = relY or 0.5,
         color   = (options and options.color) or "ffffff",
-        text    = options and options.text or nil,
-        variant = options and options.variant or nil,
+        text    = (options and options.text) or nil,
+        variant = (options and options.variant) or nil,
         locked  = false,
     }
     if options and options.spellID then
         entry.spellID = options.spellID
         entry.iconTex = options.iconTex
     end
+    if options and options.npcID then
+        entry.npcID = options.npcID
+    end
     table.insert(plan.icons, entry)
     currentSelection = #plan.icons
-    refresh()
+    -- Deferred: we're often called from an event-handler closure
+    -- whose own frame is about to be destroyed by refreshPalette.
+    scheduleRefresh()
 end
 
 local function buildPaletteButton(parent, kind, entry, x, y, sz)
@@ -565,8 +628,15 @@ local function canvasUpdate(self)
     local pts = currentStroke.points
     local last = pts[#pts]
     if not last or math.abs(last.x - rx) > 0.001 or math.abs(last.y - ry) > 0.001 then
-        table.insert(pts, { x = rx, y = ry })
-        refreshDrawings()
+        local newPt = { x = rx, y = ry }
+        table.insert(pts, newPt)
+        -- Append only the new segment - DO NOT call refreshDrawings,
+        -- which would O(N) rebuild every existing segment on every
+        -- frame. Long strokes would stop drawing because the renderer
+        -- choked on the texture-creation flood.
+        if last then
+            appendStrokeSegment(currentStroke, last, newPt)
+        end
     end
 end
 
@@ -619,7 +689,7 @@ openContextMenu = function(anchorBtn, iconIdx)
                 c.y = (icon and icon.y or 0.5) + 0.03
                 table.insert(plan.icons, c)
                 currentSelection = #plan.icons
-                refresh()
+                scheduleRefresh()
             end
             f:Hide()
         end },
@@ -627,7 +697,7 @@ openContextMenu = function(anchorBtn, iconIdx)
             if icon then
                 table.remove(plan.icons, iconIdx)
                 currentSelection = nil
-                refresh()
+                scheduleRefresh()
             end
             f:Hide()
         end },
@@ -781,17 +851,42 @@ refreshPalette = function()
         end)
         cy = cy + 30
 
-        label("Color (hex)", 0, cy); cy = cy + 14
-        local colorStr = CreateFrame("EditBox", nil, penControls, "InputBoxTemplate")
-        colorStr:SetSize(56, 22)
-        colorStr:SetPoint("TOPLEFT", penControls, "TOPLEFT", 6, -cy)
-        colorStr:SetAutoFocus(false); colorStr:SetMaxLetters(6)
-        colorStr:SetText(penMode.color)
-        colorStr:SetScript("OnEnterPressed", function(self)
-            local c = self:GetText():lower():gsub("[^0-9a-f]", "")
-            if #c == 6 then penMode.color = c end
-            self:ClearFocus(); refreshPalette()
+        label("Color", 0, cy); cy = cy + 14
+        local penColorBtn = CreateFrame("Button", nil, penControls)
+        penColorBtn:SetSize(28, 22)
+        penColorBtn:SetPoint("TOPLEFT", penControls, "TOPLEFT", 6, -cy)
+        local penColorSwatch = penColorBtn:CreateTexture(nil, "ARTWORK")
+        penColorSwatch:SetPoint("TOPLEFT", penColorBtn, "TOPLEFT", 1, -1)
+        penColorSwatch:SetPoint("BOTTOMRIGHT", penColorBtn, "BOTTOMRIGHT", -1, 1)
+        penColorSwatch:SetTexture("Interface\\Buttons\\WHITE8X8")
+        do
+            local r = tonumber(penMode.color:sub(1, 2), 16) / 255
+            local g = tonumber(penMode.color:sub(3, 4), 16) / 255
+            local b = tonumber(penMode.color:sub(5, 6), 16) / 255
+            penColorSwatch:SetVertexColor(r, g, b, 1)
+        end
+        local penBorder = penColorBtn:CreateTexture(nil, "OVERLAY")
+        penBorder:SetAllPoints()
+        penBorder:SetTexture("Interface\\Buttons\\WHITE8X8")
+        penBorder:SetVertexColor(0, 0, 0, 0.6)
+        penBorder:SetDrawLayer("OVERLAY", -2)
+        penColorBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+        penColorBtn:SetScript("OnClick", function()
+            openColorPicker(penMode.color, function(newHex)
+                penMode.color = newHex
+                local r = tonumber(newHex:sub(1, 2), 16) / 255
+                local g = tonumber(newHex:sub(3, 4), 16) / 255
+                local b = tonumber(newHex:sub(5, 6), 16) / 255
+                penColorSwatch:SetVertexColor(r, g, b, 1)
+                if prevDot then prevDot:SetVertexColor(r, g, b, 1) end
+            end)
         end)
+        penColorBtn:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText("Pen color")
+            GameTooltip:Show()
+        end)
+        penColorBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
         cy = cy + 30
 
         label("Fade (sec, 0=off)", 0, cy); cy = cy + 14
@@ -965,7 +1060,18 @@ refreshPropsPanel = function()
     colorBtn:SetScript("OnClick", function()
         openColorPicker(icon.color or "ffffff", function(newHex)
             icon.color = newHex
-            refresh()
+            -- Live-update the swatch + label so the user sees the
+            -- color change WHILE the picker is open. Avoids calling
+            -- refresh() (which rebuilds propsHost - the picker's
+            -- swatchFunc closure references THIS colorSwatch /
+            -- hexLabel; if we destroyed them on every picker tick
+            -- the in-flight callback would update orphan textures).
+            local r = tonumber(newHex:sub(1, 2), 16) / 255
+            local g = tonumber(newHex:sub(3, 4), 16) / 255
+            local b = tonumber(newHex:sub(5, 6), 16) / 255
+            colorSwatch:SetVertexColor(r, g, b, 1)
+            hexLabel:SetText("#" .. newHex)
+            refreshIcons()
         end)
     end)
     row = row + 28
@@ -992,7 +1098,7 @@ refreshPropsPanel = function()
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetText(v.label); GameTooltip:Show()
             end)
             b:SetScript("OnLeave", function() GameTooltip:Hide() end)
-            b:SetScript("OnClick", function() icon.variant = v.key; refresh() end)
+            b:SetScript("OnClick", function() icon.variant = v.key; scheduleRefresh() end)
         end
     end
 end
@@ -1074,11 +1180,55 @@ refreshEncounterPanel = function()
             GameTooltip:SetOwner(self, "ANCHOR_LEFT")
             GameTooltip:SetText(npc.name)
             if npc.notes then GameTooltip:AddLine(npc.notes, 0.7, 0.7, 0.7, true) end
+            GameTooltip:AddLine("Drag onto the canvas to place a 3D portrait.",
+                0.6, 0.6, 0.6, true)
             GameTooltip:Show()
         end)
         row:SetScript("OnLeave", function()
             rbg:SetColorTexture(0, 0, 0, 0.12); GameTooltip:Hide()
         end)
+
+        -- Drag the row onto the canvas to place a kind="boss" icon
+        -- (rendered as a small PlayerModel portrait). Uses the same
+        -- follower-icon pattern as the palette buttons.
+        row:RegisterForDrag("LeftButton")
+        row:SetScript("OnDragStart", function()
+            dragState.active   = true
+            dragState.kind     = "boss"
+            dragState.key      = "boss:" .. tostring(npc.id)
+            dragState.npcID    = npc.id
+            dragState.npcName  = npc.name
+            dragState.color    = "ffffff"
+            dragState.variant  = nil
+            dragState.fromIcon = nil
+            followerTex:SetTexture("Interface\\Icons\\INV_Misc_Head_Dragon_01")
+            follower:Show()
+        end)
+        row:SetScript("OnDragStop", function()
+            if not dragState.active or dragState.fromIcon ~= nil
+               or dragState.kind ~= "boss" then
+                dragState.active = false
+                follower:Hide()
+                return
+            end
+            local cx, cy = GetCursorPosition()
+            local scale = UIParent:GetEffectiveScale()
+            cx, cy = cx / scale, cy / scale
+            local l, r = canvasFrame:GetLeft(), canvasFrame:GetRight()
+            local t, b = canvasFrame:GetTop(), canvasFrame:GetBottom()
+            if l and cx >= l and cx <= r and cy >= b and cy <= t then
+                placeIconAt("boss", dragState.key,
+                    (cx - l) / (r - l), 1 - (cy - b) / (t - b),
+                    { npcID = dragState.npcID, text = dragState.npcName })
+            end
+            dragState.active = false
+            dragState.kind = nil
+            dragState.npcID = nil
+            dragState.npcName = nil
+            dragState.key = nil
+            follower:Hide()
+        end)
+
         y = y + rowH + 2
     end)
     child:SetHeight(math.max(y + 10, 200))
@@ -1256,7 +1406,7 @@ local function buildTopStrip(parent)
             L3F.db.raidPlanner.activeEncounter = value
             L3F.db.raidPlanner.activePlanIdx = 1
             ensurePlansFor(value)
-            refresh()
+            scheduleRefresh()
         end)
     encDD:SetPoint("LEFT", nameEdit, "RIGHT", 8, -2)
 
@@ -1273,7 +1423,7 @@ local function buildTopStrip(parent)
             return { { entries = entries } }
         end,
         function(value)
-            local p = currentPlan(); if p then p.background = value; refresh() end
+            local p = currentPlan(); if p then p.background = value; scheduleRefresh() end
         end)
     bgDD:SetPoint("LEFT", encDD, "RIGHT", 2, 0)
 
@@ -1281,7 +1431,7 @@ local function buildTopStrip(parent)
     UIDropDownMenu_Initialize(utilDD, function(self, level)
         local opts = {
             { text = "Clear plan", func = function()
-                local p = currentPlan(); if p then p.icons = {}; p.drawings = {}; refresh() end
+                local p = currentPlan(); if p then p.icons = {}; p.drawings = {}; scheduleRefresh() end
             end },
             { text = "Clone plan", func = function()
                 local plans = ensurePlansFor(L3F.db.raidPlanner.activeEncounter)
@@ -1291,7 +1441,7 @@ local function buildTopStrip(parent)
                     copy.name = (cur.name or "Plan") .. " copy"
                     table.insert(plans, copy)
                     L3F.db.raidPlanner.activePlanIdx = #plans
-                    refresh()
+                    scheduleRefresh()
                 end
             end },
         }
@@ -1336,7 +1486,7 @@ local function buildTopStrip(parent)
         local plans = ensurePlansFor(L3F.db.raidPlanner.activeEncounter)
         table.insert(plans, newEmptyPlan(L3F.db.raidPlanner.activeEncounter))
         L3F.db.raidPlanner.activePlanIdx = #plans
-        refresh()
+        scheduleRefresh()
     end)
 
     prevBtn = CreateFrame("Button", nil, topStripFrame)
@@ -1347,7 +1497,7 @@ local function buildTopStrip(parent)
     prevBtn:SetScript("OnClick", function()
         local rp = L3F.db.raidPlanner
         rp.activePlanIdx = math.max(1, (rp.activePlanIdx or 1) - 1)
-        refresh()
+        scheduleRefresh()
     end)
     nextBtn = CreateFrame("Button", nil, topStripFrame)
     nextBtn:SetSize(20, 20)
@@ -1358,7 +1508,7 @@ local function buildTopStrip(parent)
         local rp = L3F.db.raidPlanner
         local plans = ensurePlansFor(rp.activeEncounter)
         rp.activePlanIdx = math.min(#plans, (rp.activePlanIdx or 1) + 1)
-        refresh()
+        scheduleRefresh()
     end)
 
     deleteBtn = CreateFrame("Button", nil, topStripFrame)
@@ -1372,7 +1522,7 @@ local function buildTopStrip(parent)
         if #plans > 1 then
             table.remove(plans, rp.activePlanIdx or 1)
             rp.activePlanIdx = math.max(1, math.min(#plans, rp.activePlanIdx))
-            refresh()
+            scheduleRefresh()
         end
     end)
 end
@@ -1394,7 +1544,7 @@ refreshTopStrip = function()
         b:SetPoint("LEFT", planTabsHost, "LEFT", cx, 0)
         if i == rp.activePlanIdx then b:SetButtonState("PUSHED", true) end
         b:SetScript("OnClick", function()
-            rp.activePlanIdx = i; refresh()
+            rp.activePlanIdx = i; scheduleRefresh()
         end)
         cx = cx + 30
     end
