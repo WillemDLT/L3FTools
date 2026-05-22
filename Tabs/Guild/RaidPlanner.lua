@@ -266,7 +266,12 @@ end
 -- Frame and placed icons are children whose absolute position is
 -- computed from their stored 0..1 fractional coords.
 
-local refresh, selectIcon, deselect, openContextMenu
+-- `refresh` is forward-declared at the top of the file (right above
+-- scheduleRefresh) so scheduleRefresh's closure captures it. Re-
+-- declaring `local refresh` here would SHADOW that upvalue and the
+-- deferred refresh would never fire. Only declare the other three
+-- forwards here.
+local selectIcon, deselect, openContextMenu
 
 local dragState = { active = false }
 
@@ -409,8 +414,15 @@ local function buildPlacedIcon(plan, iconData, idx)
         end
     end)
 
+    -- Track the icon's fractional position at drag start so OnDragStop
+    -- can distinguish a real move from an accidental shake-during-click
+    -- (WoW's drag threshold is generous; even a still-handed click can
+    -- nudge the cursor ~2-3 px which is enough to fire OnDragStart).
+    local dragStartX, dragStartY
+
     f:SetScript("OnDragStart", function()
         if iconData.locked then return end
+        dragStartX, dragStartY = iconData.x, iconData.y
         f:StartMoving()  -- WoW now moves f under the cursor; no
                          -- follower / Hide / dragState manipulation.
     end)
@@ -420,10 +432,24 @@ local function buildPlacedIcon(plan, iconData, idx)
         local cx, cy = f:GetCenter()
         local l, r = canvasFrame:GetLeft(), canvasFrame:GetRight()
         local t, b = canvasFrame:GetTop(), canvasFrame:GetBottom()
-        if cx and l and cx >= l and cx <= r and cy >= b and cy <= t then
-            iconData.x = (cx - l) / (r - l)
-            iconData.y = 1 - (cy - b) / (t - b)
+        local newX, newY
+        if cx and l then
+            newX = (cx - l) / (r - l)
+            newY = 1 - (cy - b) / (t - b)
+        end
+        local moved = newX and (
+            math.abs(newX - (dragStartX or newX)) > 0.005 or
+            math.abs(newY - (dragStartY or newY)) > 0.005)
+        if not moved then
+            -- Treated as a click - select instead of move (the frame
+            -- snaps back to its original anchored position on the
+            -- next scheduleRefresh tick).
+            currentSelection = idx
+        elseif newX and l and cx >= l and cx <= r and cy >= b and cy <= t then
+            iconData.x = newX
+            iconData.y = newY
         else
+            -- Released outside canvas after a meaningful drag = yeet.
             for i, ic in ipairs(plan.icons) do
                 if ic == iconData then
                     table.remove(plan.icons, i); break
@@ -506,16 +532,36 @@ end
 -- =============================================================
 local leftPanel, iconControls, penControls
 
+-- `dragSource` discriminates palette-vs-encounter drags so each
+-- handler only acts on its own drop. Without this, a stale state
+-- from a previous drag could cause palette's OnDragStop to fire
+-- against an encounter-kind drag and produce a malformed icon.
 local function startDragFromPalette(kind, key)
-    dragState.active   = true
-    dragState.kind     = kind
-    dragState.key      = key
-    dragState.variant  = nil
-    dragState.color    = "ffffff"
-    dragState.text     = nil
-    dragState.fromIcon = nil
+    dragState.active     = true
+    dragState.dragSource = "palette"
+    dragState.kind       = kind
+    dragState.key        = key
+    dragState.variant    = nil
+    dragState.color      = "ffffff"
+    dragState.text       = nil
+    dragState.fromIcon   = nil
+    dragState.npcID      = nil
+    dragState.npcName    = nil
     followerTex:SetTexture(KEY_TO_TEX[key] or QUILL)
     follower:Show()
+end
+
+local function resetDragState()
+    dragState.active     = false
+    dragState.dragSource = nil
+    dragState.kind       = nil
+    dragState.key        = nil
+    dragState.variant    = nil
+    dragState.color      = nil
+    dragState.text       = nil
+    dragState.fromIcon   = nil
+    dragState.npcID      = nil
+    dragState.npcName    = nil
 end
 
 local function placeIconAt(kind, key, relX, relY, options)
@@ -572,7 +618,13 @@ local function buildPaletteButton(parent, kind, entry, x, y, sz)
 
     btn:SetScript("OnDragStart", function() startDragFromPalette(kind, entry.key) end)
     btn:SetScript("OnDragStop", function()
-        if not dragState.active or dragState.fromIcon ~= nil then return end
+        -- Only act if THIS palette drag is the active one. dragSource
+        -- guard prevents firing against an encounter-kind drag state;
+        -- when it doesn't match we just bail without touching state
+        -- so the legitimate drag's own OnDragStop can still clean up.
+        if not dragState.active or dragState.dragSource ~= "palette" then
+            return
+        end
         local cx, cy = GetCursorPosition()
         local scale = UIParent:GetEffectiveScale()
         cx, cy = cx / scale, cy / scale
@@ -583,8 +635,7 @@ local function buildPaletteButton(parent, kind, entry, x, y, sz)
                 (cx - l) / (r - l), 1 - (cy - b) / (t - b),
                 { color = dragState.color, variant = dragState.variant })
         end
-        dragState.active = false
-        dragState.fromIcon = nil
+        resetDragState()
         follower:Hide()
     end)
     btn:SetScript("OnClick", function() placeIconAt(kind, entry.key, 0.5, 0.5) end)
@@ -1193,23 +1244,21 @@ refreshEncounterPanel = function()
         -- follower-icon pattern as the palette buttons.
         row:RegisterForDrag("LeftButton")
         row:SetScript("OnDragStart", function()
-            dragState.active   = true
-            dragState.kind     = "boss"
-            dragState.key      = "boss:" .. tostring(npc.id)
-            dragState.npcID    = npc.id
-            dragState.npcName  = npc.name
-            dragState.color    = "ffffff"
-            dragState.variant  = nil
-            dragState.fromIcon = nil
+            dragState.active     = true
+            dragState.dragSource = "encounter"
+            dragState.kind       = "boss"
+            dragState.key        = "boss:" .. tostring(npc.id)
+            dragState.npcID      = npc.id
+            dragState.npcName    = npc.name
+            dragState.color      = "ffffff"
+            dragState.variant    = nil
+            dragState.fromIcon   = nil
             followerTex:SetTexture("Interface\\Icons\\INV_Misc_Head_Dragon_01")
             follower:Show()
         end)
         row:SetScript("OnDragStop", function()
-            if not dragState.active or dragState.fromIcon ~= nil
-               or dragState.kind ~= "boss" then
-                dragState.active = false
-                follower:Hide()
-                return
+            if not dragState.active or dragState.dragSource ~= "encounter" then
+                return  -- not our drag; leave state alone
             end
             local cx, cy = GetCursorPosition()
             local scale = UIParent:GetEffectiveScale()
@@ -1221,11 +1270,7 @@ refreshEncounterPanel = function()
                     (cx - l) / (r - l), 1 - (cy - b) / (t - b),
                     { npcID = dragState.npcID, text = dragState.npcName })
             end
-            dragState.active = false
-            dragState.kind = nil
-            dragState.npcID = nil
-            dragState.npcName = nil
-            dragState.key = nil
+            resetDragState()
             follower:Hide()
         end)
 
@@ -1682,7 +1727,11 @@ local function buildRaidPlanner(parent)
     canvasFrame:SetPoint("TOPLEFT", parent, "TOPLEFT", LEFT_W + 12, -TOP_H)
     canvasFrame:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -RIGHT_W - 12, 4)
     canvasFrame:EnableMouse(true)
-    canvasFrame:RegisterForDrag("LeftButton")
+    -- No RegisterForDrag on the canvas: pen mode uses OnMouseDown +
+    -- OnUpdate polling for stroke drawing, NOT drag events. Having
+    -- RegisterForDrag here armed WoW's drag system for the empty
+    -- canvas with no OnDragStart bound, which might have stolen drag
+    -- events from placed-icon children.
     canvasBg = canvasFrame:CreateTexture(nil, "BACKGROUND")
     canvasBg:SetAllPoints()
     canvasBg:SetColorTexture(0.05, 0.05, 0.05, 1)
