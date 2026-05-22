@@ -590,34 +590,34 @@ end
 -- 5. UI
 -- =============================================================
 local composerRoot
--- Forward decls for the drag driver (defined immediately below) so
--- endDragAndDrop can reach helpers that are defined later in the file.
-local refresh, findSlotUnderFrame, clickAddSpec
+-- Forward decls so the palette icon's OnDragStop / OnClick (set up
+-- in buildPaletteIcon below the helpers) can reach functions defined
+-- later in the file - refresh lives inside buildComposer, clickAddSpec
+-- is defined after the popup block.
+local refresh, clickAddSpec
 
--- Custom drag-drop machinery. WoW's built-in drag system
--- (RegisterForDrag + OnDragStart + OnReceiveDrag) is designed around
--- Blizzard cursor payloads (PickupSpell, PickupItem, etc.). For
--- arbitrary payloads like our spec keys neither OnDragStart nor
--- OnReceiveDrag fire reliably in Classic 2.5.x - GetCursorInfo
--- documents only item/spell/petaction/macro/money/mount/merchant/
--- battlepet as supported payload types, with no extension hook.
--- So we bypass the WoW drag system entirely:
---   1. OnMouseDown on a palette icon arms a "potential drag" by
---      recording the spec being pressed + the cursor's current
---      position.
---   2. A persistent dragDriver frame's OnUpdate watches the cursor
---      while a drag is armed - once movement exceeds DRAG_THRESHOLD,
---      the follower icon shows attached to the cursor.
---   3. Mouse release is detected by polling IsMouseButtonDown in the
---      same OnUpdate, NOT by OnMouseUp on the palette icon. In TBC
---      2.5.x a Button's OnMouseUp fires only when the cursor is over
---      the button at release - so releasing on a slot row across the
---      screen would otherwise leave drop logic unreached. Polling
---      catches release wherever it happens.
---   4. On release: if the follower never showed (no movement past
---      threshold), treat it as a click and fill the first empty
---      group slot; otherwise read GetMouseFocus for the drop target.
-local DRAG_THRESHOLD = 4
+-- Drag-and-drop. Verified-working Classic pattern (cross-checked
+-- against AuraTracker and ZOMGBuffs_BlessingsManager source):
+--   * RegisterForDrag("LeftButton") + OnDragStart on the source.
+--     WoW's built-in drag detection (mouse-press + motion past its
+--     internal threshold) fires OnDragStart. The folklore that this
+--     "needs a Blizzard cursor payload" applies to OnReceiveDrag and
+--     GetCursorInfo, not OnDragStart - OnDragStart fires on a plain
+--     CreateFrame button as long as RegisterForDrag + EnableMouse
+--     are set.
+--   * OnDragStop on the source fires when the mouse is released
+--     anywhere. Inside it, GetMouseFocus() returns the frame the
+--     cursor is over at release; walk the parent chain looking for a
+--     composerSlot tag to identify the drop target.
+--   * RegisterForClicks("LeftButtonUp") + OnClick on the source for
+--     the click-to-add convenience (a click that doesn't move past
+--     the drag threshold doesn't initiate a drag, so OnClick fires
+--     instead of OnDragStart).
+--
+-- Prior attempts used OnMouseDown + IsMouseButtonDown polling + a
+-- row OnMouseUp handler on the receiver. That pattern fails because
+-- Frame:OnMouseUp fires on the press source, NOT the cursor target -
+-- a drop on a slot row across the screen never receives OnMouseUp.
 
 local follower = CreateFrame("Frame", "L3FComposerDragFollower", UIParent)
 follower:SetSize(28, 28)
@@ -627,52 +627,19 @@ local followerTex = follower:CreateTexture(nil, "OVERLAY")
 followerTex:SetAllPoints()
 followerTex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 
-local dragState = { spec = nil, startX = 0, startY = 0 }
+local dragState = { spec = nil }
 
--- Resolves the drag-release case (drop) or no-motion case (click).
--- Reads forward-declared helpers (findSlotUnderFrame, clickAddSpec,
--- refresh) which are defined later in this file.
-local function endDragAndDrop()
-    if not dragState.spec then return end
-    local sp = dragState.spec
-    local dragged = follower:IsShown()
-    dragState.spec = nil
-    follower:Hide()
-    if dragged then
-        local focus = GetMouseFocus and GetMouseFocus() or nil
-        local target = findSlotUnderFrame and findSlotUnderFrame(focus) or nil
-        if target then
-            local s = SPEC_LOOKUP[sp.key]
-            if s then
-                target.target.slots[target.idx] = { specKey = sp.key, label = s.label }
-            end
-            if refresh then refresh() end
-        end
-    else
-        if clickAddSpec then clickAddSpec(sp) end
-    end
-end
-
+-- Drag driver: positions the follower icon at the cursor while a
+-- drag is in flight. Drag start and stop are handled by the source
+-- icon's OnDragStart / OnDragStop scripts (set in buildPaletteIcon),
+-- so this OnUpdate has no release-detection responsibility.
 local dragDriver = CreateFrame("Frame")
 dragDriver:SetScript("OnUpdate", function()
-    if not dragState.spec then return end
-    if not IsMouseButtonDown("LeftButton") then
-        endDragAndDrop()
-        return
-    end
+    if not (dragState.spec and follower:IsShown()) then return end
     local x, y = GetCursorPosition()
-    if not follower:IsShown() then
-        local dx, dy = x - dragState.startX, y - dragState.startY
-        if dx * dx + dy * dy > DRAG_THRESHOLD * DRAG_THRESHOLD then
-            followerTex:SetTexture(dragState.spec.icon)
-            follower:Show()
-        end
-    end
-    if follower:IsShown() then
-        local s = follower:GetEffectiveScale()
-        follower:ClearAllPoints()
-        follower:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x / s, y / s)
-    end
+    local s = follower:GetEffectiveScale()
+    follower:ClearAllPoints()
+    follower:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x / s, y / s)
 end)
 
 local function setSlot(target, idx, specKey)
@@ -688,14 +655,12 @@ local function firstEmptySlot(target)
     return nil
 end
 
--- Walk the parent chain of `frame` looking for one that's tagged
--- with `composerSlot = { target, idx }`. Used by drag-drop drop
--- detection: GetMouseFocus returns the deepest frame under the
--- cursor (often the background texture's region or a child of the
--- slot row), so we hop upward until we find the actual slot row.
--- Assigns to the forward-declared upvalue so the dragDriver
--- machinery near the top of the file can see this.
-findSlotUnderFrame = function(frame)
+-- Walk the parent chain of `frame` looking for one tagged with
+-- `composerSlot = { target, idx }`. Drag-drop's OnDragStop reads
+-- GetMouseFocus() which returns the deepest frame under the cursor
+-- (often a child of the slot row - icon, label region, edit/X
+-- button); the walk climbs to the actual slot row.
+local function findSlotUnderFrame(frame)
     while frame do
         if frame.composerSlot then return frame.composerSlot end
         if frame.GetParent then
@@ -780,10 +745,16 @@ local function buildPaletteIcon(parent, spec, x, y)
     local hl = btn:CreateTexture(nil, "HIGHLIGHT")
     hl:SetAllPoints(); hl:SetTexture("Interface\\Buttons\\ButtonHilight-Square"); hl:SetBlendMode("ADD")
 
-    -- Drag handling: see the dragState/dragDriver block above for the
-    -- full rationale. No RegisterForDrag / RegisterForClicks here - we
-    -- consume OnMouseDown/OnMouseUp directly so we control the drag
-    -- threshold and don't depend on WoW's payload-aware drag system.
+    -- Drag handling per the canonical Classic pattern:
+    --   * RegisterForDrag arms OnDragStart on press + motion.
+    --   * RegisterForClicks lets OnClick fire for press-without-motion
+    --     (click-to-add).
+    -- See the block above the dragDriver definition for why this is
+    -- the correct pattern.
+    btn:EnableMouse(true)
+    btn:RegisterForDrag("LeftButton")
+    btn:RegisterForClicks("LeftButtonUp")
+
     btn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText(spec.label)
@@ -798,15 +769,30 @@ local function buildPaletteIcon(parent, spec, x, y)
     end)
     btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    -- Only OnMouseDown arms the drag; release is detected globally
-    -- by dragDriver's OnUpdate polling IsMouseButtonDown. OnMouseUp on
-    -- a Classic Button only fires when the cursor is over the button
-    -- at release, which would never happen for a drag landing on a
-    -- slot row across the screen.
-    btn:SetScript("OnMouseDown", function(self, button)
-        if button ~= "LeftButton" then return end
+    btn:SetScript("OnDragStart", function()
         dragState.spec = spec
-        dragState.startX, dragState.startY = GetCursorPosition()
+        followerTex:SetTexture(spec.icon)
+        follower:Show()
+    end)
+    btn:SetScript("OnDragStop", function()
+        if not dragState.spec then
+            follower:Hide()
+            return
+        end
+        local focus = GetMouseFocus and GetMouseFocus() or nil
+        local hit = findSlotUnderFrame(focus)
+        if hit then
+            local s = SPEC_LOOKUP[dragState.spec.key]
+            if s then
+                hit.target.slots[hit.idx] = { specKey = dragState.spec.key, label = s.label }
+            end
+        end
+        dragState.spec = nil
+        follower:Hide()
+        if refresh then refresh() end
+    end)
+    btn:SetScript("OnClick", function()
+        clickAddSpec(spec)
     end)
 end
 
@@ -837,26 +823,12 @@ local function buildSlotRow(parent, target, idx, y)
     row:SetSize(SLOT_W, SLOT_H)
     row:SetPoint("TOPLEFT", parent, "TOPLEFT", 6, -y)
     row:EnableMouse(true)
+    -- composerSlot is the tag the source icon's OnDragStop reads via
+    -- GetMouseFocus + parent walk to identify this drop target. The
+    -- row itself has no OnMouseUp drop handler - that script doesn't
+    -- fire on a Frame whose press came from a different frame, so
+    -- relying on it here would silently break.
     row.composerSlot = { target = target, idx = idx }
-
-    -- Native drop handler: if LMB is released over this row while a
-    -- drag is armed, the row's OnMouseUp fires (it's mouse-enabled
-    -- with a full-area BG texture). This is the only way to reliably
-    -- catch the drop on Classic 2.5.x - GetMouseFocus turned out to
-    -- be unreliable for nested frames inside a ScrollFrame. The
-    -- dragDriver's OnUpdate is still the safety net for click-no-
-    -- motion and drops landing off any row.
-    row:SetScript("OnMouseUp", function(self, button)
-        if button ~= "LeftButton" or not dragState.spec then return end
-        local sp = dragState.spec
-        local s = SPEC_LOOKUP[sp.key]
-        if s then
-            target.slots[idx] = { specKey = sp.key, label = s.label }
-        end
-        dragState.spec = nil
-        follower:Hide()
-        if refresh then refresh() end
-    end)
 
     local bg = row:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints(); bg:SetColorTexture(0, 0, 0, 0.18)
