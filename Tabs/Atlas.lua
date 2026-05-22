@@ -1211,12 +1211,19 @@ local function buildListPane(parent)
                 for _, section in ipairs(entry.sections) do
                     if section.items and #section.items > 0 then
                         y = addBonusSectionHeader(section.name or "", y)
-                        local kind = section.kind or "item"
+                        -- Section-level kind: "set" routes ALL rows to
+                        -- the set renderer (PvP season sets etc.).
+                        -- Otherwise we dispatch per-item, supporting
+                        -- mixed item / spell sections (Professions ships
+                        -- one section per profession with Enchant /
+                        -- Smelt / Transmute rows flagged kind = "spell"
+                        -- inline alongside crafted items).
+                        local sectionKind = section.kind
                         for _, item in ipairs(section.items) do
                             if item.id then
-                                if kind == "set" then
+                                if sectionKind == "set" then
                                     y = addBonusSetRow(item.id, y)
-                                elseif kind == "spell" then
+                                elseif (item.kind or sectionKind) == "spell" then
                                     y = addBonusSpellRow(item.id, item.name, item.skill, y)
                                 else
                                     y = addBonusItemRow(item.id, item.name, item.skill, y)

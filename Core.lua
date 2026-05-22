@@ -106,13 +106,15 @@ function L3F.RegisterBonusCategory(catKey, displayName, entries)
     for _, entry in ipairs(entries) do
         L3F.bonusLookup[catKey][entry.key] = entry
         for _, section in ipairs(entry.sections or {}) do
-            -- Default kind is "item"; sections flagged kind = "set" hold
-            -- item-set IDs (resolve via GetItemSetInfo). Propagate to the
-            -- per-source lookup record so the Atlas search + detail pane
-            -- can pick the right resolver.
-            local kind = section.kind or "item"
+            -- Resolution order for an entry's `kind`:
+            --   1. item.kind       (Professions per-row spell flag)
+            --   2. section.kind    (PvP "set" sections, legacy spell sections)
+            --   3. "item"          (default for everything else)
+            -- The Atlas search + bg-prefetch read this to pick the right
+            -- resolver (SetItemByID / GetItemSetInfo / SetSpellByID).
             for _, item in ipairs(section.items or {}) do
                 if item.id then
+                    local kind = item.kind or section.kind or "item"
                     L3F.bonusItemLookup[item.id] = L3F.bonusItemLookup[item.id] or {}
                     table.insert(L3F.bonusItemLookup[item.id], {
                         catKey      = catKey,
