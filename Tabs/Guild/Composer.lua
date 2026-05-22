@@ -681,6 +681,11 @@ local GROUP_W = 200
 local PALETTE_ICON = 26
 local PALETTE_GAP = 4
 local PALETTE_CLASS_GAP = 10
+-- "Ink-feather" icon Morphéours asked for - used on the rename
+-- affordance for both group/bench headers and slot rows. The
+-- texture is the same WoW feather glyph at all sites for visual
+-- consistency.
+local QUILL_ICON = "Interface\\Icons\\INV_Feather_07"
 
 local function buildPaletteIcon(parent, spec, x, y)
     local btn = CreateFrame("Button", nil, parent)
@@ -793,12 +798,11 @@ local function buildSlotRow(parent, target, idx, y)
     lbl:SetWordWrap(false)
 
     local editBtn = CreateFrame("Button", nil, row)
-    editBtn:SetSize(16, 16)
+    editBtn:SetSize(14, 14)
     editBtn:SetPoint("RIGHT", row, "RIGHT", -20, 0)
-    editBtn:SetNormalTexture("Interface\\PaperDollInfoFrame\\UI-GearManager-Title-Background")
+    editBtn:SetNormalTexture(QUILL_ICON)
+    editBtn:GetNormalTexture():SetTexCoord(0.07, 0.93, 0.07, 0.93)
     editBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
-    local editLbl = editBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    editLbl:SetPoint("CENTER"); editLbl:SetText("E")
 
     local xBtn = CreateFrame("Button", nil, row)
     xBtn:SetSize(16, 16)
@@ -836,26 +840,21 @@ local function buildSquadFrame(parent, target, x, y, idxLabel, kind, auras)
     f:SetSize(GROUP_W, 220)
     f:SetPoint("TOPLEFT", parent, "TOPLEFT", x, -y)
 
-    local hdr = CreateFrame("Button", nil, f)
+    -- Header is a plain Frame (no longer click-to-rename in 0.16.1);
+    -- renaming goes through the explicit quill button to the right.
+    local hdr = CreateFrame("Frame", nil, f)
     hdr:SetSize(GROUP_W - 22, 18)
     hdr:SetPoint("TOPLEFT", f, "TOPLEFT", 0, 0)
     local hdrTxt = hdr:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     hdrTxt:SetPoint("LEFT", hdr, "LEFT", 4, 0)
     hdrTxt:SetText(target.name or (kind == "bench" and "Bench" or "Group"))
-    -- Bench labels render in a slightly dimmer cyan to telegraph that
-    -- the slots inside don't contribute to raid-wide buff coverage.
     if kind == "bench" then hdrTxt:SetTextColor(0.55, 0.85, 1.0) end
-    hdr:SetScript("OnClick", function()
-        promptText(kind == "bench" and "Rename bench:" or "Rename group:",
-            target.name or "", function(txt)
-            if txt and txt ~= "" then target.name = txt; refresh() end
-        end)
-    end)
 
-    -- Remove button. Groups can be removed down to GROUP_MIN (1);
-    -- benches down to BENCH_MIN (0). The shown-vs-hidden decision
-    -- factors in the current count so the last group never offers
-    -- a minus, but the last bench (when count > 0) does.
+    -- Right-side controls in the header. Order left-to-right:
+    --   [quill rename]  [minus remove (conditional)]
+    -- The quill is always present; the minus is hidden when the
+    -- count is at its lower bound (last group can't be removed,
+    -- benches can be removed to zero so always present when count > 0).
     local p = currentProfile()
     local canRemove
     if kind == "group" then
@@ -863,6 +862,7 @@ local function buildSquadFrame(parent, target, x, y, idxLabel, kind, auras)
     else
         canRemove = p.benchCount > BENCH_MIN
     end
+
     if canRemove then
         local rm = CreateFrame("Button", nil, f)
         rm:SetSize(16, 16)
@@ -890,6 +890,31 @@ local function buildSquadFrame(parent, target, x, y, idxLabel, kind, auras)
             refresh()
         end)
     end
+
+    -- Quill rename button. Sits to the LEFT of the minus when minus
+    -- is present, otherwise anchors flush to the right edge.
+    local quill = CreateFrame("Button", nil, f)
+    quill:SetSize(14, 14)
+    if canRemove then
+        quill:SetPoint("TOPRIGHT", f, "TOPRIGHT", -22, -2)
+    else
+        quill:SetPoint("TOPRIGHT", f, "TOPRIGHT", -3, -2)
+    end
+    quill:SetNormalTexture(QUILL_ICON)
+    quill:GetNormalTexture():SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    quill:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+    quill:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(kind == "bench" and "Rename bench" or "Rename group")
+        GameTooltip:Show()
+    end)
+    quill:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    quill:SetScript("OnClick", function()
+        promptText(kind == "bench" and "Rename bench:" or "Rename group:",
+            target.name or "", function(txt)
+            if txt and txt ~= "" then target.name = txt; refresh() end
+        end)
+    end)
 
     local yy = 22
     for i = 1, 5 do
@@ -1312,15 +1337,18 @@ local function buildComposer(parent)
         end
 
         -- Right-side sidebar: buffs + debuffs sections stacked vertically.
-        -- Starts at the same y as the groups grid, fills the empty space
-        -- (no longer parked below everything).
+        -- Starts at the SAME y as the "Profile:" label (top strip) so the
+        -- player sees the coverage panel and the profile controls on the
+        -- same horizontal eye-line. Horizontal placement is unchanged -
+        -- the panel still parks past the groups grid on the right.
         local covered = computeCoverage()
         local sidebarX = 16 + groupColumns * (GROUP_W + colGap) + 4
         local sidebarW = 290
-        local sidebarH = buildBuffPanel(body, covered, sidebarX, gridY, sidebarW)
+        local sidebarY = 16
+        local sidebarH = buildBuffPanel(body, covered, sidebarX, sidebarY, sidebarW)
 
         local groupsBottom = afterGridY
-        local sidebarBottom = gridY + sidebarH
+        local sidebarBottom = sidebarY + sidebarH
         body:SetHeight(math.max(groupsBottom, sidebarBottom) + 24)
     end
 
