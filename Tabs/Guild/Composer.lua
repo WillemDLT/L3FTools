@@ -837,9 +837,26 @@ local function buildSlotRow(parent, target, idx, y)
     row:SetSize(SLOT_W, SLOT_H)
     row:SetPoint("TOPLEFT", parent, "TOPLEFT", 6, -y)
     row:EnableMouse(true)
-    -- Tag the row so OnDragStop on the palette icon can identify
-    -- this drop target via GetMouseFocus + findSlotUnderFrame.
     row.composerSlot = { target = target, idx = idx }
+
+    -- Native drop handler: if LMB is released over this row while a
+    -- drag is armed, the row's OnMouseUp fires (it's mouse-enabled
+    -- with a full-area BG texture). This is the only way to reliably
+    -- catch the drop on Classic 2.5.x - GetMouseFocus turned out to
+    -- be unreliable for nested frames inside a ScrollFrame. The
+    -- dragDriver's OnUpdate is still the safety net for click-no-
+    -- motion and drops landing off any row.
+    row:SetScript("OnMouseUp", function(self, button)
+        if button ~= "LeftButton" or not dragState.spec then return end
+        local sp = dragState.spec
+        local s = SPEC_LOOKUP[sp.key]
+        if s then
+            target.slots[idx] = { specKey = sp.key, label = s.label }
+        end
+        dragState.spec = nil
+        follower:Hide()
+        if refresh then refresh() end
+    end)
 
     local bg = row:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints(); bg:SetColorTexture(0, 0, 0, 0.18)
@@ -1076,36 +1093,49 @@ local function buildBuffRow(parent, name, covered, y, panelW)
     hl:SetAllPoints(); hl:SetColorTexture(1, 1, 1, 0.05)
 end
 
--- Right-side sidebar: BUFFS section above DEBUFFS section, single
--- column, full panel width per row so long names (e.g. "Improved
--- Demoralizing Shout") don't truncate. Returns the total height
--- consumed so the caller can size the scroll body.
+-- Right-side coverage panel. Two layouts based on available width:
+--   * Narrow (< 596px): Buffs section above Debuffs section, stacked.
+--   * Wide  (>= 596px): Buffs LEFT, Debuffs RIGHT, side-by-side.
+-- The threshold (290 * 2 + 16) is just enough for two readable lists.
+-- Returns the total height consumed so the caller can size the body.
+local SIDE_BY_SIDE_THRESHOLD = 290 * 2 + 16  -- 596
+
 local function buildBuffPanel(parent, covered, x, y, panelW)
     local f = CreateFrame("Frame", nil, parent)
-    -- Height is computed below; placeholder for now.
     f:SetPoint("TOPLEFT", parent, "TOPLEFT", x, -y)
 
-    local function section(title, list, covSet, sectionY)
+    -- Builds one section (Buffs or Debuffs) at offset (sx, sy) within
+    -- the panel frame with width sw. Returns the height consumed.
+    local function section(title, list, covSet, sx, sy, sw)
         local hdr = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        hdr:SetPoint("TOPLEFT", f, "TOPLEFT", 4, -sectionY)
+        hdr:SetPoint("TOPLEFT", f, "TOPLEFT", sx + 4, -sy)
         hdr:SetText(title)
         local box = CreateFrame("Frame", nil, f)
-        box:SetSize(panelW, #list * 22 + 8)
-        box:SetPoint("TOPLEFT", f, "TOPLEFT", 0, -(sectionY + 22))
+        box:SetSize(sw, #list * 22 + 8)
+        box:SetPoint("TOPLEFT", f, "TOPLEFT", sx, -(sy + 22))
         local boxBg = box:CreateTexture(nil, "BACKGROUND")
         boxBg:SetAllPoints(); boxBg:SetColorTexture(0, 0, 0, 0.18)
         local rowY = 4
         for _, name in ipairs(list) do
-            buildBuffRow(box, name, covSet[name], rowY, panelW)
+            buildBuffRow(box, name, covSet[name], rowY, sw)
             rowY = rowY + 22
         end
-        return sectionY + 22 + box:GetHeight() + 12
+        return 22 + box:GetHeight() + 12
     end
 
-    local afterBuffs   = section("Buffs",   BUFFS_LIST,   covered.buffs,   0)
-    local afterDebuffs = section("Debuffs", DEBUFFS_LIST, covered.debuffs, afterBuffs)
-    f:SetSize(panelW, afterDebuffs)
-    return afterDebuffs
+    local totalH
+    if panelW >= SIDE_BY_SIDE_THRESHOLD then
+        local halfW = math.floor((panelW - 16) / 2)
+        local hBuffs   = section("Buffs",   BUFFS_LIST,   covered.buffs,   0,          0, halfW)
+        local hDebuffs = section("Debuffs", DEBUFFS_LIST, covered.debuffs, halfW + 16, 0, halfW)
+        totalH = math.max(hBuffs, hDebuffs)
+    else
+        local hBuffs   = section("Buffs",   BUFFS_LIST,   covered.buffs,   0, 0,      panelW)
+        local hDebuffs = section("Debuffs", DEBUFFS_LIST, covered.debuffs, 0, hBuffs, panelW)
+        totalH = hBuffs + hDebuffs
+    end
+    f:SetSize(panelW, totalH)
+    return totalH
 end
 
 
@@ -1278,6 +1308,16 @@ local function buildComposer(parent)
     body:SetSize(900, 1200)
     scroll:SetScrollChild(body)
 
+    -- Body width follows the scroll viewport so the buffs/debuffs
+    -- sidebar can switch to a side-by-side layout once the user
+    -- expands the window wide enough (per Morphéours 0.16.6). A
+    -- refresh re-runs whenever the scroll resizes - cheap, the
+    -- whole composer rebuilds in a single pass.
+    scroll:HookScript("OnSizeChanged", function(self, w, h)
+        if w and w > 0 then body:SetWidth(w) end
+        if refresh then refresh() end
+    end)
+
     refresh = function()
         ensureComposerState()
         for _, c in ipairs({body:GetChildren()}) do c:Hide(); c:SetParent(nil) end
@@ -1388,15 +1428,16 @@ local function buildComposer(parent)
             afterGridY = afterGridY + 34
         end
 
-        -- Right-side sidebar: buffs + debuffs sections stacked vertically.
-        -- Starts at the SAME y as the "Profile:" label (top strip) so the
-        -- player sees the coverage panel and the profile controls on the
-        -- same horizontal eye-line. Horizontal placement is unchanged -
-        -- the panel still parks past the groups grid on the right.
+        -- Right-side coverage panel. Width is dynamic - it consumes
+        -- whatever space remains after the groups grid + a right
+        -- margin. Once panelW crosses SIDE_BY_SIDE_THRESHOLD the
+        -- buffs/debuffs sections lay out horizontally instead of
+        -- stacked. Y aligned with the "Profile:" label up top.
         local covered = computeCoverage()
         local sidebarX = 16 + groupColumns * (GROUP_W + colGap) + 4
-        local sidebarW = 290
         local sidebarY = 16
+        local rightMargin = 16
+        local sidebarW = math.max(290, (body:GetWidth() or 900) - sidebarX - rightMargin)
         local sidebarH = buildBuffPanel(body, covered, sidebarX, sidebarY, sidebarW)
 
         local groupsBottom = afterGridY
