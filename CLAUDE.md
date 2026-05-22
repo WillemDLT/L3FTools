@@ -71,9 +71,9 @@ L3F.RegisterDrops(17535, {
 - Author: Willem (willem-YT@hotmail.com). GitHub display name: WillemDLT.
 
 ## Project status
-- Version 0.17.1 (`.toc`). All work lands on `dev`; Morphéours pulls the beta zip and reports back.
+- Version 0.18.0 (`.toc`). All work lands on `dev`; Morphéours pulls the beta zip and reports back.
 - **Wing-aware marking** + spatial sectioning for all 9 raids: shipped.
-- **Atlas tab** complete: Raids / Heroic Dungeons / Consumables / Factions / Collections in a 3-pane tree → list → detail layout with sub-tabs Drops / Spells / Notes. Heroic dungeons carry Normal + Heroic drop tables. Bonus-category items use coordinate-based search + cross-link to NPC sources. Pre-BiS / PvP / Professions were wiped in 0.14.2 (Morphéours rejected AtlasLoot-dump quality; will hand-curate later — see [[atlas-data-source]]).
+- **Atlas tab** complete: Raids / Heroic Dungeons / Consumables / Factions / Collections / **Professions** in a 3-pane tree → list → detail layout with sub-tabs Drops / Spells / Notes. Heroic dungeons carry Normal + Heroic drop tables. Bonus-category items use coordinate-based search + cross-link to NPC sources. Professions ships in 0.18.0 from Morphéours's hand-curated `Data-Professions.ods` (10 professions, 2122 entries — auto-split into item-kind and spell-kind sections by name-prefix heuristic, see `_migration/professions_ingest/`). Pre-BiS and PvP remain wiped (no hand-curated data yet).
 - **Composer tab** (Tabs/Guild/Composer.lua) complete: 27-spec palette, drag-drop or click-to-add, 5 groups + 1 bench default (groups [1, 5], benches [0, 5]), per-group party-aura icons, raid-wide buffs/debuffs sidebar with hover tooltips, multiple named profiles, L3F2C share/import strings. Personal-only — permissions framework was dropped per Willem's 0.15.0 scope-in (see [[project-l3ftools-composer-official]]). See [[project-l3ftools-composer-complete]] for the build details + the drag-drop machinery's quirks.
 - **Map tab** complete on a previous session (universal minimap-button collector opt-out). See [[project-l3ftools-map-complete]].
 - **AutomarkerL3F** shipped to main, hands-off (see [[project-automarkerl3f-complete]]).

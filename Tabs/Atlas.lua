@@ -724,7 +724,16 @@ local function buildListPane(parent)
     -- consumable rows, plus a click handler that prefers the cross-link
     -- (jump to a dropping NPC when L3F.itemLookup[id] resolves; otherwise
     -- show the bonus-item card in the detail pane).
-    local function addBonusItemRow(itemID, y)
+    --
+    -- `displayName` (optional) is the spreadsheet-authoritative name
+    -- (Professions ships it on every row); we seed the label with it
+    -- so the row is readable BEFORE GetItemInfo resolves. queueItemUI's
+    -- applyItemUI only overwrites text that starts with "Item #" or is
+    -- empty, so a pre-set canonical name is preserved while the quality
+    -- colour + icon still apply asynchronously.
+    -- `skill` (optional, >0) renders as a trailing "  (390)" hint so
+    -- Profession rows show their required skill inline.
+    local function addBonusItemRow(itemID, displayName, skill, y)
         local rowH = 24
         local row = CreateFrame("Button", nil, npcList)
         row:SetSize(170, rowH)
@@ -744,7 +753,12 @@ local function buildListPane(parent)
         txt:SetPoint("RIGHT", row, "RIGHT", -4, 0)
         txt:SetJustifyH("LEFT")
         txt:SetWordWrap(false)
-        txt:SetText("Item #" .. itemID)
+        local seedName = displayName or ("Item #" .. itemID)
+        if skill and skill > 0 then
+            txt:SetText(seedName .. "  (" .. skill .. ")")
+        else
+            txt:SetText(seedName)
+        end
         queueItemUI(itemID, txt, icon)
 
         row:SetScript("OnClick", function()
@@ -779,6 +793,61 @@ local function buildListPane(parent)
         row:SetScript("OnLeave", function()
             if active then rbg:SetColorTexture(0.30, 0.65, 1.0, 0.25)
             else rbg:SetColorTexture(0, 0, 0, 0) end
+            GameTooltip:Hide()
+        end)
+        return y + rowH + 2
+    end
+
+    -- Spell-kind bonus row. Used by Professions sections that hold
+    -- spell ids (Enchanting Enchants / Mining Smelting / Alchemy
+    -- Transmutes / known oddballs like Disenchant + Void Shatter).
+    -- GetSpellTexture is synchronous on Classic; we fall back to a
+    -- question-mark icon if the spell id is unknown to the client.
+    -- No cross-link / click handler - spells don't have NPC sources.
+    local function addBonusSpellRow(spellID, displayName, skill, y)
+        local rowH = 24
+        local row = CreateFrame("Frame", nil, npcList)
+        row:SetSize(170, rowH)
+        row:SetPoint("TOPLEFT", npcList, "TOPLEFT", 0, -y)
+        row:EnableMouse(true)
+        local rbg = row:CreateTexture(nil, "BACKGROUND")
+        rbg:SetAllPoints()
+        rbg:SetColorTexture(0, 0, 0, 0)
+
+        local icon = row:CreateTexture(nil, "ARTWORK")
+        icon:SetSize(18, 18)
+        icon:SetPoint("LEFT", row, "LEFT", 4, 0)
+        local tex = GetSpellTexture and GetSpellTexture(spellID) or nil
+        icon:SetTexture(tex or "Interface\\Icons\\INV_Misc_QuestionMark")
+
+        local txt = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        txt:SetPoint("LEFT", icon, "RIGHT", 6, 0)
+        txt:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+        txt:SetJustifyH("LEFT")
+        txt:SetWordWrap(false)
+        local seed = displayName or ("Spell #" .. spellID)
+        if skill and skill > 0 then
+            txt:SetText(seed .. "  (" .. skill .. ")")
+        else
+            txt:SetText(seed)
+        end
+        -- Spells don't carry item-quality colour; render in a soft
+        -- gold so they're visually distinct from regular items but
+        -- still readable on the dark list background.
+        txt:SetTextColor(0.95, 0.85, 0.50)
+
+        row:SetScript("OnEnter", function(self)
+            rbg:SetColorTexture(1, 1, 1, 0.07)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            if GameTooltip.SetSpellByID then
+                GameTooltip:SetSpellByID(spellID)
+            else
+                GameTooltip:SetHyperlink("spell:" .. spellID)
+            end
+            GameTooltip:Show()
+        end)
+        row:SetScript("OnLeave", function()
+            rbg:SetColorTexture(0, 0, 0, 0)
             GameTooltip:Hide()
         end)
         return y + rowH + 2
@@ -1007,26 +1076,36 @@ local function buildListPane(parent)
             -- behaviour - the player picks the relevant context).
             local numericSearch = tonumber(search)
             for itemID, sources in pairs(L3F.bonusItemLookup or {}) do
-                local cachedName = GetItemInfo(itemID)
-                local matched = false
-                if numericSearch and numericSearch == itemID then
-                    matched = true
-                elseif cachedName and cachedName:lower():find(search, 1, true) then
-                    matched = true
-                end
-                if matched then
-                    -- One hit per source entry so the user sees which list
-                    -- the item lives in (Honored from Cenarion Expedition,
-                    -- Pre-BiS Druid Balance / Head, etc.).
-                    for _, src in ipairs(sources) do
-                        table.insert(hits, {
-                            kind     = "bonus",
-                            itemID   = itemID,
-                            source   = src,
-                            label    = cachedName or ("Item #" .. itemID),
-                            subtitle = src.catLabel .. " - " .. src.entry.name
-                                       .. (src.sectionName and (" / " .. src.sectionName) or ""),
-                        })
+                -- Spell-kind bonus entries (Professions Enchant / Smelt /
+                -- Transmute spells) live in bonusItemLookup too but aren't
+                -- resolvable via GetItemInfo, and the search-hit row only
+                -- knows how to render item tooltips. Skip them - the user
+                -- can still browse them via the tree.
+                local firstKind = sources[1] and sources[1].kind or "item"
+                if firstKind == "spell" then
+                    -- skip
+                else
+                    local cachedName = GetItemInfo(itemID)
+                    local matched = false
+                    if numericSearch and numericSearch == itemID then
+                        matched = true
+                    elseif cachedName and cachedName:lower():find(search, 1, true) then
+                        matched = true
+                    end
+                    if matched then
+                        -- One hit per source entry so the user sees which list
+                        -- the item lives in (Honored from Cenarion Expedition,
+                        -- Pre-BiS Druid Balance / Head, etc.).
+                        for _, src in ipairs(sources) do
+                            table.insert(hits, {
+                                kind     = "bonus",
+                                itemID   = itemID,
+                                source   = src,
+                                label    = cachedName or ("Item #" .. itemID),
+                                subtitle = src.catLabel .. " - " .. src.entry.name
+                                           .. (src.sectionName and (" / " .. src.sectionName) or ""),
+                            })
+                        end
                     end
                 end
             end
@@ -1132,13 +1211,15 @@ local function buildListPane(parent)
                 for _, section in ipairs(entry.sections) do
                     if section.items and #section.items > 0 then
                         y = addBonusSectionHeader(section.name or "", y)
-                        local isSet = (section.kind == "set")
+                        local kind = section.kind or "item"
                         for _, item in ipairs(section.items) do
                             if item.id then
-                                if isSet then
+                                if kind == "set" then
                                     y = addBonusSetRow(item.id, y)
+                                elseif kind == "spell" then
+                                    y = addBonusSpellRow(item.id, item.name, item.skill, y)
                                 else
-                                    y = addBonusItemRow(item.id, y)
+                                    y = addBonusItemRow(item.id, item.name, item.skill, y)
                                 end
                             end
                         end
@@ -1681,15 +1762,19 @@ local function buildAtlas(parent)
     -- their names + icons populate the client cache before the user clicks
     -- a leaf. In TBC Classic 2.5.x GetItemInfo alone isn't enough; we feed
     -- the IDs through a hidden tooltip via forceItemFetch which calls
-    -- GameTooltip:SetItemByID. Sets are skipped - GetItemSetInfo is sync
-    -- and already returns the name without any server round-trip. Fires
+    -- GameTooltip:SetItemByID. Sets are skipped (GetItemSetInfo is sync
+    -- and already returns the name without any server round-trip); spells
+    -- are skipped too (they're not items - GetSpellTexture is sync). Fires
     -- exactly once per session (forceItemFetch dedupes via fetchedOnce).
     if L3F.bonusItemLookup then
         for itemID, sources in pairs(L3F.bonusItemLookup) do
-            local srcKind = sources[1] and sources[1].kind or "item"
-            if srcKind ~= "set" then
-                forceItemFetch(itemID)
+            -- An ID might appear under multiple kinds (rare item/spell
+            -- collision). Fetch if ANY source treats it as an item.
+            local anyItem = false
+            for _, s in ipairs(sources) do
+                if (s.kind or "item") == "item" then anyItem = true; break end
             end
+            if anyItem then forceItemFetch(itemID) end
         end
     end
 
