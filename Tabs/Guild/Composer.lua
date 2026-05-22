@@ -590,11 +590,12 @@ end
 -- 5. UI
 -- =============================================================
 local composerRoot
--- Forward decls so the palette icon's OnDragStop / OnClick (set up
--- in buildPaletteIcon below the helpers) can reach functions defined
--- later in the file - refresh lives inside buildComposer, clickAddSpec
--- is defined after the popup block.
-local refresh, clickAddSpec
+-- Forward decls so the drag machinery (defined immediately below)
+-- can reach helpers declared further down the file:
+--   refresh             - assigned inside buildComposer
+--   clickAddSpec        - assigned after the popups block
+--   findSlotUnderFrame  - assigned in the helpers section
+local refresh, clickAddSpec, findSlotUnderFrame
 
 -- Drag-and-drop. Verified-working Classic pattern (cross-checked
 -- against AuraTracker and ZOMGBuffs_BlessingsManager source):
@@ -622,12 +623,16 @@ local refresh, clickAddSpec
 local follower = CreateFrame("Frame", "L3FComposerDragFollower", UIParent)
 follower:SetSize(28, 28)
 follower:SetFrameStrata("TOOLTIP")
+follower:EnableMouse(false)  -- explicit: do NOT intercept hit-testing
 follower:Hide()
 local followerTex = follower:CreateTexture(nil, "OVERLAY")
 followerTex:SetAllPoints()
 followerTex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 
-local dragState = { spec = nil }
+-- dragState.spec     = { key, label }
+-- dragState.fromTarget, dragState.fromIdx = present when dragging FROM a slot
+--                                           (nil when dragging from the palette)
+local dragState = { spec = nil, fromTarget = nil, fromIdx = nil }
 
 -- Drag driver: positions the follower icon at the cursor while a
 -- drag is in flight. Drag start and stop are handled by the source
@@ -641,6 +646,55 @@ dragDriver:SetScript("OnUpdate", function()
     follower:ClearAllPoints()
     follower:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x / s, y / s)
 end)
+
+-- Diagnostic toggle. When true, prints to chat what GetMouseFocus
+-- returns at drop time so we can see why a drop misses. Flip to
+-- false after the drop bug is confirmed fixed.
+local DEBUG_DROP = true
+
+-- Shared end-of-drag handler. Hides the follower BEFORE GetMouseFocus
+-- so the TOOLTIP-strata follower can't confuse hit-testing even
+-- though it's mouse-disabled. Looks up the drop target via
+-- findSlotUnderFrame on the cursor focus, then applies the drop
+-- (move-or-place semantics: if dragging from a slot, source is
+-- cleared on a hit; drop on the same slot is a no-op).
+local function finishDrag()
+    if not dragState.spec then follower:Hide(); return end
+    local sp = dragState.spec
+    local fromTarget, fromIdx = dragState.fromTarget, dragState.fromIdx
+    dragState.spec = nil
+    dragState.fromTarget = nil
+    dragState.fromIdx = nil
+
+    follower:Hide()
+
+    local focus = GetMouseFocus and GetMouseFocus() or nil
+    local hit = findSlotUnderFrame(focus)
+
+    if DEBUG_DROP then
+        local fname = focus and (focus.GetName and focus:GetName())
+        local ftype = focus and (focus.GetObjectType and focus:GetObjectType()) or "nil"
+        print(("|cffffd100L3FComp|r drop: focus=%s (%s) hit=%s"):format(
+            tostring(fname or "(unnamed)"),
+            tostring(ftype),
+            hit and ("slot " .. tostring(hit.idx)) or "NIL"))
+    end
+
+    if hit then
+        if fromTarget and (fromTarget ~= hit.target or fromIdx ~= hit.idx) then
+            fromTarget.slots[fromIdx] = nil
+        end
+        local s = SPEC_LOOKUP[sp.key]
+        if s then
+            hit.target.slots[hit.idx] = { specKey = sp.key, label = sp.label or s.label }
+        end
+    elseif fromTarget then
+        -- Dragged a filled slot's icon off any slot: yeet it.
+        fromTarget.slots[fromIdx] = nil
+    end
+
+    if refresh then refresh() end
+end
 
 local function setSlot(target, idx, specKey)
     local s = SPEC_LOOKUP[specKey]
@@ -659,8 +713,10 @@ end
 -- `composerSlot = { target, idx }`. Drag-drop's OnDragStop reads
 -- GetMouseFocus() which returns the deepest frame under the cursor
 -- (often a child of the slot row - icon, label region, edit/X
--- button); the walk climbs to the actual slot row.
-local function findSlotUnderFrame(frame)
+-- button); the walk climbs to the actual slot row. Assigns to the
+-- forward-declared upvalue so finishDrag at the top of the file
+-- can see it.
+findSlotUnderFrame = function(frame)
     while frame do
         if frame.composerSlot then return frame.composerSlot end
         if frame.GetParent then
@@ -770,30 +826,17 @@ local function buildPaletteIcon(parent, spec, x, y)
     btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     btn:SetScript("OnDragStart", function()
-        dragState.spec = spec
+        dragState.spec = { key = spec.key, label = spec.label }
+        dragState.fromTarget = nil  -- palette drag has no source slot
+        dragState.fromIdx = nil
         followerTex:SetTexture(spec.icon)
         follower:Show()
-    end)
-    btn:SetScript("OnDragStop", function()
-        if not dragState.spec then
-            follower:Hide()
-            return
+        if DEBUG_DROP then
+            print("|cffffd100L3FComp|r drag from palette: " .. spec.label)
         end
-        local focus = GetMouseFocus and GetMouseFocus() or nil
-        local hit = findSlotUnderFrame(focus)
-        if hit then
-            local s = SPEC_LOOKUP[dragState.spec.key]
-            if s then
-                hit.target.slots[hit.idx] = { specKey = dragState.spec.key, label = s.label }
-            end
-        end
-        dragState.spec = nil
-        follower:Hide()
-        if refresh then refresh() end
     end)
-    btn:SetScript("OnClick", function()
-        clickAddSpec(spec)
-    end)
+    btn:SetScript("OnDragStop", finishDrag)
+    btn:SetScript("OnClick", function() clickAddSpec(spec) end)
 end
 
 local function buildPalette(parent, x, y)
@@ -870,6 +913,24 @@ local function buildSlotRow(parent, target, idx, y)
             end)
         end)
         xBtn:SetScript("OnClick", function() clearSlot(target, idx); refresh() end)
+
+        -- Drag-from-slot: pick up THIS slot's spec and drop on another
+        -- slot to move it (or off any slot to remove it). Same drag
+        -- machinery as the palette icons, but dragState.fromTarget /
+        -- fromIdx are populated so finishDrag knows to clear the
+        -- source slot on a successful move.
+        row:RegisterForDrag("LeftButton")
+        row:SetScript("OnDragStart", function()
+            dragState.spec = { key = slot.specKey, label = slot.label or (s and s.label) }
+            dragState.fromTarget = target
+            dragState.fromIdx = idx
+            if s then followerTex:SetTexture(s.icon) end
+            follower:Show()
+            if DEBUG_DROP then
+                print(("|cffffd100L3FComp|r drag from slot %d: %s"):format(idx, slot.specKey))
+            end
+        end)
+        row:SetScript("OnDragStop", finishDrag)
     else
         icon:SetColorTexture(0.08, 0.08, 0.08, 1)
         lbl:SetText("")
