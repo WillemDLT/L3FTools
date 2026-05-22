@@ -106,6 +106,11 @@ function L3F.RegisterBonusCategory(catKey, displayName, entries)
     for _, entry in ipairs(entries) do
         L3F.bonusLookup[catKey][entry.key] = entry
         for _, section in ipairs(entry.sections or {}) do
+            -- Default kind is "item"; sections flagged kind = "set" hold
+            -- item-set IDs (resolve via GetItemSetInfo). Propagate to the
+            -- per-source lookup record so the Atlas search + detail pane
+            -- can pick the right resolver.
+            local kind = section.kind or "item"
             for _, item in ipairs(section.items or {}) do
                 if item.id then
                     L3F.bonusItemLookup[item.id] = L3F.bonusItemLookup[item.id] or {}
@@ -114,6 +119,7 @@ function L3F.RegisterBonusCategory(catKey, displayName, entries)
                         catLabel    = displayName,
                         entry       = entry,
                         sectionName = section.name,
+                        kind        = kind,
                     })
                 end
             end

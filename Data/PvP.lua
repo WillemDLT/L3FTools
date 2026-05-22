@@ -12,6 +12,7 @@ L3F.RegisterBonusCategory("pvp", "PvP", {
         sections = {
             {
                 name = "Sets",
+                kind = "set",
                 items = {
                     { id = 568, slot = 1 },
                     { id = 615, slot = 2 },
@@ -267,6 +268,7 @@ L3F.RegisterBonusCategory("pvp", "PvP", {
         sections = {
             {
                 name = "Sets",
+                kind = "set",
                 items = {
                     { id = 702, slot = 1 },
                     { id = 704, slot = 2 },
@@ -482,6 +484,7 @@ L3F.RegisterBonusCategory("pvp", "PvP", {
         sections = {
             {
                 name = "Sets",
+                kind = "set",
                 items = {
                     { id = 734, slot = 1 },
                     { id = 735, slot = 2 },
@@ -721,6 +724,7 @@ L3F.RegisterBonusCategory("pvp", "PvP", {
         sections = {
             {
                 name = "Sets",
+                kind = "set",
                 items = {
                     { id = 2000568, slot = 1 },
                     { id = 2000615, slot = 2 },
@@ -973,6 +977,7 @@ L3F.RegisterBonusCategory("pvp", "PvP", {
         sections = {
             {
                 name = "Sets",
+                kind = "set",
                 items = {
                     { id = 591, slot = 1 },
                     { id = 691, slot = 4 },
@@ -1205,6 +1210,7 @@ L3F.RegisterBonusCategory("pvp", "PvP", {
         sections = {
             {
                 name = "Sets",
+                kind = "set",
                 items = {
                     { id = 738, slot = 1 },
                     { id = 739, slot = 4 },

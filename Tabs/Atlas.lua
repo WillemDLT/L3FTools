@@ -55,21 +55,51 @@ local viewer, npcTitle, npcMeta
 
 
 -- =============================================================
--- ITEM INFO ASYNC CACHE  (icon + quality colour for drop rows)
+-- ITEM INFO ASYNC CACHE  (icon + quality colour + name for item rows)
 -- =============================================================
 -- GetItemInfo is async: it returns nil for an uncached item, then the
--- data arrives via GET_ITEM_INFO_RECEIVED. Apply the texture/colour
+-- data arrives via GET_ITEM_INFO_RECEIVED. Apply the texture/colour/name
 -- immediately if cached, otherwise queue and reapply when the event
 -- fires.
+--
+-- In TBC Classic 2.5.x GetItemInfo only triggers a server fetch in some
+-- cases - the reliable cross-version pattern is to feed the ID through
+-- a hidden GameTooltip via SetItemByID, which forces the client to
+-- request the item from the server. We do that once per uncached ID.
 local pendingItem = {}
+local fetchedOnce = {}
 local itemInfoFrame = CreateFrame("Frame")
 itemInfoFrame:RegisterEvent("GET_ITEM_INFO_RECEIVED")
 
+local fetchTooltip = CreateFrame("GameTooltip", "L3FAtlasFetchTooltip",
+                                  nil, "GameTooltipTemplate")
+fetchTooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
+
+local function forceItemFetch(itemID)
+    if not itemID or fetchedOnce[itemID] then return end
+    fetchedOnce[itemID] = true
+    -- SetItemByID + Show makes the client cache the item server-side.
+    -- AtlasLoot, Pawn, etc. all use this trick on Classic.
+    fetchTooltip:SetItemByID(itemID)
+    fetchTooltip:Show()
+    fetchTooltip:Hide()
+end
+
 local function applyItemUI(itemID, label, icon)
-    local _, _, quality, _, _, _, _, _, _, tex = GetItemInfo(itemID)
-    if label and quality then
-        local r, g, b = GetItemQualityColor(quality)
-        label:SetTextColor(r, g, b)
+    local cachedName, _, quality, _, _, _, _, _, _, tex = GetItemInfo(itemID)
+    if label and cachedName then
+        -- Only rewrite the label text when it's currently the "Item #N"
+        -- placeholder. Baked names (e.g. raid drop "Boots of the Darkwalker"
+        -- in Data/Drops/<Raid>.lua) must NOT be clobbered - quality colour
+        -- still applies on top of the kept text.
+        local cur = label:GetText() or ""
+        if cur:sub(1, 6) == "Item #" or cur == "" then
+            label:SetText(cachedName)
+        end
+        if quality then
+            local r, g, b = GetItemQualityColor(quality)
+            label:SetTextColor(r, g, b)
+        end
     end
     if icon and tex then
         icon:SetTexture(tex)
@@ -82,6 +112,8 @@ local function queueItemUI(itemID, label, icon)
     if applyItemUI(itemID, label, icon) then return end
     pendingItem[itemID] = pendingItem[itemID] or {}
     table.insert(pendingItem[itemID], { label = label, icon = icon })
+    -- Trigger the server fetch on Classic where GetItemInfo alone won't.
+    forceItemFetch(itemID)
 end
 
 itemInfoFrame:SetScript("OnEvent", function(_, _, itemID)
@@ -633,6 +665,61 @@ local function buildListPane(parent)
         return y + 16
     end
 
+    -- Item-SET row. PvP Season "Sets" sections (and any other AtlasLoot
+    -- table flagged TableType = "IT:Set") use SET IDs, not item IDs:
+    -- GetItemInfo can't resolve them. GetItemSetInfo is synchronous and
+    -- returns the localized set name + the list of pieces.
+    local function addBonusSetRow(setID, y)
+        local rowH = 24
+        local row = CreateFrame("Button", nil, npcList)
+        row:SetSize(170, rowH)
+        row:SetPoint("TOPLEFT", npcList, "TOPLEFT", 0, -y)
+        local rbg = row:CreateTexture(nil, "BACKGROUND")
+        rbg:SetAllPoints()
+        local active = currentBonusItem and currentBonusItem.id == setID and currentBonusItem.kind == "set"
+        rbg:SetColorTexture(active and 0.30 or 0, active and 0.65 or 0, active and 1 or 0, active and 0.25 or 0)
+
+        local icon = row:CreateTexture(nil, "ARTWORK")
+        icon:SetSize(18, 18)
+        icon:SetPoint("LEFT", row, "LEFT", 4, 0)
+        -- Sets use a generic "armor set" looking icon since there's no
+        -- single texture per set on the client side.
+        icon:SetTexture("Interface\\Icons\\INV_Chest_Plate06")
+
+        local txt = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        txt:SetPoint("LEFT", icon, "RIGHT", 6, 0)
+        txt:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+        txt:SetJustifyH("LEFT")
+        txt:SetWordWrap(false)
+        local setName = GetItemSetInfo and GetItemSetInfo(setID) or nil
+        txt:SetText(setName or ("Set #" .. setID))
+        -- Sets are always epic-tier in TBC PvP; use the epic purple so the
+        -- row doesn't look like a generic placeholder.
+        txt:SetTextColor(0.64, 0.21, 0.93)
+
+        row:SetScript("OnClick", function()
+            currentBonusItem = { id = setID, kind = "set" }
+            currentNPC = nil
+            currentConsumable = nil
+            if L3F.RefreshNPCList then L3F.RefreshNPCList() end
+            if L3F.RefreshDetailPane then L3F.RefreshDetailPane() end
+        end)
+        row:SetScript("OnEnter", function(self)
+            if not active then rbg:SetColorTexture(1, 1, 1, 0.07) end
+            -- A set tooltip via GameTooltip:SetItemSet doesn't exist; use
+            -- the manual hyperlink which renders the set summary correctly.
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetHyperlink("itemset:" .. setID)
+            GameTooltip:Show()
+        end)
+        row:SetScript("OnLeave", function()
+            if active then rbg:SetColorTexture(0.30, 0.65, 1.0, 0.25)
+            else rbg:SetColorTexture(0, 0, 0, 0) end
+            GameTooltip:Hide()
+        end)
+        return y + rowH + 2
+    end
+
     -- Bonus-category item row. Same async icon+name pattern as the
     -- consumable rows, plus a click handler that prefers the cross-link
     -- (jump to a dropping NPC when L3F.itemLookup[id] resolves; otherwise
@@ -779,7 +866,10 @@ local function buildListPane(parent)
                 -- also has a known NPC drop entry, jump there (the player
                 -- usually cares MORE about "where do I farm this" than "the
                 -- vendor list it's in"). Otherwise show the bonus-item card.
-                if L3F.itemLookup and L3F.itemLookup[hit.itemID]
+                -- Sets are never NPC-dropped, so they always land on the
+                -- bonus-item card path.
+                local srcKind = hit.source and hit.source.kind or "item"
+                if srcKind == "item" and L3F.itemLookup and L3F.itemLookup[hit.itemID]
                    and L3F.itemLookup[hit.itemID][1] then
                     local link = L3F.itemLookup[hit.itemID][1]
                     currentNPC = link.npc
@@ -788,7 +878,7 @@ local function buildListPane(parent)
                     L3F.db.atlas.lastSelectedNPC = link.npc.id
                     L3F.db.atlas.lastActiveSubTab = "drops"
                 else
-                    currentBonusItem = { id = hit.itemID }
+                    currentBonusItem = { id = hit.itemID, kind = srcKind }
                     currentNPC = nil
                     currentConsumable = nil
                 end
@@ -1030,6 +1120,9 @@ local function buildListPane(parent)
             -- Bonus-category entry selected -> render each section as a
             -- dim uppercase header followed by its item rows. Format key:
             --   bonus:<catKey>:<entryKey>
+            -- Sections flagged kind = "set" route their IDs through the
+            -- set renderer (PvP Season sets, etc.) since GetItemInfo can't
+            -- resolve item-set IDs.
             local rest = sel:sub(7)
             local catKey, entryKey = rest:match("^([^:]+):(.+)$")
             local entry = catKey and entryKey
@@ -1039,8 +1132,15 @@ local function buildListPane(parent)
                 for _, section in ipairs(entry.sections) do
                     if section.items and #section.items > 0 then
                         y = addBonusSectionHeader(section.name or "", y)
+                        local isSet = (section.kind == "set")
                         for _, item in ipairs(section.items) do
-                            if item.id then y = addBonusItemRow(item.id, y) end
+                            if item.id then
+                                if isSet then
+                                    y = addBonusSetRow(item.id, y)
+                                else
+                                    y = addBonusItemRow(item.id, y)
+                                end
+                            end
                         end
                         y = y + 4
                     end
@@ -1320,9 +1420,23 @@ local function buildDetailPane(parent)
             consumableSubStrip:Hide()
             detailPane.consumableIcon:Show()
             detailPane.consumableIcon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
-            local cachedName = GetItemInfo(bonus.id) or ("Item #" .. bonus.id)
-            npcTitle:SetText(cachedName)
-            queueItemUI(bonus.id, npcTitle, detailPane.consumableIcon)
+
+            local isSet = (bonus.kind == "set")
+            if isSet then
+                -- Set detail: synchronous GetItemSetInfo. Use a chest-armor
+                -- icon as the universal "set" glyph since the client has no
+                -- per-set icon for arbitrary sets.
+                local setName = GetItemSetInfo and GetItemSetInfo(bonus.id)
+                                  or ("Set #" .. bonus.id)
+                detailPane.consumableIcon:SetTexture("Interface\\Icons\\INV_Chest_Plate06")
+                npcTitle:SetText(setName)
+                npcTitle:SetTextColor(0.64, 0.21, 0.93)  -- epic purple
+            else
+                local cachedName = GetItemInfo(bonus.id) or ("Item #" .. bonus.id)
+                npcTitle:SetText(cachedName)
+                npcTitle:SetTextColor(1, 1, 1, 1)
+                queueItemUI(bonus.id, npcTitle, detailPane.consumableIcon)
+            end
 
             -- Build the source list from L3F.bonusItemLookup. Multiple
             -- entries are possible (e.g. an item that's both a Faction
@@ -1561,6 +1675,22 @@ local function buildAtlas(parent)
             -- ready the next time the user opens the window.
             if L3F.RefreshTree then L3F.RefreshTree() end
         end)
+    end
+
+    -- Trigger the server fetch for every bonus item ID we know about, so
+    -- their names + icons populate the client cache before the user clicks
+    -- a leaf. In TBC Classic 2.5.x GetItemInfo alone isn't enough; we feed
+    -- the IDs through a hidden tooltip via forceItemFetch which calls
+    -- GameTooltip:SetItemByID. Sets are skipped - GetItemSetInfo is sync
+    -- and already returns the name without any server round-trip. Fires
+    -- exactly once per session (forceItemFetch dedupes via fetchedOnce).
+    if L3F.bonusItemLookup then
+        for itemID, sources in pairs(L3F.bonusItemLookup) do
+            local srcKind = sources[1] and sources[1].kind or "item"
+            if srcKind ~= "set" then
+                forceItemFetch(itemID)
+            end
+        end
     end
 
     if L3F.db.atlas.lastSelectedNPC then
