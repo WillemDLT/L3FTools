@@ -647,17 +647,42 @@ dragDriver:SetScript("OnUpdate", function()
     follower:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x / s, y / s)
 end)
 
--- Diagnostic toggle. When true, prints to chat what GetMouseFocus
--- returns at drop time so we can see why a drop misses. Flip to
--- false after the drop bug is confirmed fixed.
+-- Diagnostic toggle. When true, prints to chat what the cursor was
+-- over at drop time so we can see why a drop misses.
 local DEBUG_DROP = true
 
--- Shared end-of-drag handler. Hides the follower BEFORE GetMouseFocus
--- so the TOOLTIP-strata follower can't confuse hit-testing even
--- though it's mouse-disabled. Looks up the drop target via
--- findSlotUnderFrame on the cursor focus, then applies the drop
--- (move-or-place semantics: if dragging from a slot, source is
--- cleared on a hit; drop on the same slot is a no-op).
+-- Live list of all currently rendered slot row frames. Wiped at the
+-- start of each refresh() pass and re-populated by buildSlotRow.
+-- Powers coord-based drop hit-testing (more reliable than
+-- GetMouseFocus, which Morphéours saw return nil at release time
+-- despite the cursor being squarely over a slot - likely because the
+-- TOOLTIP-strata follower confuses 2.5.x's hit cache).
+local liveSlots = {}
+
+local function findSlotAtCursor()
+    local cx, cy = GetCursorPosition()
+    if not cx then return nil end
+    local scale = UIParent:GetEffectiveScale()
+    cx, cy = cx / scale, cy / scale
+    for _, frame in ipairs(liveSlots) do
+        if frame:IsVisible() then
+            local l, r = frame:GetLeft(), frame:GetRight()
+            local t, b = frame:GetTop(), frame:GetBottom()
+            if l and r and t and b
+               and cx >= l and cx <= r and cy >= b and cy <= t then
+                return frame.composerSlot
+            end
+        end
+    end
+    return nil
+end
+
+-- Shared end-of-drag handler. Uses coordinate-based hit-testing
+-- (findSlotAtCursor) rather than GetMouseFocus, which the
+-- diagnostic in 0.16.8 proved returns nil at drop time. Move-or-
+-- place semantics: if dragging from a slot, the source is cleared
+-- on a hit (move) or on an off-slot drop (remove); drop on the
+-- same slot is a no-op.
 local function finishDrag()
     if not dragState.spec then follower:Hide(); return end
     local sp = dragState.spec
@@ -668,15 +693,13 @@ local function finishDrag()
 
     follower:Hide()
 
-    local focus = GetMouseFocus and GetMouseFocus() or nil
-    local hit = findSlotUnderFrame(focus)
+    local hit = findSlotAtCursor()
 
     if DEBUG_DROP then
-        local fname = focus and (focus.GetName and focus:GetName())
-        local ftype = focus and (focus.GetObjectType and focus:GetObjectType()) or "nil"
-        print(("|cffffd100L3FComp|r drop: focus=%s (%s) hit=%s"):format(
-            tostring(fname or "(unnamed)"),
-            tostring(ftype),
+        local cx, cy = GetCursorPosition()
+        local scale = UIParent:GetEffectiveScale()
+        print(("|cffffd100L3FComp|r drop: cursor=(%.0f,%.0f) scale=%.2f hit=%s"):format(
+            cx or 0, cy or 0, scale or 1,
             hit and ("slot " .. tostring(hit.idx)) or "NIL"))
     end
 
@@ -689,7 +712,6 @@ local function finishDrag()
             hit.target.slots[hit.idx] = { specKey = sp.key, label = sp.label or s.label }
         end
     elseif fromTarget then
-        -- Dragged a filled slot's icon off any slot: yeet it.
         fromTarget.slots[fromIdx] = nil
     end
 
@@ -866,12 +888,11 @@ local function buildSlotRow(parent, target, idx, y)
     row:SetSize(SLOT_W, SLOT_H)
     row:SetPoint("TOPLEFT", parent, "TOPLEFT", 6, -y)
     row:EnableMouse(true)
-    -- composerSlot is the tag the source icon's OnDragStop reads via
-    -- GetMouseFocus + parent walk to identify this drop target. The
-    -- row itself has no OnMouseUp drop handler - that script doesn't
-    -- fire on a Frame whose press came from a different frame, so
-    -- relying on it here would silently break.
+    -- composerSlot is the tag findSlotAtCursor reads to identify the
+    -- drop target. The row also pushes itself into liveSlots so the
+    -- coordinate-based hit-tester can iterate the current rows.
     row.composerSlot = { target = target, idx = idx }
+    table.insert(liveSlots, row)
 
     local bg = row:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints(); bg:SetColorTexture(0, 0, 0, 0.18)
@@ -1353,6 +1374,9 @@ local function buildComposer(parent)
 
     refresh = function()
         ensureComposerState()
+        -- Wipe the liveSlots registry before re-rendering. buildSlotRow
+        -- will repopulate it as each row is created.
+        wipe(liveSlots)
         for _, c in ipairs({body:GetChildren()}) do c:Hide(); c:SetParent(nil) end
         for _, r in ipairs({body:GetRegions()}) do r:Hide(); r:ClearAllPoints()
             if r.SetText then r:SetText("") end
