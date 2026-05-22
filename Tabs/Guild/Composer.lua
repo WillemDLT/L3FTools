@@ -892,9 +892,14 @@ end
 -- determines (a) the remove-button condition (groups can't fall below
 -- 1, benches can go to 0) and (b) which aura map feeds the per-frame
 -- party-aura strip (groupAuras or benchAuras).
+--
+-- Frame height (176) is tight against the rendered content: header
+-- 18 + 5 slot rows (5 * 24 = 120) + 4 gap + 26 aura strip + 8 padding.
+-- 0.16.5 trimmed this from 220 (which had a 44px empty tail) per
+-- Morphéours's "halve the gap" feedback.
 local function buildSquadFrame(parent, target, x, y, idxLabel, kind, auras)
     local f = CreateFrame("Frame", nil, parent)
-    f:SetSize(GROUP_W, 220)
+    f:SetSize(GROUP_W, 176)
     f:SetPoint("TOPLEFT", parent, "TOPLEFT", x, -y)
 
     -- Header is a plain Frame (no longer click-to-rename in 0.16.1);
@@ -1150,58 +1155,43 @@ local function buildTopStrip(parent)
         return b
     end
 
-    -- Save As: prompts for a new profile name and writes the CURRENT
-    -- comp state under it. If the name already exists, overwrites
-    -- (saving an updated comp under the same name is the expected
-    -- "save" workflow; the user knows what they typed).
-    local saveBtn = mkBtn("Save As", profDD, -8, 70, function()
-        StaticPopupDialogs["L3F_COMP_SAVE"] = {
-            text = "Save current comp as profile:",
-            button1 = "Save", button2 = "Cancel",
+    -- New Profile: prompts for a name and creates an EMPTY profile.
+    -- Replaced the old "Save As" button in 0.16.5 per Morphéours -
+    -- "Save As" required first returning to Default and rebuilding,
+    -- which is unintuitive when the user just wants to start a fresh
+    -- comp. Edits made to the new profile auto-persist via the live
+    -- L3F.db.composer state - no explicit save step needed.
+    local newBtn = mkBtn("New Profile", profDD, -8, 88, function()
+        StaticPopupDialogs["L3F_COMP_NEW"] = {
+            text = "New profile name:",
+            button1 = "Create", button2 = "Cancel",
             hasEditBox = true, maxLetters = 32,
             OnAccept = function(self)
                 local name = self.EditBox:GetText():gsub("^%s+",""):gsub("%s+$","")
                 if name == "" then return end
-                -- Deep-copy the active profile so subsequent edits don't
-                -- bleed back into the saved snapshot (or vice versa).
-                local src = L3F.db.composer.profiles[L3F.db.composer.activeProfile]
-                local copy = newEmptyProfile()
-                copy.groupCount = src.groupCount
-                copy.benchCount = src.benchCount
-                for g = 1, GROUP_MAX do
-                    copy.groups[g].name = src.groups[g].name
-                    for i = 1, 5 do
-                        local s = src.groups[g].slots[i]
-                        copy.groups[g].slots[i] = s and { specKey = s.specKey, label = s.label } or nil
-                    end
+                if L3F.db.composer.profiles[name] then
+                    print("|cffffd100L3FComp|r profile '" .. name .. "' already exists.")
+                    return
                 end
-                for b = 1, BENCH_MAX do
-                    copy.benches[b].name = src.benches[b].name
-                    for i = 1, 5 do
-                        local s = src.benches[b].slots[i]
-                        copy.benches[b].slots[i] = s and { specKey = s.specKey, label = s.label } or nil
-                    end
-                end
-                L3F.db.composer.profiles[name] = copy
+                L3F.db.composer.profiles[name] = newEmptyProfile()
                 L3F.db.composer.activeProfile = name
                 refreshProfileDD()
                 refresh()
-                print("|cffffd100L3FComp|r saved profile '" .. name .. "'.")
+                print("|cffffd100L3FComp|r created profile '" .. name .. "'.")
             end,
             EditBoxOnEnterPressed = function(self)
                 local b = self:GetParent().button1; if b then b:Click() end
             end,
             OnShow = function(self)
-                self.EditBox:SetText(L3F.db.composer.activeProfile or "")
-                self.EditBox:HighlightText()
+                self.EditBox:SetText("")
                 self.EditBox:SetFocus()
             end,
             timeout = 0, whileDead = true, hideOnEscape = true,
         }
-        StaticPopup_Show("L3F_COMP_SAVE")
+        StaticPopup_Show("L3F_COMP_NEW")
     end)
 
-    local delBtn = mkBtn("Delete", saveBtn, 2, 60, function()
+    local delBtn = mkBtn("Delete", newBtn, 2, 60, function()
         local active = L3F.db.composer.activeProfile
         if not active then
             print("|cffffd100L3FComp|r no profile selected.")
@@ -1334,7 +1324,10 @@ local function buildComposer(parent)
         local p = currentProfile()
         local gridY = palY + 18 + (PALETTE_ICON + PALETTE_GAP) * 2 + 16
         local colGap = 12
-        local rowH = 230
+        -- rowH = frame height (176) + 5px inter-row gap. Halved from
+        -- the old 230 (frame 220 + 10 gap, leaving large visual
+        -- whitespace under each group) per Morphéours 0.16.5.
+        local rowH = 181
         local groupColumns = 3
 
         -- Cells = groups[1..groupCount] then benches[1..benchCount], in
@@ -1361,7 +1354,9 @@ local function buildComposer(parent)
         end
 
         local rows = math.ceil(#cells / groupColumns)
-        local afterGridY = gridY + rows * rowH + 4
+        -- Tight 2px gap to the Add Group / Add Bench buttons (halved
+        -- from 4 in 0.16.5 alongside the row-spacing tightening).
+        local afterGridY = gridY + rows * rowH + 2
 
         -- Side-by-side "+ Add Group" and "+ Add Bench" buttons beneath the
         -- grid. Each only appears when the corresponding count is below
