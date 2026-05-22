@@ -2,7 +2,7 @@
 ## Title: L3FTools
 ## Notes: Multi-tool suite for TBC Anniversary - Automarker, Atlas/Encyclopedia, more.
 ## Author: Willem
-## Version: 0.18.2
+## Version: 0.19.0
 ## SavedVariables: L3FToolsDB
 ## SavedVariablesPerCharacter: L3FToolsCharDB
 ## IconTexture: Interface\AddOns\L3FTools\Media\automarker
@@ -76,6 +76,7 @@ Data/Consumables/ProfessionItems.lua
 Data/Factions.lua
 Data/Collections.lua
 Data/Professions.lua
+Data/ProfessionsRecipeMap.lua
 UI/ModelViewer.lua
 UI/HoverPreview.lua
 UI/PlayerMarksDialog.lua

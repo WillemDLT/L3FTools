@@ -800,13 +800,22 @@ local function buildListPane(parent)
 
     -- Spell-kind bonus row. Every Professions section uses this
     -- renderer because Morpheours's spreadsheet stores recipe spell
-    -- ids (a recipe-tracking export), not item ids. GetSpellTexture
-    -- returns the recipe's icon - for crafting spells that's the
-    -- result item's icon, so the visual matches what the player
-    -- expects (flask icon for the flask recipe etc.). Synchronous on
-    -- Classic; falls back to a question-mark icon if the spell id is
-    -- unknown to the client. No cross-link / click handler - recipes
-    -- don't have NPC sources.
+    -- ids, not item ids.
+    --
+    -- Icon resolution (per Morpheours 0.19.0):
+    --   1. L3F.professionRecipeMap[spellID]  -> result item id; render
+    --      via GetItemInfo + queueItemUI so the row shows the RESULT
+    --      item's icon (the player's mental model). This is the common
+    --      path for crafted gear, flasks, potions, bars, etc.
+    --   2. GetSpellTexture(spellID)          -> the spell's own icon.
+    --      Used as fallback when the map has no entry, which is the
+    --      case for Enchants / Disenchant / other recipes with no
+    --      result-item product.
+    --   3. Question-mark placeholder         -> ultimate fallback.
+    --
+    -- Tooltip is always the spell tooltip (SetSpellByID) - the recipe
+    -- text with reagents is more useful than the result-item tooltip.
+    -- No cross-link / click handler - recipes don't have NPC sources.
     local function addBonusSpellRow(spellID, displayName, skill, y)
         local rowH = 24
         local row = CreateFrame("Frame", nil, npcList)
@@ -820,8 +829,21 @@ local function buildListPane(parent)
         local icon = row:CreateTexture(nil, "ARTWORK")
         icon:SetSize(18, 18)
         icon:SetPoint("LEFT", row, "LEFT", 4, 0)
-        local tex = GetSpellTexture and GetSpellTexture(spellID) or nil
-        icon:SetTexture(tex or "Interface\\Icons\\INV_Misc_QuestionMark")
+
+        local resultItemID = L3F.professionRecipeMap
+            and L3F.professionRecipeMap[spellID] or nil
+        if resultItemID then
+            -- Render the result item's icon. queueItemUI handles the
+            -- GetItemInfo async cache; if it's already cached the icon
+            -- applies synchronously, otherwise we fall back to a
+            -- question mark until the GET_ITEM_INFO_RECEIVED event
+            -- fires.
+            icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+            queueItemUI(resultItemID, nil, icon)
+        else
+            local tex = GetSpellTexture and GetSpellTexture(spellID) or nil
+            icon:SetTexture(tex or "Interface\\Icons\\INV_Misc_QuestionMark")
+        end
 
         local txt = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         txt:SetPoint("LEFT", icon, "RIGHT", 6, 0)
@@ -1785,6 +1807,17 @@ local function buildAtlas(parent)
                 if (s.kind or "item") == "item" then anyItem = true; break end
             end
             if anyItem then forceItemFetch(itemID) end
+        end
+    end
+
+    -- Warm the cache for Profession recipe RESULT items too. The
+    -- recipe rows themselves are spell-kind (skipped above) but their
+    -- icons come from result-item lookups via L3F.professionRecipeMap.
+    -- Without this prefetch the icons would stay as question marks
+    -- until the player hovered each row.
+    if L3F.professionRecipeMap then
+        for _, itemID in pairs(L3F.professionRecipeMap) do
+            forceItemFetch(itemID)
         end
     end
 
