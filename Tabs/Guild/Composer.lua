@@ -589,12 +589,31 @@ end
 -- =============================================================
 local composerRoot
 local refresh
-local dragSpecKey
 
--- Cursor-follower icon for drag visuals. WoW's built-in drag system
--- only paints the cursor for system payloads (spells, items); for
--- custom payloads like our spec keys we attach a small textured
--- frame and reposition it every frame while a drag is active.
+-- Custom drag-drop machinery. WoW's built-in drag system
+-- (RegisterForDrag + OnDragStart + OnReceiveDrag) is designed around
+-- Blizzard cursor payloads (PickupSpell, PickupItem, etc.). For
+-- arbitrary payloads like our spec keys neither OnDragStart nor
+-- OnReceiveDrag fire reliably in Classic 2.5.x - GetCursorInfo
+-- documents only item/spell/petaction/macro/money/mount/merchant/
+-- battlepet as supported payload types, with no extension hook.
+-- So we bypass the WoW drag system entirely:
+--   1. OnMouseDown on a palette icon arms a "potential drag" by
+--      recording the spec being pressed + the cursor's current
+--      position.
+--   2. A persistent dragDriver frame's OnUpdate watches the cursor
+--      while a drag is armed - once movement exceeds DRAG_THRESHOLD,
+--      the follower icon shows attached to the cursor.
+--   3. OnMouseUp on the palette icon (which fires reliably because
+--      WoW captures the mouse to the press source on mouse-down)
+--      ends the drag: if the follower never showed (no movement),
+--      treat it as a click and fill the first empty group slot;
+--      otherwise read GetMouseFocus() for the drop-target slot.
+--   4. IsMouseButtonDown safety net catches the edge case where the
+--      release happens outside the WoW window and we never get an
+--      OnMouseUp event.
+local DRAG_THRESHOLD = 4
+
 local follower = CreateFrame("Frame", "L3FComposerDragFollower", UIParent)
 follower:SetSize(28, 28)
 follower:SetFrameStrata("TOOLTIP")
@@ -602,11 +621,33 @@ follower:Hide()
 local followerTex = follower:CreateTexture(nil, "OVERLAY")
 followerTex:SetAllPoints()
 followerTex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-follower:SetScript("OnUpdate", function(self)
+
+local dragState = { spec = nil, startX = 0, startY = 0 }
+
+-- Always-shown invisible driver so OnUpdate keeps ticking even when
+-- the follower is hidden (between mouse-down and threshold cross).
+local dragDriver = CreateFrame("Frame")
+dragDriver:SetScript("OnUpdate", function()
+    if not dragState.spec then return end
+    -- Safety net: lost mouse release (alt-tab, mouse exits window, etc.).
+    if not IsMouseButtonDown("LeftButton") then
+        dragState.spec = nil
+        follower:Hide()
+        return
+    end
     local x, y = GetCursorPosition()
-    local s = self:GetEffectiveScale()
-    self:ClearAllPoints()
-    self:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x / s, y / s)
+    if not follower:IsShown() then
+        local dx, dy = x - dragState.startX, y - dragState.startY
+        if dx * dx + dy * dy > DRAG_THRESHOLD * DRAG_THRESHOLD then
+            followerTex:SetTexture(dragState.spec.icon)
+            follower:Show()
+        end
+    end
+    if follower:IsShown() then
+        local s = follower:GetEffectiveScale()
+        follower:ClearAllPoints()
+        follower:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x / s, y / s)
+    end
 end)
 
 local function setSlot(target, idx, specKey)
@@ -687,6 +728,18 @@ local PALETTE_CLASS_GAP = 10
 -- consistency.
 local QUILL_ICON = "Interface\\Icons\\INV_Feather_07"
 
+-- Click-without-drag handler: drop into the first empty group slot.
+-- Shared between the OnMouseUp click path and any future click-only
+-- entry points. The bench is intentionally skipped (per 0.15.1).
+local function clickAddSpec(spec)
+    local p = currentProfile()
+    for g = 1, p.groupCount do
+        local idx = firstEmptySlot(p.groups[g])
+        if idx then setSlot(p.groups[g], idx, spec.key); refresh(); return end
+    end
+    print("|cffffd100L3FComp|r all groups full - add a group first.")
+end
+
 local function buildPaletteIcon(parent, spec, x, y)
     local btn = CreateFrame("Button", nil, parent)
     btn:SetSize(PALETTE_ICON, PALETTE_ICON)
@@ -699,12 +752,10 @@ local function buildPaletteIcon(parent, spec, x, y)
     local hl = btn:CreateTexture(nil, "HIGHLIGHT")
     hl:SetAllPoints(); hl:SetTexture("Interface\\Buttons\\ButtonHilight-Square"); hl:SetBlendMode("ADD")
 
-    -- Drag-and-drop: RegisterForDrag arms OnDragStart on mouse motion
-    -- while the button is held. Click (no motion) still fires OnClick
-    -- via RegisterForClicks. Do NOT call SetMovable - that interprets
-    -- the drag as "move the icon frame" and swallows the start event.
-    btn:RegisterForDrag("LeftButton")
-    btn:RegisterForClicks("LeftButtonUp")
+    -- Drag handling: see the dragState/dragDriver block above for the
+    -- full rationale. No RegisterForDrag / RegisterForClicks here - we
+    -- consume OnMouseDown/OnMouseUp directly so we control the drag
+    -- threshold and don't depend on WoW's payload-aware drag system.
     btn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText(spec.label)
@@ -718,38 +769,28 @@ local function buildPaletteIcon(parent, spec, x, y)
         GameTooltip:Show()
     end)
     btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    btn:SetScript("OnDragStart", function()
-        dragSpecKey = spec.key
-        followerTex:SetTexture(spec.icon)
-        follower:Show()
+
+    btn:SetScript("OnMouseDown", function(self, button)
+        if button ~= "LeftButton" then return end
+        dragState.spec = spec
+        dragState.startX, dragState.startY = GetCursorPosition()
     end)
-    btn:SetScript("OnDragStop", function()
-        -- OnDragStop fires on mouse release; resolve the drop target
-        -- via GetMouseFocus (the frame the cursor is currently over)
-        -- and walk up to find a slot row tagged composerSlot.
-        if dragSpecKey then
+    btn:SetScript("OnMouseUp", function(self, button)
+        if button ~= "LeftButton" or not dragState.spec then return end
+        local sp = dragState.spec
+        local dragged = follower:IsShown()
+        dragState.spec = nil
+        follower:Hide()
+        if not dragged then
+            clickAddSpec(sp)
+        else
             local focus = GetMouseFocus and GetMouseFocus() or nil
             local target = findSlotUnderFrame(focus)
             if target then
-                setSlot(target.target, target.idx, dragSpecKey)
+                setSlot(target.target, target.idx, sp.key)
+                refresh()
             end
-            dragSpecKey = nil
-            follower:Hide()
-            refresh()
-        else
-            follower:Hide()
         end
-    end)
-    btn:SetScript("OnClick", function()
-        -- Click-to-add convenience: drop into the first empty group
-        -- slot. There is no bench fallback as of 0.15.1 - if every
-        -- visible group is full, the player should add a group.
-        local p = currentProfile()
-        for g = 1, p.groupCount do
-            local idx = firstEmptySlot(p.groups[g])
-            if idx then setSlot(p.groups[g], idx, spec.key); refresh(); return end
-        end
-        print("|cffffd100L3FComp|r all groups full - add a group first.")
     end)
 end
 
