@@ -264,6 +264,59 @@ local DEBUFFS_LIST = {
     "Winter's Chill",
 }
 
+-- TBC max-rank spell IDs used by the buff/debuff tooltip on hover.
+-- GameTooltip:SetSpellByID resolves these to the canonical, localized
+-- in-game tooltip (rank, mana, range, cast time, description). Any ID
+-- that doesn't resolve falls back to a plain-text tooltip with just
+-- the name - easy per-entry correction when a beta tester flags one.
+local SPELL_IDS = {
+    -- Buffs
+    ["Arcane Intellect"]              = 27126,
+    ["Battle Shout"]                  = 25289,
+    ["Blessing of Kings"]             = 20217,
+    ["Blessing of Sanctuary"]         = 27168,
+    ["Bloodlust"]                     =  2825,
+    ["Commanding Shout"]              = 25289,  -- TBC Anniversary may map to a distinct spell ID
+    ["Devotion Aura"]                 = 27149,
+    ["Divine Spirit"]                 = 25312,
+    ["Earth Shield"]                  = 32594,
+    ["Ferocious Inspiration"]         = 34460,
+    ["Improved Healthstone"]          = 18692,
+    ["Improved Imp"]                  = 18696,
+    ["Improved Mark of the Wild"]     = 17051,
+    ["Innervate"]                     = 29166,
+    ["Leader of the Pack"]            = 24932,
+    ["Mana Tide Totem"]               = 16191,
+    ["Mark of the Wild"]              = 26990,
+    ["Moonkin Form"]                  = 24858,
+    ["Pain Suppression"]              = 33206,
+    ["Power Word: Fortitude"]         = 25389,
+    ["Sanctity Aura"]                 = 31870,
+    ["Shadow Protection"]             = 25433,
+    ["Totem of Wrath"]                = 30706,
+    ["Tree of Life"]                  = 33891,
+    ["Trueshot Aura"]                 = 27066,
+    ["Unleashed Rage"]                = 30802,
+    -- Debuffs
+    ["Blood Frenzy"]                  = 29859,
+    ["Expose Weakness"]               = 34503,
+    ["Faerie Fire"]                   = 26993,
+    ["Hemorrhage"]                    = 16511,
+    ["Improved Demoralizing Shout"]   = 12879,
+    ["Improved Expose Armor"]         = 14169,
+    ["Improved Faerie Fire"]          = 33602,
+    ["Improved Scorch"]               = 22959,
+    ["Improved Seal of the Crusader"] = 20335,
+    ["Improved Shadow Bolt"]          = 17800,
+    ["Improved Thunder Clap"]         = 12666,
+    ["Insect Swarm"]                  = 27013,
+    ["Malediction"]                   = 32379,
+    ["Mangle"]                        = 33878,
+    ["Scorpid Sting"]                 =  3043,
+    ["Shadow Weaving"]                = 15334,
+    ["Winter's Chill"]                = 28593,
+}
+
 local SPEC_LOOKUP = {}
 for _, s in ipairs(SPECS) do SPEC_LOOKUP[s.key] = s end
 
@@ -272,13 +325,12 @@ for _, s in ipairs(SPECS) do SPEC_LOOKUP[s.key] = s end
 -- 2. PROFILE STATE
 -- =============================================================
 local function newEmptyProfile()
-    local p = { groups = {}, bench = { name = "Bench", slots = {} }, groupCount = 3 }
+    local p = { groups = {}, groupCount = 3 }
     for g = 1, 9 do
         local slots = {}
         for i = 1, 5 do slots[i] = nil end
         p.groups[g] = { name = "Group " .. g, slots = slots }
     end
-    for i = 1, 5 do p.bench.slots[i] = nil end
     return p
 end
 
@@ -302,8 +354,9 @@ local function ensureComposerState()
         p.groups[g] = p.groups[g] or { name = "Group " .. g, slots = {} }
         for i = 1, 5 do p.groups[g].slots[i] = p.groups[g].slots[i] or nil end
     end
-    p.bench = p.bench or { name = "Bench", slots = {} }
-    for i = 1, 5 do p.bench.slots[i] = p.bench.slots[i] or nil end
+    -- 0.15.1: bench removed; silently strip from any pre-existing profile
+    -- so SavedVariables don't accumulate dead fields.
+    p.bench = nil
 end
 
 local function currentProfile()
@@ -347,6 +400,10 @@ end
 -- =============================================================
 local LibDeflate = LibStub and LibStub("LibDeflate", true)
 
+-- Wire format: COMP1|NAME|GC|G1S1,..,G1S5|G2..|...|G9..|GN1//GN2//...//GN9
+-- (the bench row + bench name from 0.15.0 are gone in 0.15.1; the
+-- decoder still tolerates strings that include them by silently
+-- discarding those fields).
 local function serializeProfile(name, profile)
     local function encodeSlot(slot)
         if not slot or not slot.specKey then return "" end
@@ -359,13 +416,9 @@ local function serializeProfile(name, profile)
         for i = 1, 5 do row[i] = encodeSlot(profile.groups[g] and profile.groups[g].slots[i]) end
         table.insert(parts, table.concat(row, ","))
     end
-    local benchRow = {}
-    for i = 1, 5 do benchRow[i] = encodeSlot(profile.bench.slots[i]) end
-    table.insert(parts, table.concat(benchRow, ","))
     local nameRow = {}
     for g = 1, 9 do nameRow[g] = (profile.groups[g].name or ("Group " .. g)):gsub("|", "/") end
     table.insert(parts, table.concat(nameRow, "//"))
-    table.insert(parts, (profile.bench.name or "Bench"):gsub("|", "/"))
 
     local inner = "COMP1|" .. table.concat(parts, "|")
     if LibDeflate then
@@ -395,7 +448,7 @@ local function deserializeProfile(str)
     inner = inner:sub(7)
     local parts = {}
     for piece in (inner .. "|"):gmatch("([^|]*)|") do table.insert(parts, piece) end
-    if #parts < 12 then return nil, "Truncated profile string" end
+    if #parts < 11 then return nil, "Truncated profile string" end
     local p = newEmptyProfile()
     local function decodeRow(row, into)
         local i = 0
@@ -412,16 +465,25 @@ local function deserializeProfile(str)
     end
     p.groupCount = math.max(1, math.min(9, tonumber(parts[2]) or 3))
     for g = 1, 9 do decodeRow(parts[2 + g], p.groups[g].slots) end
-    decodeRow(parts[12], p.bench.slots)
-    if parts[13] and parts[13] ~= "" then
+    -- 0.15.0 strings have a bench row at parts[12] and bench name at
+    -- parts[14]. The group-names row was at parts[13] there, here at
+    -- parts[12]. Try the new position first, fall back to the legacy
+    -- one if the new position holds something that looks like a slot
+    -- (legacy bench row).
+    local nameRow
+    if parts[12] and parts[12]:find("//") then
+        nameRow = parts[12]
+    elseif parts[13] and parts[13]:find("//") then
+        nameRow = parts[13]
+    end
+    if nameRow and nameRow ~= "" then
         local g = 0
-        for nm in (parts[13] .. "//"):gmatch("([^/][^/]*)//") do
+        for nm in (nameRow .. "//"):gmatch("([^/][^/]*)//") do
             g = g + 1
             if g > 9 then break end
             p.groups[g].name = nm
         end
     end
-    if parts[14] and parts[14] ~= "" then p.bench.name = parts[14] end
     return parts[1] or "Imported", p
 end
 
@@ -433,6 +495,24 @@ local composerRoot
 local refresh
 local dragSpecKey
 
+-- Cursor-follower icon for drag visuals. WoW's built-in drag system
+-- only paints the cursor for system payloads (spells, items); for
+-- custom payloads like our spec keys we attach a small textured
+-- frame and reposition it every frame while a drag is active.
+local follower = CreateFrame("Frame", "L3FComposerDragFollower", UIParent)
+follower:SetSize(28, 28)
+follower:SetFrameStrata("TOOLTIP")
+follower:Hide()
+local followerTex = follower:CreateTexture(nil, "OVERLAY")
+followerTex:SetAllPoints()
+followerTex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+follower:SetScript("OnUpdate", function(self)
+    local x, y = GetCursorPosition()
+    local s = self:GetEffectiveScale()
+    self:ClearAllPoints()
+    self:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x / s, y / s)
+end)
+
 local function setSlot(target, idx, specKey)
     local s = SPEC_LOOKUP[specKey]
     if not s then return end
@@ -443,6 +523,23 @@ local function clearSlot(target, idx) target.slots[idx] = nil end
 
 local function firstEmptySlot(target)
     for i = 1, 5 do if not target.slots[i] then return i end end
+    return nil
+end
+
+-- Walk the parent chain of `frame` looking for one that's tagged
+-- with `composerSlot = { target, idx }`. Used by drag-drop drop
+-- detection: GetMouseFocus returns the deepest frame under the
+-- cursor (often the background texture's region or a child of the
+-- slot row), so we hop upward until we find the actual slot row.
+local function findSlotUnderFrame(frame)
+    while frame do
+        if frame.composerSlot then return frame.composerSlot end
+        if frame.GetParent then
+            frame = frame:GetParent()
+        else
+            return nil
+        end
+    end
     return nil
 end
 
@@ -538,7 +635,10 @@ local function buildPaletteIcon(parent, spec, x, y)
     local hl = btn:CreateTexture(nil, "HIGHLIGHT")
     hl:SetAllPoints(); hl:SetTexture("Interface\\Buttons\\ButtonHilight-Square"); hl:SetBlendMode("ADD")
 
-    btn:SetMovable(true)
+    -- Drag-and-drop: RegisterForDrag arms OnDragStart on mouse motion
+    -- while the button is held. Click (no motion) still fires OnClick
+    -- via RegisterForClicks. Do NOT call SetMovable - that interprets
+    -- the drag as "move the icon frame" and swallows the start event.
     btn:RegisterForDrag("LeftButton")
     btn:RegisterForClicks("LeftButtonUp")
     btn:SetScript("OnEnter", function(self)
@@ -554,17 +654,38 @@ local function buildPaletteIcon(parent, spec, x, y)
         GameTooltip:Show()
     end)
     btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    btn:SetScript("OnDragStart", function() dragSpecKey = spec.key end)
-    btn:SetScript("OnDragStop",  function() dragSpecKey = nil end)
+    btn:SetScript("OnDragStart", function()
+        dragSpecKey = spec.key
+        followerTex:SetTexture(spec.icon)
+        follower:Show()
+    end)
+    btn:SetScript("OnDragStop", function()
+        -- OnDragStop fires on mouse release; resolve the drop target
+        -- via GetMouseFocus (the frame the cursor is currently over)
+        -- and walk up to find a slot row tagged composerSlot.
+        if dragSpecKey then
+            local focus = GetMouseFocus and GetMouseFocus() or nil
+            local target = findSlotUnderFrame(focus)
+            if target then
+                setSlot(target.target, target.idx, dragSpecKey)
+            end
+            dragSpecKey = nil
+            follower:Hide()
+            refresh()
+        else
+            follower:Hide()
+        end
+    end)
     btn:SetScript("OnClick", function()
+        -- Click-to-add convenience: drop into the first empty group
+        -- slot. There is no bench fallback as of 0.15.1 - if every
+        -- visible group is full, the player should add a group.
         local p = currentProfile()
         for g = 1, p.groupCount do
             local idx = firstEmptySlot(p.groups[g])
             if idx then setSlot(p.groups[g], idx, spec.key); refresh(); return end
         end
-        local benchIdx = firstEmptySlot(p.bench)
-        if benchIdx then setSlot(p.bench, benchIdx, spec.key); refresh(); return end
-        print("|cffffd100L3FComp|r all slots full.")
+        print("|cffffd100L3FComp|r all groups full - add a group first.")
     end)
 end
 
@@ -594,15 +715,10 @@ local function buildSlotRow(parent, target, idx, y)
     local row = CreateFrame("Frame", nil, parent)
     row:SetSize(SLOT_W, SLOT_H)
     row:SetPoint("TOPLEFT", parent, "TOPLEFT", 6, -y)
-
     row:EnableMouse(true)
-    row:SetScript("OnMouseUp", function(_, button)
-        if dragSpecKey and button == "LeftButton" then
-            setSlot(target, idx, dragSpecKey)
-            dragSpecKey = nil
-            refresh()
-        end
-    end)
+    -- Tag the row so OnDragStop on the palette icon can identify
+    -- this drop target via GetMouseFocus + findSlotUnderFrame.
+    row.composerSlot = { target = target, idx = idx }
 
     local bg = row:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints(); bg:SetColorTexture(0, 0, 0, 0.18)
@@ -720,76 +836,84 @@ local function buildGroupFrame(parent, target, x, y, idxLabel)
     end
 end
 
-local function buildBenchFrame(parent, x, y)
-    local p = currentProfile()
-    local f = CreateFrame("Frame", nil, parent)
-    f:SetSize(GROUP_W, 220)
-    f:SetPoint("TOPLEFT", parent, "TOPLEFT", x, -y)
+-- Single buff/debuff list row. Returns the row Button so the caller
+-- can install hover scripts; the row itself owns its dot + text.
+local function buildBuffRow(parent, name, covered, y, panelW)
+    local row = CreateFrame("Button", nil, parent)
+    row:SetSize(panelW - 8, 20)
+    row:SetPoint("TOPLEFT", parent, "TOPLEFT", 4, -y)
 
-    local hdr = CreateFrame("Button", nil, f)
-    hdr:SetSize(GROUP_W - 22, 18)
-    hdr:SetPoint("TOPLEFT", f, "TOPLEFT", 0, 0)
-    local hdrTxt = hdr:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    hdrTxt:SetPoint("LEFT", hdr, "LEFT", 4, 0); hdrTxt:SetText(p.bench.name or "Bench")
-    hdr:SetScript("OnClick", function()
-        promptText("Rename bench:", p.bench.name or "", function(txt)
-            if txt and txt ~= "" then p.bench.name = txt; refresh() end
-        end)
-    end)
-
-    local yy = 22
-    for i = 1, 5 do
-        buildSlotRow(f, p.bench, i, yy)
-        yy = yy + SLOT_H + 2
+    local dot = row:CreateTexture(nil, "OVERLAY")
+    dot:SetSize(8, 8)
+    dot:SetPoint("LEFT", row, "LEFT", 4, 0)
+    if covered then
+        dot:SetColorTexture(0.30, 0.85, 0.30, 1)
+    else
+        dot:SetColorTexture(0.40, 0.40, 0.40, 1)
     end
-    local strip = CreateFrame("Frame", nil, f)
-    strip:SetSize(GROUP_W - 4, 26)
-    strip:SetPoint("TOPLEFT", f, "TOPLEFT", 6, -(yy + 4))
-    local stripBg = strip:CreateTexture(nil, "BACKGROUND")
-    stripBg:SetAllPoints(); stripBg:SetColorTexture(0, 0, 0, 0.18)
+
+    local txt = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    txt:SetPoint("LEFT", row, "LEFT", 18, 0)
+    txt:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+    txt:SetJustifyH("LEFT")
+    txt:SetWordWrap(false)
+    txt:SetText(name)
+    if covered then
+        txt:SetTextColor(1, 1, 1, 1)
+    else
+        txt:SetTextColor(0.6, 0.6, 0.6, 1)
+    end
+
+    -- Hover tooltip: SetSpellByID with the TBC max-rank ID for the
+    -- buff/debuff (the canonical in-game tooltip). For names without
+    -- a mapped ID, fall back to a name-only tooltip.
+    local spellID = SPELL_IDS[name]
+    row:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        if spellID and GameTooltip.SetSpellByID then
+            GameTooltip:SetSpellByID(spellID)
+        else
+            GameTooltip:SetText(name)
+        end
+        GameTooltip:Show()
+    end)
+    row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    -- Subtle row highlight on hover so the tooltip target is obvious.
+    local hl = row:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetAllPoints(); hl:SetColorTexture(1, 1, 1, 0.05)
 end
 
+-- Right-side sidebar: BUFFS section above DEBUFFS section, single
+-- column, full panel width per row so long names (e.g. "Improved
+-- Demoralizing Shout") don't truncate. Returns the total height
+-- consumed so the caller can size the scroll body.
 local function buildBuffPanel(parent, covered, x, y, panelW)
     local f = CreateFrame("Frame", nil, parent)
-    f:SetSize(panelW, 380)
+    -- Height is computed below; placeholder for now.
     f:SetPoint("TOPLEFT", parent, "TOPLEFT", x, -y)
 
-    local function panel(title, list, covSet, xx)
-        local p = CreateFrame("Frame", nil, f)
-        local pw = math.floor(panelW / 2) - 8
-        p:SetSize(pw, 370)
-        p:SetPoint("TOPLEFT", f, "TOPLEFT", xx, 0)
-        local hdr = p:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        hdr:SetPoint("TOPLEFT", p, "TOPLEFT", 0, 0); hdr:SetText(title)
-        local box = CreateFrame("Frame", nil, p)
-        box:SetPoint("TOPLEFT", p, "TOPLEFT", 0, -22)
-        box:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", 0, 0)
+    local function section(title, list, covSet, sectionY)
+        local hdr = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        hdr:SetPoint("TOPLEFT", f, "TOPLEFT", 4, -sectionY)
+        hdr:SetText(title)
+        local box = CreateFrame("Frame", nil, f)
+        box:SetSize(panelW, #list * 22 + 8)
+        box:SetPoint("TOPLEFT", f, "TOPLEFT", 0, -(sectionY + 22))
         local boxBg = box:CreateTexture(nil, "BACKGROUND")
         boxBg:SetAllPoints(); boxBg:SetColorTexture(0, 0, 0, 0.18)
-        local colW = math.floor(pw / 2)
-        for i, name in ipairs(list) do
-            local col = ((i - 1) % 2)
-            local rowIdx = math.floor((i - 1) / 2)
-            local dot = box:CreateTexture(nil, "OVERLAY")
-            dot:SetSize(8, 8)
-            dot:SetPoint("TOPLEFT", box, "TOPLEFT", 8 + col * colW, -(6 + rowIdx * 22))
-            if covSet[name] then
-                dot:SetColorTexture(0.30, 0.85, 0.30, 1)
-            else
-                dot:SetColorTexture(0.40, 0.40, 0.40, 1)
-            end
-            local txt = box:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            txt:SetPoint("TOPLEFT", box, "TOPLEFT", 22 + col * colW, -(2 + rowIdx * 22))
-            txt:SetText(name)
-            if covSet[name] then
-                txt:SetTextColor(1, 1, 1, 1)
-            else
-                txt:SetTextColor(0.6, 0.6, 0.6, 1)
-            end
+        local rowY = 4
+        for _, name in ipairs(list) do
+            buildBuffRow(box, name, covSet[name], rowY, panelW)
+            rowY = rowY + 22
         end
+        return sectionY + 22 + box:GetHeight() + 12
     end
-    panel("Buffs",   BUFFS_LIST,   covered.buffs,   0)
-    panel("Debuffs", DEBUFFS_LIST, covered.debuffs, math.floor(panelW / 2) + 8)
+
+    local afterBuffs   = section("Buffs",   BUFFS_LIST,   covered.buffs,   0)
+    local afterDebuffs = section("Debuffs", DEBUFFS_LIST, covered.debuffs, afterBuffs)
+    f:SetSize(panelW, afterDebuffs)
+    return afterDebuffs
 end
 
 
@@ -936,25 +1060,19 @@ local function buildComposer(parent)
         local gridY = palY + 18 + (PALETTE_ICON + PALETTE_GAP) * 2 + 16
         local colGap = 12
         local rowH = 230
-        local cellsPerRow = 3
-        local cells = {}
+        local groupColumns = 3
+        -- Place each visible group in a 3-column grid on the LEFT.
+        -- Bench was removed in 0.15.1; the empty space to the right is
+        -- now reserved for the buffs/debuffs sidebar.
         for g = 1, p.groupCount do
-            table.insert(cells, { kind = "group", idx = g })
-        end
-        table.insert(cells, { kind = "bench" })
-        for i, cell in ipairs(cells) do
-            local row = math.floor((i - 1) / cellsPerRow)
-            local col = (i - 1) % cellsPerRow
+            local row = math.floor((g - 1) / groupColumns)
+            local col = (g - 1) % groupColumns
             local cx = 16 + col * (GROUP_W + colGap)
             local cy = gridY + row * rowH
-            if cell.kind == "group" then
-                buildGroupFrame(body, p.groups[cell.idx], cx, cy, cell.idx)
-            else
-                buildBenchFrame(body, cx, cy)
-            end
+            buildGroupFrame(body, p.groups[g], cx, cy, g)
         end
 
-        local rows = math.ceil(#cells / cellsPerRow)
+        local rows = math.ceil(p.groupCount / groupColumns)
         local afterGridY = gridY + rows * rowH + 4
         if p.groupCount < 9 then
             local addBtn = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
@@ -968,10 +1086,17 @@ local function buildComposer(parent)
             afterGridY = afterGridY + 34
         end
 
+        -- Right-side sidebar: buffs + debuffs sections stacked vertically.
+        -- Starts at the same y as the groups, fills the empty space.
         local covered = computeCoverage()
-        buildBuffPanel(body, covered, 16, afterGridY, 700)
+        local sidebarX = 16 + groupColumns * (GROUP_W + colGap) + 4
+        local sidebarW = 290
+        local sidebarH = buildBuffPanel(body, covered, sidebarX, gridY, sidebarW)
 
-        body:SetHeight(afterGridY + 400)
+        -- Scroll body height = tallest of (groups column) and (sidebar).
+        local groupsBottom = afterGridY
+        local sidebarBottom = gridY + sidebarH
+        body:SetHeight(math.max(groupsBottom, sidebarBottom) + 24)
     end
 
     refresh()
