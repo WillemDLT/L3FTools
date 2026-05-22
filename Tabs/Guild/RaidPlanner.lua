@@ -182,6 +182,45 @@ local function bgTexture(slug)
     return "Interface\\AddOns\\L3FTools\\Media\\RaidPlanner\\" .. slug
 end
 
+-- Opens the WoW client's built-in ColorPickerFrame. `initialHex` is
+-- six lowercase hex chars (no '#'); `onAccept` is called with the
+-- new hex when the user clicks OK or cancel (cancel restores). Works
+-- on TBC 2.5.x; the previousValues table convention is what TBC's
+-- cancelFunc expects.
+local function openColorPicker(initialHex, onAccept)
+    if not ColorPickerFrame then return end
+    initialHex = (initialHex and #initialHex == 6) and initialHex or "ffffff"
+    local r = tonumber(initialHex:sub(1, 2), 16) / 255
+    local g = tonumber(initialHex:sub(3, 4), 16) / 255
+    local b = tonumber(initialHex:sub(5, 6), 16) / 255
+
+    local function rgbToHex(nr, ng, nb)
+        return string.format("%02x%02x%02x",
+            math.floor((nr or 1) * 255 + 0.5),
+            math.floor((ng or 1) * 255 + 0.5),
+            math.floor((nb or 1) * 255 + 0.5))
+    end
+    local function applyCurrent()
+        onAccept(rgbToHex(ColorPickerFrame:GetColorRGB()))
+    end
+
+    ColorPickerFrame.hasOpacity = false
+    ColorPickerFrame.opacity = 1
+    ColorPickerFrame.previousValues = { r, g, b }
+    ColorPickerFrame.func = applyCurrent
+    ColorPickerFrame.opacityFunc = applyCurrent
+    ColorPickerFrame.cancelFunc = function(prev)
+        if prev and prev.r then
+            onAccept(rgbToHex(prev.r, prev.g, prev.b))
+        else
+            onAccept(initialHex)
+        end
+    end
+    ColorPickerFrame:Hide()  -- force the OnShow handlers to fire on re-show
+    ColorPickerFrame:SetColorRGB(r, g, b)
+    ColorPickerFrame:Show()
+end
+
 
 -- =============================================================
 -- 4. DRAG-DROP MACHINERY
@@ -248,17 +287,24 @@ local function relToAbs(x, y)
 end
 
 
--- Build a placed-icon Button bound to one entry in plan.icons. The
--- icon's appearance is driven by either (a) iconData.spellID +
--- iconData.iconTex for search-dropped spells, or (b) the KEY_TO_TEX
--- lookup for marks / roles / classes.
+-- Build a placed-icon Frame bound to one entry in plan.icons.
+--
+-- Why a Frame and not a Button: in TBC 2.5.x, mixing OnClick with
+-- OnDragStart/OnDragStop on the same Button produces weird transient
+-- states - drags fire on tiny accidental movements, then OnClick
+-- doesn't, then refreshIcons rebuilds while the user is mid-gesture
+-- and the new btn re-enters the same drag, "consuming" only part of
+-- the requested movement (the "sticky" symptom Morpheours reported).
+-- Frames cleanly separate the two: OnDragStart fires only when WoW
+-- thinks the user is dragging, and OnMouseUp fires only when they
+-- weren't dragging. That's enough to disambiguate click-vs-drag.
 local function buildPlacedIcon(plan, iconData, idx)
-    local btn = CreateFrame("Button", nil, placedHost)
-    btn:SetSize(PLACED_DEFAULT_SIZE, PLACED_DEFAULT_SIZE)
+    local f = CreateFrame("Frame", nil, placedHost)
+    f:SetSize(PLACED_DEFAULT_SIZE, PLACED_DEFAULT_SIZE)
     local ax, ay = relToAbs(iconData.x or 0.5, iconData.y or 0.5)
-    btn:SetPoint("CENTER", placedHost, "TOPLEFT", ax, -ay)
+    f:SetPoint("CENTER", placedHost, "TOPLEFT", ax, -ay)
 
-    local tex = btn:CreateTexture(nil, "ARTWORK")
+    local tex = f:CreateTexture(nil, "ARTWORK")
     tex:SetAllPoints()
     tex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
     local path
@@ -278,54 +324,62 @@ local function buildPlacedIcon(plan, iconData, idx)
     end
 
     if currentSelection == idx then
-        local ring = btn:CreateTexture(nil, "OVERLAY")
-        ring:SetPoint("TOPLEFT", btn, "TOPLEFT", -3, 3)
-        ring:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 3, -3)
+        local ring = f:CreateTexture(nil, "OVERLAY")
+        ring:SetPoint("TOPLEFT", f, "TOPLEFT", -3, 3)
+        ring:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 3, -3)
         ring:SetTexture("Interface\\Buttons\\WHITE8X8")
         ring:SetVertexColor(0.3, 0.7, 1.0, 0.35)
         ring:SetDrawLayer("OVERLAY", -2)
     end
 
     if iconData.locked then
-        local lockBg = btn:CreateTexture(nil, "OVERLAY")
+        local lockBg = f:CreateTexture(nil, "OVERLAY")
         lockBg:SetSize(10, 10)
-        lockBg:SetPoint("TOPRIGHT", btn, "TOPRIGHT", 2, 2)
+        lockBg:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2)
         lockBg:SetColorTexture(0.9, 0.7, 0.1, 0.9)
     end
 
     if iconData.text and iconData.text ~= "" then
-        local lbl = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        lbl:SetPoint("TOP", btn, "BOTTOM", 0, -1)
+        local lbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetPoint("TOP", f, "BOTTOM", 0, -1)
         lbl:SetText(iconData.text)
         lbl:SetTextColor(1, 1, 1, 1)
     end
 
-    btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-    btn:RegisterForDrag("LeftButton")
-    btn:EnableMouse(true)
-    btn:SetMovable(false)
+    f:EnableMouse(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetMovable(false)
 
-    btn:SetScript("OnClick", function(self, button)
+    -- OnMouseUp only fires when WoW didn't escalate the gesture into
+    -- a drag (drag would have routed to OnDragStart/OnDragStop and
+    -- swallowed OnMouseUp). So a left-click here is a pure click,
+    -- safe to use as "select"; a right-click is always a non-drag
+    -- because RegisterForDrag only watches LeftButton.
+    f:SetScript("OnMouseUp", function(self, button)
         if button == "RightButton" then
             openContextMenu(self, idx)
-        else
+        elseif button == "LeftButton" then
             selectIcon(idx)
         end
     end)
 
-    btn:SetScript("OnDragStart", function()
+    f:SetScript("OnDragStart", function()
         if iconData.locked then return end
         dragState.active   = true
         dragState.fromIcon = iconData
         followerTex:SetTexture(path or QUILL)
         follower:Show()
-        btn:Hide()
+        f:Hide()
     end)
 
-    btn:SetScript("OnDragStop", function()
-        if not dragState.active then return end
+    f:SetScript("OnDragStop", function()
+        -- Guard: only this frame's OnDragStop applies if THIS frame
+        -- started the drag. fromIcon mismatch means stale event.
+        if not dragState.active or dragState.fromIcon ~= iconData then
+            return
+        end
         local cx, cy = GetCursorPosition()
-        local scale = canvasFrame:GetEffectiveScale()
+        local scale = UIParent:GetEffectiveScale()
         cx, cy = cx / scale, cy / scale
         local l, r = canvasFrame:GetLeft(), canvasFrame:GetRight()
         local t, b = canvasFrame:GetTop(), canvasFrame:GetBottom()
@@ -338,11 +392,12 @@ local function buildPlacedIcon(plan, iconData, idx)
             end
         end
         dragState.active = false
+        dragState.fromIcon = nil
         follower:Hide()
         refreshIcons()
     end)
 
-    return btn
+    return f
 end
 
 
@@ -454,9 +509,9 @@ local function buildPaletteButton(parent, kind, entry, x, y, sz)
 
     btn:SetScript("OnDragStart", function() startDragFromPalette(kind, entry.key) end)
     btn:SetScript("OnDragStop", function()
-        if not dragState.active then return end
+        if not dragState.active or dragState.fromIcon ~= nil then return end
         local cx, cy = GetCursorPosition()
-        local scale = canvasFrame:GetEffectiveScale()
+        local scale = UIParent:GetEffectiveScale()
         cx, cy = cx / scale, cy / scale
         local l, r = canvasFrame:GetLeft(), canvasFrame:GetRight()
         local t, b = canvasFrame:GetTop(), canvasFrame:GetBottom()
@@ -466,6 +521,7 @@ local function buildPaletteButton(parent, kind, entry, x, y, sz)
                 { color = dragState.color, variant = dragState.variant })
         end
         dragState.active = false
+        dragState.fromIcon = nil
         follower:Hide()
     end)
     btn:SetScript("OnClick", function() placeIconAt(kind, entry.key, 0.5, 0.5) end)
@@ -498,7 +554,7 @@ local function canvasUpdate(self)
         return
     end
     local cx, cy = GetCursorPosition()
-    local scale = canvasFrame:GetEffectiveScale()
+    local scale = UIParent:GetEffectiveScale()
     cx, cy = cx / scale, cy / scale
     local l, r = canvasFrame:GetLeft(), canvasFrame:GetRight()
     local t, b = canvasFrame:GetTop(), canvasFrame:GetBottom()
@@ -874,25 +930,43 @@ refreshPropsPanel = function()
     colorLabel:SetPoint("TOPLEFT", propsHost, "TOPLEFT", 8, -row); row = row + 16
     colorLabel:SetText("Color")
 
-    local colorSwatch = propsHost:CreateTexture(nil, "ARTWORK")
-    colorSwatch:SetSize(18, 18)
-    colorSwatch:SetPoint("TOPLEFT", propsHost, "TOPLEFT", 12, -row)
+    -- The swatch is now a clickable button that opens the WoW
+    -- ColorPickerFrame. No more hex EditBox - Willem flagged it as
+    -- unfriendly; the WoW palette is the standard UX everyone knows.
+    local colorBtn = CreateFrame("Button", nil, propsHost)
+    colorBtn:SetSize(28, 22)
+    colorBtn:SetPoint("TOPLEFT", propsHost, "TOPLEFT", 12, -row)
+    local colorSwatch = colorBtn:CreateTexture(nil, "ARTWORK")
+    colorSwatch:SetPoint("TOPLEFT", colorBtn, "TOPLEFT", 1, -1)
+    colorSwatch:SetPoint("BOTTOMRIGHT", colorBtn, "BOTTOMRIGHT", -1, 1)
     colorSwatch:SetTexture("Interface\\Buttons\\WHITE8X8")
+    local border = colorBtn:CreateTexture(nil, "OVERLAY")
+    border:SetAllPoints()
+    border:SetTexture("Interface\\Buttons\\WHITE8X8")
+    border:SetVertexColor(0, 0, 0, 0.6)
+    border:SetDrawLayer("OVERLAY", -2)
+    local hl = colorBtn:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetAllPoints(); hl:SetTexture("Interface\\Buttons\\ButtonHilight-Square"); hl:SetBlendMode("ADD")
     do
         local r = tonumber((icon.color or "ffffff"):sub(1,2), 16)/255
         local g = tonumber((icon.color or "ffffff"):sub(3,4), 16)/255
         local b = tonumber((icon.color or "ffffff"):sub(5,6), 16)/255
         colorSwatch:SetVertexColor(r, g, b, 1)
     end
-    local colorEdit = CreateFrame("EditBox", nil, propsHost, "InputBoxTemplate")
-    colorEdit:SetSize(72, 22)
-    colorEdit:SetPoint("LEFT", colorSwatch, "RIGHT", 8, 0)
-    colorEdit:SetAutoFocus(false); colorEdit:SetMaxLetters(6)
-    colorEdit:SetText(icon.color or "ffffff")
-    colorEdit:SetScript("OnEnterPressed", function(self)
-        local c = self:GetText():lower():gsub("[^0-9a-f]", "")
-        if #c == 6 then icon.color = c end
-        self:ClearFocus(); refresh()
+    local hexLabel = propsHost:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    hexLabel:SetPoint("LEFT", colorBtn, "RIGHT", 8, 0)
+    hexLabel:SetText("#" .. (icon.color or "ffffff"))
+    colorBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Pick a color")
+        GameTooltip:Show()
+    end)
+    colorBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    colorBtn:SetScript("OnClick", function()
+        openColorPicker(icon.color or "ffffff", function(newHex)
+            icon.color = newHex
+            refresh()
+        end)
     end)
     row = row + 28
 
@@ -955,7 +1029,7 @@ refreshEncounterPanel = function()
     end
 
     local y = 4
-    local rowH = 28
+    local rowH = 36   -- taller to give the 3D model some room
     L3F.iterNPCs(raid, function(npc)
         if npc.kind ~= "boss" then return end
         local row = CreateFrame("Frame", nil, child)
@@ -964,13 +1038,32 @@ refreshEncounterPanel = function()
         local rbg = row:CreateTexture(nil, "BACKGROUND")
         rbg:SetAllPoints(); rbg:SetColorTexture(0, 0, 0, 0.12)
 
-        local icon = row:CreateTexture(nil, "ARTWORK")
-        icon:SetSize(24, 24); icon:SetPoint("LEFT", row, "LEFT", 4, 0)
-        icon:SetTexture("Interface\\Icons\\INV_Misc_Head_Dragon_01")
-        icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        -- 3D portrait via PlayerModel SetCreature(npc.id). This works
+        -- for any NPC the TBC 2.5.x client knows about; if the call
+        -- errors (custom Anniversary npc id missing from the model
+        -- DB) we hide the model and fall back to a generic icon.
+        local model = CreateFrame("PlayerModel", nil, row)
+        model:SetSize(32, 32); model:SetPoint("LEFT", row, "LEFT", 2, 0)
+        local ok = pcall(function()
+            model:SetCreature(npc.id)
+            -- Pull the camera close so we see the head/torso, not a
+            -- distant full-body shot. Magic numbers tuned by eye -
+            -- WoW's default cam frames most TBC bosses too far out.
+            model:SetCamDistanceScale(1.8)
+            model:SetPortraitZoom(0.9)
+        end)
+        local iconFallback
+        if not ok then
+            model:Hide()
+            iconFallback = row:CreateTexture(nil, "ARTWORK")
+            iconFallback:SetSize(28, 28)
+            iconFallback:SetPoint("LEFT", row, "LEFT", 4, 0)
+            iconFallback:SetTexture("Interface\\Icons\\INV_Misc_Head_Dragon_01")
+            iconFallback:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        end
 
         local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        lbl:SetPoint("LEFT", icon, "RIGHT", 6, 0)
+        lbl:SetPoint("LEFT", row, "LEFT", 38, 0)
         lbl:SetPoint("RIGHT", row, "RIGHT", -2, 0)
         lbl:SetJustifyH("LEFT"); lbl:SetWordWrap(false)
         lbl:SetText(npc.name)
