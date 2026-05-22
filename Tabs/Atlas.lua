@@ -906,6 +906,14 @@ local function buildListPane(parent)
         end
         rbg:SetColorTexture(active and 0.30 or 0, active and 0.65 or 0, active and 1 or 0, active and 0.25 or 0)
 
+        -- Bonus hits can be item-kind, set-kind, or spell-kind (the
+        -- Professions recipes). Spell-kind needs different icon
+        -- resolution + a SetSpellByID tooltip; cached separately so
+        -- the click + hover handlers below can branch without
+        -- re-reading hit.source.
+        local bonusSrcKind = (hit.kind == "bonus") and hit.source
+                             and (hit.source.kind or "item") or nil
+
         local textX = 6
         if hit.kind ~= "npc" then
             local icon = row:CreateTexture(nil, "ARTWORK")
@@ -920,7 +928,21 @@ local function buildListPane(parent)
             elseif hit.kind == "consumable" and hit.consumable.id then
                 queueItemUI(hit.consumable.id, nil, icon)
             elseif hit.kind == "bonus" then
-                queueItemUI(hit.itemID, nil, icon)
+                if bonusSrcKind == "spell" then
+                    -- Mirror the in-tree Profession row's icon logic:
+                    -- result item via L3F.professionRecipeMap, fall back
+                    -- to GetSpellTexture, fall back to question mark.
+                    local resultItemID = L3F.professionRecipeMap
+                        and L3F.professionRecipeMap[hit.itemID] or nil
+                    if resultItemID then
+                        queueItemUI(resultItemID, nil, icon)
+                    else
+                        local tex = GetSpellTexture and GetSpellTexture(hit.itemID) or nil
+                        if tex then icon:SetTexture(tex) end
+                    end
+                else
+                    queueItemUI(hit.itemID, nil, icon)
+                end
             end
             textX = 24
         end
@@ -938,7 +960,14 @@ local function buildListPane(parent)
         elseif hit.kind == "consumable" and hit.consumable.id then
             queueItemUI(hit.consumable.id, title, nil)
         elseif hit.kind == "bonus" then
-            queueItemUI(hit.itemID, title, nil)
+            if bonusSrcKind == "spell" then
+                -- Recipe rows render in the same soft gold the in-tree
+                -- Profession rows use - GetItemInfo would resolve the
+                -- spell id as some unrelated item and recolour wrong.
+                title:SetTextColor(0.95, 0.85, 0.50)
+            else
+                queueItemUI(hit.itemID, title, nil)
+            end
         else
             title:SetTextColor(active and 1 or 0.85, active and 1 or 0.85, active and 1 or 0.85, 1)
         end
@@ -956,15 +985,31 @@ local function buildListPane(parent)
                 currentNPC = nil
                 currentBonusItem = nil
             elseif hit.kind == "bonus" then
-                -- Bonus-item search hit. Prefer the cross-link: if the item
-                -- also has a known NPC drop entry, jump there (the player
-                -- usually cares MORE about "where do I farm this" than "the
-                -- vendor list it's in"). Otherwise show the bonus-item card.
-                -- Sets are never NPC-dropped, so they always land on the
-                -- bonus-item card path.
                 local srcKind = hit.source and hit.source.kind or "item"
-                if srcKind == "item" and L3F.itemLookup and L3F.itemLookup[hit.itemID]
-                   and L3F.itemLookup[hit.itemID][1] then
+                if srcKind == "spell" then
+                    -- Recipe rows don't have NPC sources or a bonus-
+                    -- item card. Navigate to the parent profession leaf
+                    -- (e.g. "bonus:professions:Alchemy") so the player
+                    -- lands on the full profession list with their
+                    -- searched recipe visible inline. Clearing the
+                    -- search box is required - otherwise RefreshNPCList
+                    -- stays in search-results mode and the navigation
+                    -- has no visible effect on the list pane.
+                    if hit.source and hit.source.catKey and hit.source.entry then
+                        L3F.db.atlas.selected = "bonus:" .. hit.source.catKey
+                            .. ":" .. hit.source.entry.key
+                    end
+                    if searchBox then searchBox:SetText("") end
+                    currentNPC = nil
+                    currentConsumable = nil
+                    currentBonusItem = nil
+                    if L3F.RefreshTree then L3F.RefreshTree() end
+                elseif srcKind == "item" and L3F.itemLookup
+                       and L3F.itemLookup[hit.itemID]
+                       and L3F.itemLookup[hit.itemID][1] then
+                    -- Bonus item that's ALSO an NPC drop: jump to the
+                    -- dropping NPC (the "where do I farm this" path is
+                    -- usually more useful than "the vendor list it's in").
                     local link = L3F.itemLookup[hit.itemID][1]
                     currentNPC = link.npc
                     currentConsumable = nil
@@ -981,8 +1026,6 @@ local function buildListPane(parent)
                 currentConsumable = nil
                 currentBonusItem = nil
                 L3F.db.atlas.lastSelectedNPC = hit.npc.id
-                -- Land on the sub-tab that contains the matched item so
-                -- the player sees the drop / spell they searched for.
                 if hit.kind == "drop" then
                     L3F.db.atlas.lastActiveSubTab = "drops"
                 elseif hit.kind == "spell" then
@@ -992,12 +1035,28 @@ local function buildListPane(parent)
             if L3F.RefreshNPCList then L3F.RefreshNPCList() end
             if L3F.RefreshDetailPane then L3F.RefreshDetailPane() end
         end)
-        row:SetScript("OnEnter", function()
+        row:SetScript("OnEnter", function(self)
             if not active then rbg:SetColorTexture(1, 1, 1, 0.07) end
+            -- Hover tooltips on search rows: spell-bonus hits show the
+            -- recipe via SetSpellByID so the player can preview without
+            -- clicking through. Other kinds keep the existing
+            -- background-only highlight (matches the rest of the list).
+            if hit.kind == "bonus" and bonusSrcKind == "spell" then
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                if GameTooltip.SetSpellByID then
+                    GameTooltip:SetSpellByID(hit.itemID)
+                else
+                    GameTooltip:SetHyperlink("spell:" .. hit.itemID)
+                end
+                GameTooltip:Show()
+            end
         end)
         row:SetScript("OnLeave", function()
             if active then rbg:SetColorTexture(0.30, 0.65, 1.0, 0.25)
             else rbg:SetColorTexture(0, 0, 0, 0) end
+            if hit.kind == "bonus" and bonusSrcKind == "spell" then
+                GameTooltip:Hide()
+            end
         end)
         return y + rowH + 2
     end
@@ -1101,36 +1160,38 @@ local function buildListPane(parent)
             -- behaviour - the player picks the relevant context).
             local numericSearch = tonumber(search)
             for itemID, sources in pairs(L3F.bonusItemLookup or {}) do
-                -- Spell-kind bonus entries (Professions Enchant / Smelt /
-                -- Transmute spells) live in bonusItemLookup too but aren't
-                -- resolvable via GetItemInfo, and the search-hit row only
-                -- knows how to render item tooltips. Skip them - the user
-                -- can still browse them via the tree.
-                local firstKind = sources[1] and sources[1].kind or "item"
-                if firstKind == "spell" then
-                    -- skip
-                else
-                    local cachedName = GetItemInfo(itemID)
-                    local matched = false
-                    if numericSearch and numericSearch == itemID then
-                        matched = true
-                    elseif cachedName and cachedName:lower():find(search, 1, true) then
-                        matched = true
+                -- Each source-of-this-id may be item-kind, spell-kind, or
+                -- set-kind. Spell-kind sources match on their stored
+                -- `name` (the recipe name from Morpheours's spreadsheet);
+                -- item-kind sources match on the GetItemInfo-cached name
+                -- with the numeric-id fallback. Numeric search hits both
+                -- ID spaces.
+                local cachedName = GetItemInfo(itemID)
+                for _, src in ipairs(sources) do
+                    local srcKind = src.kind or "item"
+                    local label, matched
+                    if srcKind == "spell" then
+                        label = src.name or ("Spell #" .. itemID)
+                        matched = (numericSearch == itemID)
+                              or  (src.name and src.name:lower():find(search, 1, true) ~= nil)
+                    else
+                        label = cachedName or src.name or ("Item #" .. itemID)
+                        matched = (numericSearch == itemID)
+                              or  (cachedName and cachedName:lower():find(search, 1, true) ~= nil)
+                              or  (src.name and src.name:lower():find(search, 1, true) ~= nil)
                     end
                     if matched then
-                        -- One hit per source entry so the user sees which list
-                        -- the item lives in (Honored from Cenarion Expedition,
-                        -- Pre-BiS Druid Balance / Head, etc.).
-                        for _, src in ipairs(sources) do
-                            table.insert(hits, {
-                                kind     = "bonus",
-                                itemID   = itemID,
-                                source   = src,
-                                label    = cachedName or ("Item #" .. itemID),
-                                subtitle = src.catLabel .. " - " .. src.entry.name
-                                           .. (src.sectionName and (" / " .. src.sectionName) or ""),
-                            })
-                        end
+                        -- One hit per source so the user sees which list
+                        -- the entry lives in (Honored from Cenarion
+                        -- Expedition; Profession - Alchemy; etc.).
+                        table.insert(hits, {
+                            kind     = "bonus",
+                            itemID   = itemID,
+                            source   = src,
+                            label    = label,
+                            subtitle = src.catLabel .. " - " .. src.entry.name
+                                       .. (src.sectionName and (" / " .. src.sectionName) or ""),
+                        })
                     end
                 end
             end

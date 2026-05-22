@@ -122,6 +122,11 @@ function L3F.RegisterBonusCategory(catKey, displayName, entries)
                         entry       = entry,
                         sectionName = section.name,
                         kind        = kind,
+                        -- name lets the Atlas search match spell-kind
+                        -- entries directly (GetItemInfo can't resolve
+                        -- a spell id). For item rows the field is
+                        -- redundant with GetItemInfo's cache but cheap.
+                        name        = item.name,
                     })
                 end
             end
