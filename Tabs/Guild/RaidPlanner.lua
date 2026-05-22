@@ -1,30 +1,1465 @@
 -- =============================================================
 -- L3FTools - Tabs/Guild/RaidPlanner.lua
 -- =============================================================
--- In-raid strategy planner. Modeled on raidplan.io + MRT:
--- assistant draws markers / freehand / ability icons on top of a
--- boss-room map; saves multi-page plans; broadcasts to the raid
--- channel (assistant-only gating via UnitIsGroupAssistant).
---
--- Placeholder content until Phase 4.
+-- Raid-planner canvas modelled on raidplan.io. Per-encounter plans
+-- with multiple numbered pages, background image, drag-drop icon
+-- palette (raid marks + roles + classes), freehand pen drawings,
+-- placed-icon properties (text/color/variant), and an L3F2 share
+-- string for handing the plan to other guildies. All state lives
+-- in L3F.db.raidPlanner so reloads keep what was on screen.
 -- =============================================================
 
 local addonName, L3F = ...
 
-local function buildRaidPlanner(parent)
-    local title = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("TOPLEFT", parent, "TOPLEFT", 16, -16)
-    title:SetText("Raid Planner")
 
-    local body = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    body:SetPoint("CENTER", parent, "CENTER", 0, 0)
-    body:SetJustifyH("CENTER")
-    body:SetText(
-        "Draw strategy plans for raid bosses.\n\n" ..
-        "|cffaaaaaaMarkers, freehand, ability icons, multi-page plans\n" ..
-        "and assistant-only raid broadcast land here in Phase 4.|r"
-    )
-    body:SetTextColor(0.8, 0.8, 0.8, 1)
+-- =============================================================
+-- 1. ICON PALETTES
+-- =============================================================
+-- The three palette groups Willem itemised. Each entry carries an
+-- internal `key` (also stored in savedvars), the display texture, an
+-- optional `tooltip`, and per-group flags. Variants are sibling
+-- entries that share the parent's `key` family (`feralbear` is the
+-- bear-form variant of `feral`, etc.); the Properties panel offers
+-- them as a swap-in-place toggle on a placed icon.
+
+-- The 8 raid-target marks - built-in client textures.
+local MARKS = {
+    { key = "mark1", label = "Star",     tex = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_1" },
+    { key = "mark2", label = "Circle",   tex = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_2" },
+    { key = "mark3", label = "Diamond",  tex = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_3" },
+    { key = "mark4", label = "Triangle", tex = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_4" },
+    { key = "mark5", label = "Moon",     tex = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_5" },
+    { key = "mark6", label = "Square",   tex = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_6" },
+    { key = "mark7", label = "Cross",    tex = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_7" },
+    { key = "mark8", label = "Skull",    tex = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_8" },
+}
+
+-- Role icons (tank / healer / melee dps / ranged dps). Chosen for
+-- visual distinguishability rather than the LFG sprite sheet (its
+-- texcoords are fiddly and the LFG sheet has no "ranged" role).
+local ROLES = {
+    { key = "tank",   label = "Tank",       tex = "Interface\\Icons\\Spell_Holy_DevotionAura" },
+    { key = "heal",   label = "Healer",     tex = "Interface\\Icons\\Spell_Nature_Healingtouch" },
+    { key = "melee",  label = "Melee DPS",  tex = "Interface\\Icons\\Ability_Warrior_SavageBlow" },
+    { key = "ranged", label = "Ranged DPS", tex = "Interface\\Icons\\Ability_Hunter_AimedShot" },
+}
+
+-- TBC classes. The Properties panel surfaces alternative form icons
+-- via `variants` for classes that have a clear secondary identity in
+-- TBC (Druid's 4 forms). All other classes have a single texture.
+local CLASSES = {
+    { key = "druid",   label = "Druid",   tex = "Interface\\Icons\\Ability_Druid_CatForm",
+      variants = {
+        { key = "cat",     label = "Cat",     tex = "Interface\\Icons\\Ability_Druid_CatForm" },
+        { key = "bear",    label = "Bear",    tex = "Interface\\Icons\\Ability_Racial_BearForm" },
+        { key = "tree",    label = "Tree",    tex = "Interface\\Icons\\Ability_Druid_TreeofLife" },
+        { key = "moonkin", label = "Moonkin", tex = "Interface\\Icons\\Spell_Nature_ForceOfNature" },
+      } },
+    { key = "hunter",  label = "Hunter",  tex = "Interface\\Icons\\Ability_Hunter_BeastTaming" },
+    { key = "mage",    label = "Mage",    tex = "Interface\\Icons\\Spell_Holy_MagicalSentry" },
+    { key = "paladin", label = "Paladin", tex = "Interface\\Icons\\Spell_Holy_HolyBolt" },
+    { key = "priest",  label = "Priest",  tex = "Interface\\Icons\\Spell_Holy_PowerWordShield" },
+    { key = "rogue",   label = "Rogue",   tex = "Interface\\Icons\\Ability_Stealth" },
+    { key = "shaman",  label = "Shaman",  tex = "Interface\\Icons\\Spell_Nature_Lightning" },
+    { key = "warlock", label = "Warlock", tex = "Interface\\Icons\\Spell_Shadow_DeathCoil" },
+    { key = "warrior", label = "Warrior", tex = "Interface\\Icons\\Ability_Warrior_SavageBlow" },
+}
+
+-- Reverse lookup: any palette key (mark / role / class / class-variant)
+-- -> the texture. Populated lazily because variant sub-tables nest
+-- and we want all three palette families in one map for the canvas
+-- renderer.
+local KEY_TO_TEX = {}
+local KEY_TO_LABEL = {}
+local function buildPaletteIndex()
+    if next(KEY_TO_TEX) then return end
+    for _, m in ipairs(MARKS)   do KEY_TO_TEX[m.key], KEY_TO_LABEL[m.key] = m.tex, m.label end
+    for _, r in ipairs(ROLES)   do KEY_TO_TEX[r.key], KEY_TO_LABEL[r.key] = r.tex, r.label end
+    for _, c in ipairs(CLASSES) do
+        KEY_TO_TEX[c.key], KEY_TO_LABEL[c.key] = c.tex, c.label
+        for _, v in ipairs(c.variants or {}) do
+            -- Variant keys are namespaced "<class>:<variant>" so two
+            -- classes can share a variant name without collision.
+            local vk = c.key .. ":" .. v.key
+            KEY_TO_TEX[vk], KEY_TO_LABEL[vk] = v.tex, c.label .. " (" .. v.label .. ")"
+        end
+    end
 end
 
-L3F.RegisterTab("guild.raidplanner", "Raid Planner", nil, buildRaidPlanner, { parent = "guild" })
+-- Class -> variants[] lookup (Properties panel uses this to show the
+-- variant swatches on a selected class icon).
+local CLASS_VARIANTS = {}
+for _, c in ipairs(CLASSES) do
+    if c.variants then CLASS_VARIANTS[c.key] = c.variants end
+end
+
+
+-- =============================================================
+-- 2. STATE / PLANS
+-- =============================================================
+-- L3F.db.raidPlanner state shape:
+--   activeEncounter  = "Magtheridon"
+--   activePlanIdx    = integer (1..#plans for activeEncounter)
+--   plansByEncounter = {
+--       ["Magtheridon"] = {
+--           {
+--               name        = "Phase 1",
+--               background  = "magtheridon-wide",
+--               icons       = { { kind, key, x, y, color, text, variant, locked }, ... },
+--               drawings    = { { color, size, fade, points = {{x,y}, ...} }, ... },
+--               notes       = "free text",
+--           },
+--           ...
+--       },
+--   }
+-- `x, y` are stored as 0..1 fractional coordinates relative to the
+-- canvas so resizing the addon window preserves layout.
+
+local function ensureState()
+    L3F.db.raidPlanner = L3F.db.raidPlanner or {}
+    local rp = L3F.db.raidPlanner
+    rp.plansByEncounter = rp.plansByEncounter or {}
+    if rp.activeEncounter == nil then
+        -- Default to the first encounter in the catalog.
+        local cat = L3F.raidPlannerCatalog
+        if cat and cat[1] and cat[1].encounters and cat[1].encounters[1] then
+            rp.activeEncounter = cat[1].encounters[1].name
+        end
+    end
+    rp.activePlanIdx = rp.activePlanIdx or 1
+end
+
+local function findCatalogEncounter(name)
+    for _, raid in ipairs(L3F.raidPlannerCatalog or {}) do
+        for _, enc in ipairs(raid.encounters) do
+            if enc.name == name then return enc, raid end
+        end
+    end
+end
+
+local function newEmptyPlan(encounterName)
+    local enc = findCatalogEncounter(encounterName)
+    local defaultBg = enc and enc.backgrounds[1] and enc.backgrounds[1].slug or nil
+    return {
+        name       = "Plan",
+        background = defaultBg,
+        icons      = {},
+        drawings   = {},
+        notes      = "",
+    }
+end
+
+local function ensurePlansFor(encounterName)
+    ensureState()
+    local rp = L3F.db.raidPlanner
+    rp.plansByEncounter[encounterName] = rp.plansByEncounter[encounterName] or {}
+    if #rp.plansByEncounter[encounterName] == 0 then
+        table.insert(rp.plansByEncounter[encounterName], newEmptyPlan(encounterName))
+    end
+    return rp.plansByEncounter[encounterName]
+end
+
+local function currentPlan()
+    ensureState()
+    local rp = L3F.db.raidPlanner
+    local plans = ensurePlansFor(rp.activeEncounter)
+    rp.activePlanIdx = math.max(1, math.min(#plans, rp.activePlanIdx or 1))
+    return plans[rp.activePlanIdx], plans
+end
+
+
+-- =============================================================
+-- 3. CONSTANTS / LAYOUT
+-- =============================================================
+local LEFT_W = 64
+local RIGHT_W = 240
+local TOP_H = 88
+local PALETTE_ICON = 26
+local PLACED_DEFAULT_SIZE = 32
+local QUILL = "Interface\\Icons\\INV_Feather_07"
+
+local function bgTexture(slug)
+    return "Interface\\AddOns\\L3FTools\\Media\\RaidPlanner\\" .. slug
+end
+
+
+-- =============================================================
+-- 4. DRAG-DROP MACHINERY
+-- =============================================================
+-- Coord-based-hit-test pattern from Composer
+-- (see [[reference-classic-custom-drag]]). The canvas is a single
+-- Frame and placed icons are children whose absolute position is
+-- computed from their stored 0..1 fractional coords.
+
+local refresh, selectIcon, deselect, openContextMenu
+
+local dragState = { active = false }
+
+local follower = CreateFrame("Frame", "L3FRPDragFollower", UIParent)
+follower:SetSize(PLACED_DEFAULT_SIZE, PLACED_DEFAULT_SIZE)
+follower:SetFrameStrata("TOOLTIP")
+follower:EnableMouse(false)
+follower:Hide()
+local followerTex = follower:CreateTexture(nil, "OVERLAY")
+followerTex:SetAllPoints()
+followerTex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+
+local dragDriver = CreateFrame("Frame")
+dragDriver:SetScript("OnUpdate", function()
+    if not (dragState.active and follower:IsShown()) then return end
+    local x, y = GetCursorPosition()
+    local s = follower:GetEffectiveScale()
+    follower:ClearAllPoints()
+    follower:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x / s, y / s)
+end)
+
+
+-- =============================================================
+-- 5. UI HOSTS (forward decls)
+-- =============================================================
+local canvasFrame, canvasBg, placedHost, drawingHost
+local refreshIcons, refreshDrawings, refreshTopStrip
+local refreshPalette, refreshPropsPanel, refreshEncounterPanel
+local refreshSearchPanel, refreshNotesPanel
+local currentSelection
+
+local penMode = {
+    enabled  = false,
+    size     = 4,
+    color    = "ffffff",
+    fadeOut  = 0,
+}
+
+local rightTab = "encounter"
+local leftMode = "icons"
+
+
+-- =============================================================
+-- 6. CANVAS HELPERS
+-- =============================================================
+local function canvasSizePx()
+    if not canvasFrame then return 0, 0 end
+    return canvasFrame:GetWidth() or 0, canvasFrame:GetHeight() or 0
+end
+
+local function relToAbs(x, y)
+    local w, h = canvasSizePx()
+    return x * w, y * h
+end
+
+
+-- Build a placed-icon Button bound to one entry in plan.icons. The
+-- icon's appearance is driven by either (a) iconData.spellID +
+-- iconData.iconTex for search-dropped spells, or (b) the KEY_TO_TEX
+-- lookup for marks / roles / classes.
+local function buildPlacedIcon(plan, iconData, idx)
+    local btn = CreateFrame("Button", nil, placedHost)
+    btn:SetSize(PLACED_DEFAULT_SIZE, PLACED_DEFAULT_SIZE)
+    local ax, ay = relToAbs(iconData.x or 0.5, iconData.y or 0.5)
+    btn:SetPoint("CENTER", placedHost, "TOPLEFT", ax, -ay)
+
+    local tex = btn:CreateTexture(nil, "ARTWORK")
+    tex:SetAllPoints()
+    tex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    local path
+    if iconData.iconTex then
+        path = iconData.iconTex
+    elseif iconData.variant then
+        path = KEY_TO_TEX[iconData.key .. ":" .. iconData.variant]
+    end
+    path = path or KEY_TO_TEX[iconData.key]
+    if path then tex:SetTexture(path) end
+
+    if iconData.color and iconData.color ~= "ffffff" then
+        local r = tonumber(iconData.color:sub(1, 2), 16)
+        local g = tonumber(iconData.color:sub(3, 4), 16)
+        local b = tonumber(iconData.color:sub(5, 6), 16)
+        if r and g and b then tex:SetVertexColor(r/255, g/255, b/255, 1) end
+    end
+
+    if currentSelection == idx then
+        local ring = btn:CreateTexture(nil, "OVERLAY")
+        ring:SetPoint("TOPLEFT", btn, "TOPLEFT", -3, 3)
+        ring:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 3, -3)
+        ring:SetTexture("Interface\\Buttons\\WHITE8X8")
+        ring:SetVertexColor(0.3, 0.7, 1.0, 0.35)
+        ring:SetDrawLayer("OVERLAY", -2)
+    end
+
+    if iconData.locked then
+        local lockBg = btn:CreateTexture(nil, "OVERLAY")
+        lockBg:SetSize(10, 10)
+        lockBg:SetPoint("TOPRIGHT", btn, "TOPRIGHT", 2, 2)
+        lockBg:SetColorTexture(0.9, 0.7, 0.1, 0.9)
+    end
+
+    if iconData.text and iconData.text ~= "" then
+        local lbl = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetPoint("TOP", btn, "BOTTOM", 0, -1)
+        lbl:SetText(iconData.text)
+        lbl:SetTextColor(1, 1, 1, 1)
+    end
+
+    btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    btn:RegisterForDrag("LeftButton")
+    btn:EnableMouse(true)
+    btn:SetMovable(false)
+
+    btn:SetScript("OnClick", function(self, button)
+        if button == "RightButton" then
+            openContextMenu(self, idx)
+        else
+            selectIcon(idx)
+        end
+    end)
+
+    btn:SetScript("OnDragStart", function()
+        if iconData.locked then return end
+        dragState.active   = true
+        dragState.fromIcon = iconData
+        followerTex:SetTexture(path or QUILL)
+        follower:Show()
+        btn:Hide()
+    end)
+
+    btn:SetScript("OnDragStop", function()
+        if not dragState.active then return end
+        local cx, cy = GetCursorPosition()
+        local scale = canvasFrame:GetEffectiveScale()
+        cx, cy = cx / scale, cy / scale
+        local l, r = canvasFrame:GetLeft(), canvasFrame:GetRight()
+        local t, b = canvasFrame:GetTop(), canvasFrame:GetBottom()
+        if l and cx >= l and cx <= r and cy >= b and cy <= t then
+            iconData.x = (cx - l) / (r - l)
+            iconData.y = 1 - (cy - b) / (t - b)
+        else
+            for i, ic in ipairs(plan.icons) do
+                if ic == iconData then table.remove(plan.icons, i); break end
+            end
+        end
+        dragState.active = false
+        follower:Hide()
+        refreshIcons()
+    end)
+
+    return btn
+end
+
+
+-- =============================================================
+-- 7. DRAWING LAYER (pen mode)
+-- =============================================================
+local function drawSegment(parent, x1, y1, x2, y2, size, r, g, b, a)
+    local dx, dy = x2 - x1, y2 - y1
+    local len = math.sqrt(dx * dx + dy * dy)
+    if len < 0.5 then return end
+    local tex = parent:CreateTexture(nil, "ARTWORK")
+    tex:SetTexture("Interface\\Buttons\\WHITE8X8")
+    tex:SetVertexColor(r, g, b, a)
+    tex:SetWidth(len)
+    tex:SetHeight(size)
+    tex:ClearAllPoints()
+    tex:SetPoint("CENTER", parent, "TOPLEFT", (x1 + x2) / 2, -(y1 + y2) / 2)
+    tex:SetRotation(math.atan2(-dy, dx))
+end
+
+refreshDrawings = function()
+    if not drawingHost then return end
+    for _, c in ipairs({drawingHost:GetChildren()}) do c:Hide(); c:SetParent(nil) end
+    for _, r in ipairs({drawingHost:GetRegions()}) do r:Hide(); r:ClearAllPoints() end
+    local plan = currentPlan()
+    if not plan or not plan.drawings then return end
+    local w, h = canvasSizePx()
+    if w == 0 then return end
+    for _, stroke in ipairs(plan.drawings) do
+        local hex = stroke.color or "ffffff"
+        local r = tonumber(hex:sub(1, 2), 16) / 255
+        local g = tonumber(hex:sub(3, 4), 16) / 255
+        local b = tonumber(hex:sub(5, 6), 16) / 255
+        local size = stroke.size or 4
+        local pts = stroke.points or {}
+        for i = 2, #pts do
+            local p1, p2 = pts[i - 1], pts[i]
+            drawSegment(drawingHost,
+                p1.x * w, p1.y * h, p2.x * w, p2.y * h,
+                size, r, g, b, 1)
+        end
+    end
+end
+
+
+-- =============================================================
+-- 8. LEFT PANEL (mode toggle + palette / pen controls)
+-- =============================================================
+local leftPanel, iconControls, penControls
+
+local function startDragFromPalette(kind, key)
+    dragState.active   = true
+    dragState.kind     = kind
+    dragState.key      = key
+    dragState.variant  = nil
+    dragState.color    = "ffffff"
+    dragState.text     = nil
+    dragState.fromIcon = nil
+    followerTex:SetTexture(KEY_TO_TEX[key] or QUILL)
+    follower:Show()
+end
+
+local function placeIconAt(kind, key, relX, relY, options)
+    local plan = currentPlan()
+    if not plan then return end
+    local entry = {
+        kind    = kind,
+        key     = key,
+        x       = relX or 0.5,
+        y       = relY or 0.5,
+        color   = (options and options.color) or "ffffff",
+        text    = options and options.text or nil,
+        variant = options and options.variant or nil,
+        locked  = false,
+    }
+    if options and options.spellID then
+        entry.spellID = options.spellID
+        entry.iconTex = options.iconTex
+    end
+    table.insert(plan.icons, entry)
+    currentSelection = #plan.icons
+    refresh()
+end
+
+local function buildPaletteButton(parent, kind, entry, x, y, sz)
+    sz = sz or PALETTE_ICON
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetSize(sz, sz)
+    btn:SetPoint("TOPLEFT", parent, "TOPLEFT", x, -y)
+    local tex = btn:CreateTexture(nil, "ARTWORK")
+    tex:SetAllPoints()
+    tex:SetTexture(entry.tex)
+    tex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    btn:SetNormalTexture(tex)
+    local hl = btn:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetAllPoints(); hl:SetTexture("Interface\\Buttons\\ButtonHilight-Square"); hl:SetBlendMode("ADD")
+
+    btn:EnableMouse(true)
+    btn:RegisterForDrag("LeftButton")
+    btn:RegisterForClicks("LeftButtonUp")
+
+    btn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(entry.label or entry.key)
+        GameTooltip:AddLine("Drag onto the canvas, or click to place.", 0.6, 0.6, 0.6, true)
+        GameTooltip:Show()
+    end)
+    btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    btn:SetScript("OnDragStart", function() startDragFromPalette(kind, entry.key) end)
+    btn:SetScript("OnDragStop", function()
+        if not dragState.active then return end
+        local cx, cy = GetCursorPosition()
+        local scale = canvasFrame:GetEffectiveScale()
+        cx, cy = cx / scale, cy / scale
+        local l, r = canvasFrame:GetLeft(), canvasFrame:GetRight()
+        local t, b = canvasFrame:GetTop(), canvasFrame:GetBottom()
+        if l and cx >= l and cx <= r and cy >= b and cy <= t then
+            placeIconAt(dragState.kind, dragState.key,
+                (cx - l) / (r - l), 1 - (cy - b) / (t - b),
+                { color = dragState.color, variant = dragState.variant })
+        end
+        dragState.active = false
+        follower:Hide()
+    end)
+    btn:SetScript("OnClick", function() placeIconAt(kind, entry.key, 0.5, 0.5) end)
+end
+
+
+-- ---------- Pen-mode input on the canvas -----------------------
+local currentStroke
+local function canvasMouseDown(self, button)
+    if button ~= "LeftButton" then return end
+    if penMode.enabled then
+        local plan = currentPlan()
+        plan.drawings = plan.drawings or {}
+        currentStroke = {
+            color  = penMode.color,
+            size   = penMode.size,
+            fade   = penMode.fadeOut,
+            points = {},
+        }
+        table.insert(plan.drawings, currentStroke)
+    else
+        deselect()
+    end
+end
+
+local function canvasUpdate(self)
+    if not currentStroke then return end
+    if not (IsMouseButtonDown and IsMouseButtonDown("LeftButton")) then
+        currentStroke = nil
+        return
+    end
+    local cx, cy = GetCursorPosition()
+    local scale = canvasFrame:GetEffectiveScale()
+    cx, cy = cx / scale, cy / scale
+    local l, r = canvasFrame:GetLeft(), canvasFrame:GetRight()
+    local t, b = canvasFrame:GetTop(), canvasFrame:GetBottom()
+    if not l then return end
+    if cx < l or cx > r or cy < b or cy > t then return end
+    local rx = (cx - l) / (r - l)
+    local ry = 1 - (cy - b) / (t - b)
+    local pts = currentStroke.points
+    local last = pts[#pts]
+    if not last or math.abs(last.x - rx) > 0.001 or math.abs(last.y - ry) > 0.001 then
+        table.insert(pts, { x = rx, y = ry })
+        refreshDrawings()
+    end
+end
+
+local function canvasMouseUp(self, button)
+    if button == "LeftButton" then currentStroke = nil end
+end
+
+
+selectIcon = function(idx)
+    currentSelection = idx
+    refreshIcons()
+    refreshPropsPanel()
+end
+
+deselect = function()
+    if currentSelection then
+        currentSelection = nil
+        refreshIcons()
+        refreshPropsPanel()
+    end
+end
+
+local clipboard = nil
+
+local contextMenuFrame
+openContextMenu = function(anchorBtn, iconIdx)
+    if not contextMenuFrame then
+        contextMenuFrame = CreateFrame("Frame", "L3FRPContextMenu", UIParent)
+        contextMenuFrame:SetFrameStrata("DIALOG")
+        contextMenuFrame:SetSize(140, 6 + 22 * 4)
+        local bg = contextMenuFrame:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints(); bg:SetColorTexture(0.05, 0.05, 0.05, 0.95)
+        contextMenuFrame:Hide()
+        contextMenuFrame.buttons = {}
+    end
+    local f = contextMenuFrame
+    f:ClearAllPoints()
+    f:SetPoint("TOPLEFT", anchorBtn, "BOTTOMRIGHT", 0, 0)
+    f:Show()
+
+    local plan = currentPlan()
+    local icon = plan and plan.icons[iconIdx]
+
+    local items = {
+        { label = "Copy",   action = function() if icon then clipboard = CopyTable(icon) end; f:Hide() end },
+        { label = "Paste",  action = function()
+            if clipboard then
+                local c = CopyTable(clipboard)
+                c.x = (icon and icon.x or 0.5) + 0.03
+                c.y = (icon and icon.y or 0.5) + 0.03
+                table.insert(plan.icons, c)
+                currentSelection = #plan.icons
+                refresh()
+            end
+            f:Hide()
+        end },
+        { label = "Delete", action = function()
+            if icon then
+                table.remove(plan.icons, iconIdx)
+                currentSelection = nil
+                refresh()
+            end
+            f:Hide()
+        end },
+        { label = "Lock",   action = function()
+            if icon then icon.locked = not icon.locked end
+            refreshIcons()
+            f:Hide()
+        end },
+    }
+    for _, btn in ipairs(f.buttons) do btn:Hide() end
+    for i, item in ipairs(items) do
+        local b = f.buttons[i] or CreateFrame("Button", nil, f)
+        f.buttons[i] = b
+        b:SetSize(130, 20)
+        b:ClearAllPoints()
+        b:SetPoint("TOPLEFT", f, "TOPLEFT", 5, -3 - (i - 1) * 22)
+        b:Show()
+        if not b.text then
+            b.text = b:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            b.text:SetPoint("LEFT", b, "LEFT", 6, 0)
+        end
+        local label = item.label
+        if label == "Lock" and icon and icon.locked then label = "Unlock" end
+        b.text:SetText(label)
+        b:SetScript("OnClick", item.action)
+        local bg = b.bg or b:CreateTexture(nil, "BACKGROUND")
+        b.bg = bg
+        bg:SetAllPoints(); bg:SetColorTexture(0, 0, 0, 0)
+        b:SetScript("OnEnter", function() bg:SetColorTexture(1, 1, 1, 0.12) end)
+        b:SetScript("OnLeave", function() bg:SetColorTexture(0, 0, 0, 0) end)
+    end
+    f:SetScript("OnUpdate", function(self)
+        if not self:IsMouseOver() and IsMouseButtonDown
+           and IsMouseButtonDown("LeftButton") then
+            self:Hide(); self:SetScript("OnUpdate", nil)
+        end
+    end)
+end
+
+
+local function buildLeftPanel(parent)
+    leftPanel = CreateFrame("Frame", nil, parent)
+    leftPanel:SetSize(LEFT_W, 600)
+    leftPanel:SetPoint("TOPLEFT", parent, "TOPLEFT", 4, -TOP_H)
+    leftPanel:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", 4, 4)
+    local bg = leftPanel:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints(); bg:SetColorTexture(0, 0, 0, 0.25)
+
+    local arrowBtn = CreateFrame("Button", nil, leftPanel)
+    arrowBtn:SetSize(28, 28); arrowBtn:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 2, -4)
+    arrowBtn:SetNormalTexture("Interface\\Buttons\\UI-MicroButton-Friends-Up")
+    arrowBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+    arrowBtn:SetScript("OnClick", function() leftMode = "icons"; penMode.enabled = false; refreshPalette() end)
+    arrowBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetText("Icons mode"); GameTooltip:Show()
+    end)
+    arrowBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    local penBtn = CreateFrame("Button", nil, leftPanel)
+    penBtn:SetSize(28, 28); penBtn:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 32, -4)
+    penBtn:SetNormalTexture(QUILL)
+    penBtn:GetNormalTexture():SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    penBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+    penBtn:SetScript("OnClick", function() leftMode = "pen"; penMode.enabled = true; refreshPalette() end)
+    penBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetText("Pen mode"); GameTooltip:Show()
+    end)
+    penBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    iconControls = CreateFrame("Frame", nil, leftPanel)
+    iconControls:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 2, -36)
+    iconControls:SetPoint("BOTTOMRIGHT", leftPanel, "BOTTOMRIGHT", -2, 4)
+
+    penControls = CreateFrame("Frame", nil, leftPanel)
+    penControls:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 2, -36)
+    penControls:SetPoint("BOTTOMRIGHT", leftPanel, "BOTTOMRIGHT", -2, 4)
+    penControls:Hide()
+end
+
+refreshPalette = function()
+    if not iconControls or not penControls then return end
+    for _, c in ipairs({iconControls:GetChildren()}) do c:Hide(); c:SetParent(nil) end
+    for _, r in ipairs({iconControls:GetRegions()}) do r:Hide(); r:ClearAllPoints()
+        if r.SetText then r:SetText("") end
+    end
+    for _, c in ipairs({penControls:GetChildren()}) do c:Hide(); c:SetParent(nil) end
+    for _, r in ipairs({penControls:GetRegions()}) do r:Hide(); r:ClearAllPoints()
+        if r.SetText then r:SetText("") end
+    end
+
+    if leftMode == "icons" then
+        iconControls:Show(); penControls:Hide()
+        local gap = 4
+        local groupGap = 10
+        local y = 0
+        local col, maxCol = 0, 2
+        local function placeRow(entries, kind, sz)
+            sz = sz or PALETTE_ICON
+            col = 0
+            for _, e in ipairs(entries) do
+                local px = col * (sz + gap)
+                buildPaletteButton(iconControls, kind, e, px, y, sz)
+                col = col + 1
+                if col >= maxCol then col = 0; y = y + sz + gap end
+            end
+            if col ~= 0 then y = y + sz + gap end
+        end
+        placeRow(MARKS, "mark", 26)
+        y = y + groupGap - gap
+        placeRow(ROLES, "role", 26)
+        y = y + groupGap - gap
+        placeRow(CLASSES, "class", 26)
+    else
+        iconControls:Hide(); penControls:Show()
+        local cy = 0
+        local function label(text, x, yOff)
+            local fs = penControls:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            fs:SetPoint("TOPLEFT", penControls, "TOPLEFT", x, -yOff)
+            fs:SetText(text)
+            return fs
+        end
+
+        label("Preview", 0, cy); cy = cy + 14
+        local prevHost = CreateFrame("Frame", nil, penControls)
+        prevHost:SetSize(56, 28)
+        prevHost:SetPoint("TOPLEFT", penControls, "TOPLEFT", 0, -cy)
+        local prevBg = prevHost:CreateTexture(nil, "BACKGROUND")
+        prevBg:SetAllPoints(); prevBg:SetColorTexture(0, 0, 0, 0.35)
+        local prevDot = prevHost:CreateTexture(nil, "ARTWORK")
+        prevDot:SetTexture("Interface\\Buttons\\WHITE8X8")
+        prevDot:SetSize(penMode.size, penMode.size)
+        prevDot:SetPoint("CENTER", prevHost, "CENTER")
+        do
+            local r = tonumber(penMode.color:sub(1,2),16)/255
+            local g = tonumber(penMode.color:sub(3,4),16)/255
+            local b = tonumber(penMode.color:sub(5,6),16)/255
+            prevDot:SetVertexColor(r, g, b, 1)
+        end
+        cy = cy + 36
+
+        label("Size", 0, cy); cy = cy + 14
+        local sizeStr = CreateFrame("EditBox", nil, penControls, "InputBoxTemplate")
+        sizeStr:SetSize(50, 22)
+        sizeStr:SetPoint("TOPLEFT", penControls, "TOPLEFT", 6, -cy)
+        sizeStr:SetAutoFocus(false); sizeStr:SetNumeric(true); sizeStr:SetMaxLetters(2)
+        sizeStr:SetText(tostring(penMode.size))
+        sizeStr:SetScript("OnEnterPressed", function(self)
+            local n = tonumber(self:GetText()) or 4
+            penMode.size = math.max(1, math.min(20, n))
+            self:ClearFocus(); refreshPalette()
+        end)
+        cy = cy + 30
+
+        label("Color (hex)", 0, cy); cy = cy + 14
+        local colorStr = CreateFrame("EditBox", nil, penControls, "InputBoxTemplate")
+        colorStr:SetSize(56, 22)
+        colorStr:SetPoint("TOPLEFT", penControls, "TOPLEFT", 6, -cy)
+        colorStr:SetAutoFocus(false); colorStr:SetMaxLetters(6)
+        colorStr:SetText(penMode.color)
+        colorStr:SetScript("OnEnterPressed", function(self)
+            local c = self:GetText():lower():gsub("[^0-9a-f]", "")
+            if #c == 6 then penMode.color = c end
+            self:ClearFocus(); refreshPalette()
+        end)
+        cy = cy + 30
+
+        label("Fade (sec, 0=off)", 0, cy); cy = cy + 14
+        local fadeStr = CreateFrame("EditBox", nil, penControls, "InputBoxTemplate")
+        fadeStr:SetSize(50, 22)
+        fadeStr:SetPoint("TOPLEFT", penControls, "TOPLEFT", 6, -cy)
+        fadeStr:SetAutoFocus(false); fadeStr:SetNumeric(true); fadeStr:SetMaxLetters(3)
+        fadeStr:SetText(tostring(penMode.fadeOut))
+        fadeStr:SetScript("OnEnterPressed", function(self)
+            local n = tonumber(self:GetText()) or 0
+            penMode.fadeOut = math.max(0, math.min(120, n))
+            self:ClearFocus()
+        end)
+        cy = cy + 30
+
+        local clearBtn = CreateFrame("Button", nil, penControls, "UIPanelButtonTemplate")
+        clearBtn:SetSize(56, 22); clearBtn:SetText("Clear")
+        clearBtn:SetPoint("TOPLEFT", penControls, "TOPLEFT", 0, -cy)
+        clearBtn:SetScript("OnClick", function()
+            local plan = currentPlan()
+            if plan then plan.drawings = {}; refreshDrawings() end
+        end)
+    end
+end
+
+
+-- =============================================================
+-- 9. RIGHT PANEL (Properties + tabs: Encounter / Search / Notes)
+-- =============================================================
+local rightPanel, propsHost, encHost, searchHost, notesHost
+local rightTabButtons = {}
+
+local function buildRightPanel(parent)
+    rightPanel = CreateFrame("Frame", nil, parent)
+    rightPanel:SetSize(RIGHT_W, 600)
+    rightPanel:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -4, -TOP_H)
+    rightPanel:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -4, 4)
+    local bg = rightPanel:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints(); bg:SetColorTexture(0, 0, 0, 0.25)
+
+    local propsTitle = rightPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    propsTitle:SetPoint("TOPLEFT", rightPanel, "TOPLEFT", 8, -6)
+    propsTitle:SetText("Properties")
+
+    propsHost = CreateFrame("Frame", nil, rightPanel)
+    propsHost:SetPoint("TOPLEFT", rightPanel, "TOPLEFT", 4, -24)
+    propsHost:SetPoint("TOPRIGHT", rightPanel, "TOPRIGHT", -4, -24)
+    propsHost:SetHeight(180)
+    local propsBg = propsHost:CreateTexture(nil, "BACKGROUND")
+    propsBg:SetAllPoints(); propsBg:SetColorTexture(0, 0, 0, 0.15)
+
+    local tabsStrip = CreateFrame("Frame", nil, rightPanel)
+    tabsStrip:SetPoint("TOPLEFT", propsHost, "BOTTOMLEFT", 0, -6)
+    tabsStrip:SetPoint("TOPRIGHT", propsHost, "BOTTOMRIGHT", 0, -6)
+    tabsStrip:SetHeight(22)
+
+    local function makeTab(label, key, dx)
+        local b = CreateFrame("Button", nil, tabsStrip, "UIPanelButtonTemplate")
+        b:SetSize(70, 22); b:SetText(label)
+        b:SetPoint("TOPLEFT", tabsStrip, "TOPLEFT", dx, 0)
+        b:SetScript("OnClick", function()
+            rightTab = key
+            refreshEncounterPanel(); refreshSearchPanel(); refreshNotesPanel()
+        end)
+        rightTabButtons[key] = b
+        return b
+    end
+    makeTab("Encounter", "encounter", 4)
+    makeTab("Search", "search", 78)
+    makeTab("Notes", "notes", 152)
+
+    local hostParent = CreateFrame("Frame", nil, rightPanel)
+    hostParent:SetPoint("TOPLEFT", tabsStrip, "BOTTOMLEFT", 0, -4)
+    hostParent:SetPoint("BOTTOMRIGHT", rightPanel, "BOTTOMRIGHT", -4, 4)
+    local hbg = hostParent:CreateTexture(nil, "BACKGROUND")
+    hbg:SetAllPoints(); hbg:SetColorTexture(0, 0, 0, 0.15)
+
+    encHost    = CreateFrame("ScrollFrame", nil, hostParent, "UIPanelScrollFrameTemplate")
+    searchHost = CreateFrame("Frame", nil, hostParent)
+    notesHost  = CreateFrame("Frame", nil, hostParent)
+    for _, h in ipairs({encHost, searchHost, notesHost}) do
+        h:SetPoint("TOPLEFT",     hostParent, "TOPLEFT",      4, -4)
+        h:SetPoint("BOTTOMRIGHT", hostParent, "BOTTOMRIGHT", -20, 4)
+    end
+    local encChild = CreateFrame("Frame", nil, encHost)
+    encChild:SetSize(RIGHT_W - 30, 400)
+    encHost:SetScrollChild(encChild)
+    encHost._child = encChild
+end
+
+refreshPropsPanel = function()
+    if not propsHost then return end
+    for _, c in ipairs({propsHost:GetChildren()}) do c:Hide(); c:SetParent(nil) end
+    -- Don't wipe the background region.
+    local kept = {}
+    for _, r in ipairs({propsHost:GetRegions()}) do
+        if r:GetObjectType() == "Texture" and not kept[r] then
+            -- Keep all textures (the bg is one of them).
+            kept[r] = true
+        elseif r.SetText then
+            r:Hide(); r:ClearAllPoints(); r:SetText("")
+        else
+            r:Hide(); r:ClearAllPoints()
+        end
+    end
+
+    local plan = currentPlan()
+    local icon = plan and currentSelection and plan.icons[currentSelection] or nil
+
+    if not icon then
+        local fs = propsHost:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+        fs:SetPoint("CENTER", propsHost, "CENTER", 0, 0)
+        fs:SetText("Nothing selected")
+        return
+    end
+
+    local row = 6
+    local textLabel = propsHost:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    textLabel:SetPoint("TOPLEFT", propsHost, "TOPLEFT", 8, -row); row = row + 16
+    textLabel:SetText("Text")
+
+    local textEdit = CreateFrame("EditBox", nil, propsHost, "InputBoxTemplate")
+    textEdit:SetSize(RIGHT_W - 30, 22)
+    textEdit:SetPoint("TOPLEFT", propsHost, "TOPLEFT", 12, -row); row = row + 28
+    textEdit:SetAutoFocus(false); textEdit:SetMaxLetters(24)
+    textEdit:SetText(icon.text or "")
+    textEdit:SetScript("OnEnterPressed", function(self)
+        icon.text = self:GetText() or ""
+        self:ClearFocus(); refreshIcons()
+    end)
+    textEdit:SetScript("OnEditFocusLost", function(self)
+        icon.text = self:GetText() or ""; refreshIcons()
+    end)
+
+    local colorLabel = propsHost:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    colorLabel:SetPoint("TOPLEFT", propsHost, "TOPLEFT", 8, -row); row = row + 16
+    colorLabel:SetText("Color")
+
+    local colorSwatch = propsHost:CreateTexture(nil, "ARTWORK")
+    colorSwatch:SetSize(18, 18)
+    colorSwatch:SetPoint("TOPLEFT", propsHost, "TOPLEFT", 12, -row)
+    colorSwatch:SetTexture("Interface\\Buttons\\WHITE8X8")
+    do
+        local r = tonumber((icon.color or "ffffff"):sub(1,2), 16)/255
+        local g = tonumber((icon.color or "ffffff"):sub(3,4), 16)/255
+        local b = tonumber((icon.color or "ffffff"):sub(5,6), 16)/255
+        colorSwatch:SetVertexColor(r, g, b, 1)
+    end
+    local colorEdit = CreateFrame("EditBox", nil, propsHost, "InputBoxTemplate")
+    colorEdit:SetSize(72, 22)
+    colorEdit:SetPoint("LEFT", colorSwatch, "RIGHT", 8, 0)
+    colorEdit:SetAutoFocus(false); colorEdit:SetMaxLetters(6)
+    colorEdit:SetText(icon.color or "ffffff")
+    colorEdit:SetScript("OnEnterPressed", function(self)
+        local c = self:GetText():lower():gsub("[^0-9a-f]", "")
+        if #c == 6 then icon.color = c end
+        self:ClearFocus(); refresh()
+    end)
+    row = row + 28
+
+    local variants = (icon.kind == "class") and CLASS_VARIANTS[icon.key] or nil
+    if variants then
+        local varLabel = propsHost:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        varLabel:SetPoint("TOPLEFT", propsHost, "TOPLEFT", 8, -row); row = row + 16
+        varLabel:SetText("Variant")
+        for i, v in ipairs(variants) do
+            local b = CreateFrame("Button", nil, propsHost)
+            b:SetSize(22, 22)
+            b:SetPoint("TOPLEFT", propsHost, "TOPLEFT", 12 + (i - 1) * 26, -row)
+            local t = b:CreateTexture(nil, "ARTWORK")
+            t:SetAllPoints(); t:SetTexture(v.tex); t:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+            b:SetNormalTexture(t)
+            b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+            local active = (icon.variant == v.key)
+            if active then
+                local hl = b:CreateTexture(nil, "OVERLAY")
+                hl:SetAllPoints(); hl:SetColorTexture(0.3, 0.7, 1, 0.4)
+            end
+            b:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetText(v.label); GameTooltip:Show()
+            end)
+            b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            b:SetScript("OnClick", function() icon.variant = v.key; refresh() end)
+        end
+    end
+end
+
+refreshEncounterPanel = function()
+    if not encHost then return end
+    for k, btn in pairs(rightTabButtons) do
+        btn:SetButtonState(rightTab == k and "PUSHED" or "NORMAL")
+    end
+    encHost:SetShown(rightTab == "encounter")
+    searchHost:SetShown(rightTab == "search")
+    notesHost:SetShown(rightTab == "notes")
+
+    if rightTab ~= "encounter" then return end
+    local child = encHost._child
+    for _, c in ipairs({child:GetChildren()}) do c:Hide(); c:SetParent(nil) end
+    for _, r in ipairs({child:GetRegions()}) do r:Hide(); r:ClearAllPoints()
+        if r.SetText then r:SetText("") end
+    end
+
+    local rp = L3F.db.raidPlanner
+    local _, raidCat = findCatalogEncounter(rp.activeEncounter)
+    if not raidCat then return end
+
+    local raid = nil
+    for _, r in ipairs(L3F.raids or {}) do
+        if r.name == raidCat.raid then raid = r; break end
+    end
+    if not raid then
+        local fs = child:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+        fs:SetPoint("TOPLEFT", child, "TOPLEFT", 8, -8)
+        fs:SetText("No encounter data")
+        return
+    end
+
+    local y = 4
+    local rowH = 28
+    L3F.iterNPCs(raid, function(npc)
+        if npc.kind ~= "boss" then return end
+        local row = CreateFrame("Frame", nil, child)
+        row:SetSize(RIGHT_W - 36, rowH)
+        row:SetPoint("TOPLEFT", child, "TOPLEFT", 4, -y)
+        local rbg = row:CreateTexture(nil, "BACKGROUND")
+        rbg:SetAllPoints(); rbg:SetColorTexture(0, 0, 0, 0.12)
+
+        local icon = row:CreateTexture(nil, "ARTWORK")
+        icon:SetSize(24, 24); icon:SetPoint("LEFT", row, "LEFT", 4, 0)
+        icon:SetTexture("Interface\\Icons\\INV_Misc_Head_Dragon_01")
+        icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+
+        local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetPoint("LEFT", icon, "RIGHT", 6, 0)
+        lbl:SetPoint("RIGHT", row, "RIGHT", -2, 0)
+        lbl:SetJustifyH("LEFT"); lbl:SetWordWrap(false)
+        lbl:SetText(npc.name)
+
+        row:EnableMouse(true)
+        row:SetScript("OnEnter", function(self)
+            rbg:SetColorTexture(1, 1, 1, 0.07)
+            GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+            GameTooltip:SetText(npc.name)
+            if npc.notes then GameTooltip:AddLine(npc.notes, 0.7, 0.7, 0.7, true) end
+            GameTooltip:Show()
+        end)
+        row:SetScript("OnLeave", function()
+            rbg:SetColorTexture(0, 0, 0, 0.12); GameTooltip:Hide()
+        end)
+        y = y + rowH + 2
+    end)
+    child:SetHeight(math.max(y + 10, 200))
+end
+
+local searchEdit
+refreshSearchPanel = function()
+    if not searchHost then return end
+    if rightTab ~= "search" then return end
+    for _, c in ipairs({searchHost:GetChildren()}) do c:Hide(); c:SetParent(nil) end
+    for _, r in ipairs({searchHost:GetRegions()}) do r:Hide(); r:ClearAllPoints()
+        if r.SetText then r:SetText("") end
+    end
+
+    searchEdit = CreateFrame("EditBox", nil, searchHost, "InputBoxTemplate")
+    searchEdit:SetSize(RIGHT_W - 40, 22)
+    searchEdit:SetPoint("TOPLEFT", searchHost, "TOPLEFT", 8, -4)
+    searchEdit:SetAutoFocus(false); searchEdit:SetMaxLetters(40)
+    searchEdit:SetText("")
+
+    local list = CreateFrame("ScrollFrame", nil, searchHost, "UIPanelScrollFrameTemplate")
+    list:SetPoint("TOPLEFT", searchEdit, "BOTTOMLEFT", 0, -6)
+    list:SetPoint("BOTTOMRIGHT", searchHost, "BOTTOMRIGHT", -18, 4)
+    local listChild = CreateFrame("Frame", nil, list)
+    listChild:SetSize(RIGHT_W - 60, 600)
+    list:SetScrollChild(listChild)
+
+    local function runSearch(q)
+        for _, c in ipairs({listChild:GetChildren()}) do c:Hide(); c:SetParent(nil) end
+        if q == "" then return end
+        local needle = q:lower()
+        local y = 0
+        local hits = 0
+        if L3F.bonusItemLookup then
+            for spellID, sources in pairs(L3F.bonusItemLookup) do
+                local src = sources[1]
+                if src and src.kind == "spell" and src.name
+                   and src.name:lower():find(needle, 1, true) then
+                    local row = CreateFrame("Button", nil, listChild)
+                    row:SetSize(RIGHT_W - 60, 24)
+                    row:SetPoint("TOPLEFT", listChild, "TOPLEFT", 0, -y)
+                    local rbg = row:CreateTexture(nil, "BACKGROUND")
+                    rbg:SetAllPoints(); rbg:SetColorTexture(0, 0, 0, 0.12)
+                    local icon = row:CreateTexture(nil, "ARTWORK")
+                    icon:SetSize(20, 20); icon:SetPoint("LEFT", row, "LEFT", 2, 0)
+                    icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+                    local tex = GetSpellTexture and GetSpellTexture(spellID)
+                    if tex then icon:SetTexture(tex) end
+                    local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                    lbl:SetPoint("LEFT", icon, "RIGHT", 4, 0)
+                    lbl:SetPoint("RIGHT", row, "RIGHT", -2, 0)
+                    lbl:SetJustifyH("LEFT"); lbl:SetWordWrap(false)
+                    lbl:SetText(src.name)
+                    row:SetScript("OnEnter", function(self)
+                        rbg:SetColorTexture(1, 1, 1, 0.07)
+                        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+                        if GameTooltip.SetSpellByID then
+                            GameTooltip:SetSpellByID(spellID)
+                        end
+                        GameTooltip:Show()
+                    end)
+                    row:SetScript("OnLeave", function()
+                        rbg:SetColorTexture(0, 0, 0, 0.12); GameTooltip:Hide()
+                    end)
+                    row:SetScript("OnClick", function()
+                        placeIconAt("spell", "spell:" .. spellID, 0.5, 0.5,
+                            { spellID = spellID,
+                              iconTex = GetSpellTexture and GetSpellTexture(spellID) or nil })
+                    end)
+                    y = y + 26
+                    hits = hits + 1
+                    if hits >= 30 then break end
+                end
+            end
+        end
+        if hits == 0 then
+            local fs = listChild:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+            fs:SetPoint("CENTER", listChild, "CENTER", 0, 0)
+            fs:SetText("No matches")
+        end
+        listChild:SetHeight(math.max(y, 100))
+    end
+
+    searchEdit:SetScript("OnTextChanged", function(self)
+        runSearch((self:GetText() or ""):gsub("^%s+",""):gsub("%s+$",""))
+    end)
+end
+
+refreshNotesPanel = function()
+    if not notesHost then return end
+    if rightTab ~= "notes" then return end
+    for _, c in ipairs({notesHost:GetChildren()}) do c:Hide(); c:SetParent(nil) end
+    for _, r in ipairs({notesHost:GetRegions()}) do r:Hide(); r:ClearAllPoints() end
+
+    local scroll = CreateFrame("ScrollFrame", nil, notesHost, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", notesHost, "TOPLEFT", 4, -4)
+    scroll:SetPoint("BOTTOMRIGHT", notesHost, "BOTTOMRIGHT", -20, 4)
+    local edit = CreateFrame("EditBox", nil, scroll)
+    edit:SetMultiLine(true); edit:SetAutoFocus(false)
+    edit:SetFontObject(ChatFontNormal); edit:SetMaxLetters(2000)
+    edit:SetWidth(RIGHT_W - 40); edit:SetHeight(300)
+    edit:SetText((currentPlan() and currentPlan().notes) or "")
+    edit:SetScript("OnEditFocusLost", function(self)
+        local p = currentPlan(); if p then p.notes = self:GetText() or "" end
+    end)
+    scroll:SetScrollChild(edit)
+end
+
+
+-- =============================================================
+-- 10. TOP STRIP
+-- =============================================================
+local topStripFrame
+local nameEdit, encDD, bgDD, planTabsHost, prevBtn, nextBtn, addBtn, deleteBtn
+local utilDD, shareBtn, saveBtn
+
+local function makeGroupedDropdown(parent, name, width, getValue, groupsFn, callback)
+    local dd = CreateFrame("Frame", name, parent, "UIDropDownMenuTemplate")
+    UIDropDownMenu_SetWidth(dd, width)
+    UIDropDownMenu_Initialize(dd, function(self, level)
+        for _, group in ipairs(groupsFn()) do
+            if group.header then
+                local info = UIDropDownMenu_CreateInfo()
+                info.text = group.header
+                info.isTitle = true; info.notCheckable = true
+                UIDropDownMenu_AddButton(info, level)
+            end
+            for _, ent in ipairs(group.entries) do
+                local info = UIDropDownMenu_CreateInfo()
+                info.text = ent.label
+                info.checked = (ent.value == getValue())
+                info.func = function() callback(ent.value); CloseDropDownMenus() end
+                UIDropDownMenu_AddButton(info, level)
+            end
+        end
+    end)
+    UIDropDownMenu_SetText(dd, "")
+    return dd
+end
+
+local function buildTopStrip(parent)
+    topStripFrame = CreateFrame("Frame", nil, parent)
+    topStripFrame:SetPoint("TOPLEFT", parent, "TOPLEFT", 4, -4)
+    topStripFrame:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -4, -4)
+    topStripFrame:SetHeight(TOP_H - 6)
+
+    local thumb = topStripFrame:CreateTexture(nil, "ARTWORK")
+    thumb:SetSize(36, 36); thumb:SetPoint("TOPLEFT", topStripFrame, "TOPLEFT", 4, -2)
+    thumb:SetTexture("Interface\\Icons\\INV_Misc_Head_Dragon_01")
+    thumb:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    topStripFrame.thumb = thumb
+
+    nameEdit = CreateFrame("EditBox", nil, topStripFrame, "InputBoxTemplate")
+    nameEdit:SetSize(160, 22)
+    nameEdit:SetPoint("LEFT", thumb, "RIGHT", 14, 0)
+    nameEdit:SetAutoFocus(false); nameEdit:SetMaxLetters(32)
+    nameEdit:SetScript("OnEditFocusLost", function(self)
+        local p = currentPlan(); if p then p.name = self:GetText() or "" end
+    end)
+
+    encDD = makeGroupedDropdown(topStripFrame, "L3FRPEncounterDD", 180,
+        function() return L3F.db.raidPlanner and L3F.db.raidPlanner.activeEncounter end,
+        function()
+            local groups = {}
+            for _, raid in ipairs(L3F.raidPlannerCatalog or {}) do
+                local entries = {}
+                for _, enc in ipairs(raid.encounters) do
+                    table.insert(entries, { value = enc.name, label = enc.name })
+                end
+                table.insert(groups, { header = raid.raid, entries = entries })
+            end
+            return groups
+        end,
+        function(value)
+            L3F.db.raidPlanner.activeEncounter = value
+            L3F.db.raidPlanner.activePlanIdx = 1
+            ensurePlansFor(value)
+            refresh()
+        end)
+    encDD:SetPoint("LEFT", nameEdit, "RIGHT", 8, -2)
+
+    bgDD = makeGroupedDropdown(topStripFrame, "L3FRPBackgroundDD", 110,
+        function()
+            local p = currentPlan(); return p and p.background
+        end,
+        function()
+            local enc = findCatalogEncounter(L3F.db.raidPlanner.activeEncounter)
+            local entries = {}
+            for _, bg in ipairs(enc and enc.backgrounds or {}) do
+                table.insert(entries, { value = bg.slug, label = bg.label })
+            end
+            return { { entries = entries } }
+        end,
+        function(value)
+            local p = currentPlan(); if p then p.background = value; refresh() end
+        end)
+    bgDD:SetPoint("LEFT", encDD, "RIGHT", 2, 0)
+
+    utilDD = CreateFrame("Frame", "L3FRPUtilDD", topStripFrame, "UIDropDownMenuTemplate")
+    UIDropDownMenu_Initialize(utilDD, function(self, level)
+        local opts = {
+            { text = "Clear plan", func = function()
+                local p = currentPlan(); if p then p.icons = {}; p.drawings = {}; refresh() end
+            end },
+            { text = "Clone plan", func = function()
+                local plans = ensurePlansFor(L3F.db.raidPlanner.activeEncounter)
+                local cur = plans[L3F.db.raidPlanner.activePlanIdx]
+                if cur then
+                    local copy = CopyTable(cur)
+                    copy.name = (cur.name or "Plan") .. " copy"
+                    table.insert(plans, copy)
+                    L3F.db.raidPlanner.activePlanIdx = #plans
+                    refresh()
+                end
+            end },
+        }
+        for _, o in ipairs(opts) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = o.text; info.func = o.func; info.notCheckable = true
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end)
+    UIDropDownMenu_SetText(utilDD, "...")
+    UIDropDownMenu_SetWidth(utilDD, 50)
+    utilDD:SetPoint("LEFT", bgDD, "RIGHT", 2, 0)
+
+    shareBtn = CreateFrame("Button", nil, topStripFrame, "UIPanelButtonTemplate")
+    shareBtn:SetSize(60, 22); shareBtn:SetText("Share")
+    shareBtn:SetPoint("LEFT", utilDD, "RIGHT", 8, 2)
+    shareBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:SetText("Export current plan as a share string")
+        GameTooltip:AddLine("Paste-able into chat / Discord. The receiving",
+            0.7, 0.7, 0.7, true)
+        GameTooltip:AddLine("guildie pastes back into the Import dialog.",
+            0.7, 0.7, 0.7, true)
+        GameTooltip:Show()
+    end)
+    shareBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    saveBtn = CreateFrame("Button", nil, topStripFrame, "UIPanelButtonTemplate")
+    saveBtn:SetSize(110, 22); saveBtn:SetText("Save changes")
+    saveBtn:SetPoint("LEFT", shareBtn, "RIGHT", 4, 0)
+    saveBtn:SetScript("OnClick", function()
+        print("|cffffd100L3FTools:|r plan saved (auto-saves apply continuously)")
+    end)
+
+    planTabsHost = CreateFrame("Frame", nil, topStripFrame)
+    planTabsHost:SetPoint("TOPLEFT", thumb, "BOTTOMLEFT", 0, -6)
+    planTabsHost:SetSize(400, 24)
+
+    addBtn = CreateFrame("Button", nil, topStripFrame, "UIPanelButtonTemplate")
+    addBtn:SetSize(28, 24); addBtn:SetText("+")
+    addBtn:SetScript("OnClick", function()
+        local plans = ensurePlansFor(L3F.db.raidPlanner.activeEncounter)
+        table.insert(plans, newEmptyPlan(L3F.db.raidPlanner.activeEncounter))
+        L3F.db.raidPlanner.activePlanIdx = #plans
+        refresh()
+    end)
+
+    prevBtn = CreateFrame("Button", nil, topStripFrame)
+    prevBtn:SetSize(20, 20)
+    prevBtn:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Up")
+    prevBtn:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Down")
+    prevBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
+    prevBtn:SetScript("OnClick", function()
+        local rp = L3F.db.raidPlanner
+        rp.activePlanIdx = math.max(1, (rp.activePlanIdx or 1) - 1)
+        refresh()
+    end)
+    nextBtn = CreateFrame("Button", nil, topStripFrame)
+    nextBtn:SetSize(20, 20)
+    nextBtn:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Up")
+    nextBtn:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Down")
+    nextBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
+    nextBtn:SetScript("OnClick", function()
+        local rp = L3F.db.raidPlanner
+        local plans = ensurePlansFor(rp.activeEncounter)
+        rp.activePlanIdx = math.min(#plans, (rp.activePlanIdx or 1) + 1)
+        refresh()
+    end)
+
+    deleteBtn = CreateFrame("Button", nil, topStripFrame)
+    deleteBtn:SetSize(20, 20)
+    deleteBtn:SetNormalTexture("Interface\\Buttons\\UI-MinusButton-Up")
+    deleteBtn:SetPushedTexture("Interface\\Buttons\\UI-MinusButton-Down")
+    deleteBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
+    deleteBtn:SetScript("OnClick", function()
+        local rp = L3F.db.raidPlanner
+        local plans = ensurePlansFor(rp.activeEncounter)
+        if #plans > 1 then
+            table.remove(plans, rp.activePlanIdx or 1)
+            rp.activePlanIdx = math.max(1, math.min(#plans, rp.activePlanIdx))
+            refresh()
+        end
+    end)
+end
+
+refreshTopStrip = function()
+    if not topStripFrame then return end
+    local rp = L3F.db.raidPlanner
+    UIDropDownMenu_SetText(encDD, rp.activeEncounter or "(no encounter)")
+    local plan = currentPlan()
+    UIDropDownMenu_SetText(bgDD, plan and plan.background or "(no background)")
+    nameEdit:SetText(plan and plan.name or "")
+
+    for _, c in ipairs({planTabsHost:GetChildren()}) do c:Hide(); c:SetParent(nil) end
+    local plans = ensurePlansFor(rp.activeEncounter)
+    local cx = 0
+    for i = 1, #plans do
+        local b = CreateFrame("Button", nil, planTabsHost, "UIPanelButtonTemplate")
+        b:SetSize(28, 22); b:SetText(tostring(i))
+        b:SetPoint("LEFT", planTabsHost, "LEFT", cx, 0)
+        if i == rp.activePlanIdx then b:SetButtonState("PUSHED", true) end
+        b:SetScript("OnClick", function()
+            rp.activePlanIdx = i; refresh()
+        end)
+        cx = cx + 30
+    end
+    addBtn:ClearAllPoints()
+    addBtn:SetPoint("LEFT", planTabsHost, "LEFT", cx + 4, 0)
+
+    prevBtn:ClearAllPoints(); prevBtn:SetPoint("LEFT", addBtn, "RIGHT", 30, 0)
+    nextBtn:ClearAllPoints(); nextBtn:SetPoint("LEFT", prevBtn, "RIGHT", 4, 0)
+    deleteBtn:ClearAllPoints(); deleteBtn:SetPoint("LEFT", nextBtn, "RIGHT", 12, 0)
+end
+
+
+-- =============================================================
+-- 11. SHARE / EXPORT (L3F2 string)
+-- =============================================================
+local LibDeflate = LibStub and LibStub("LibDeflate", true)
+
+local function serializePlan(plan, encounterName)
+    local function encIcon(ic)
+        local parts = {
+            ic.kind or "",
+            ic.key or "",
+            string.format("%.4f", ic.x or 0.5),
+            string.format("%.4f", ic.y or 0.5),
+            ic.color or "ffffff",
+            ic.variant or "",
+            ic.locked and "1" or "0",
+            (ic.text or ""):gsub(";", " "):gsub("|", "/"),
+        }
+        return table.concat(parts, ":")
+    end
+    local iconsCSV = {}
+    for _, ic in ipairs(plan.icons or {}) do
+        table.insert(iconsCSV, encIcon(ic))
+    end
+    local function encStroke(s)
+        local pts = {}
+        for _, p in ipairs(s.points or {}) do
+            table.insert(pts, string.format("%.3f,%.3f", p.x, p.y))
+        end
+        return table.concat({
+            s.color or "ffffff",
+            tostring(s.size or 4),
+            tostring(s.fade or 0),
+            table.concat(pts, "/"),
+        }, ":")
+    end
+    local drawCSV = {}
+    for _, s in ipairs(plan.drawings or {}) do
+        table.insert(drawCSV, encStroke(s))
+    end
+    local inner = "RPLAN1|"
+        .. (encounterName or ""):gsub("|", "/") .. "|"
+        .. ((plan.name or ""):gsub("|", "/")) .. "|"
+        .. (plan.background or "") .. "|"
+        .. table.concat(iconsCSV, ";") .. "|"
+        .. table.concat(drawCSV, ";") .. "|"
+        .. ((plan.notes or ""):gsub("|", "/"))
+    if LibDeflate then
+        local compressed = LibDeflate:CompressDeflate(inner)
+        return "L3FRP:" .. LibDeflate:EncodeForPrint(compressed)
+    end
+    return "L3FRP1:" .. inner
+end
+
+local function openShareDialog()
+    local plan = currentPlan()
+    if not plan then return end
+    local str = serializePlan(plan, L3F.db.raidPlanner.activeEncounter)
+    if L3F.ShowStringDialog then
+        L3F.ShowStringDialog({
+            title = "Raid plan export - Ctrl+A then Ctrl+C to copy:",
+            text = str,
+            acceptText = "Close",
+            showCancel = false,
+            selectAll = true,
+        })
+    else
+        print("|cffffd100L3FTools:|r " .. str)
+    end
+end
+
+
+-- =============================================================
+-- 12. MAIN BUILDER + REFRESH
+-- =============================================================
+refreshIcons = function()
+    if not placedHost then return end
+    for _, c in ipairs({placedHost:GetChildren()}) do c:Hide(); c:SetParent(nil) end
+    for _, r in ipairs({placedHost:GetRegions()}) do r:Hide(); r:ClearAllPoints() end
+    local plan = currentPlan()
+    if not plan then return end
+    for i, ic in ipairs(plan.icons or {}) do
+        if ic.spellID and not ic.iconTex then
+            ic.iconTex = GetSpellTexture and GetSpellTexture(ic.spellID) or nil
+        end
+        buildPlacedIcon(plan, ic, i)
+    end
+end
+
+refresh = function()
+    refreshTopStrip()
+    refreshPalette()
+    refreshIcons()
+    refreshDrawings()
+    refreshPropsPanel()
+    refreshEncounterPanel()
+    refreshSearchPanel()
+    refreshNotesPanel()
+
+    local plan = currentPlan()
+    if canvasBg then
+        if plan and plan.background then
+            canvasBg:SetTexture(bgTexture(plan.background))
+            canvasBg:SetVertexColor(1, 1, 1, 1)
+        else
+            canvasBg:SetTexture(nil)
+            canvasBg:SetColorTexture(0.05, 0.05, 0.05, 1)
+        end
+    end
+end
+
+
+local function buildRaidPlanner(parent)
+    buildPaletteIndex()
+    ensureState()
+
+    buildTopStrip(parent)
+    shareBtn:SetScript("OnClick", openShareDialog)
+
+    buildLeftPanel(parent)
+    buildRightPanel(parent)
+
+    canvasFrame = CreateFrame("Frame", nil, parent)
+    canvasFrame:SetPoint("TOPLEFT", parent, "TOPLEFT", LEFT_W + 12, -TOP_H)
+    canvasFrame:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -RIGHT_W - 12, 4)
+    canvasFrame:EnableMouse(true)
+    canvasFrame:RegisterForDrag("LeftButton")
+    canvasBg = canvasFrame:CreateTexture(nil, "BACKGROUND")
+    canvasBg:SetAllPoints()
+    canvasBg:SetColorTexture(0.05, 0.05, 0.05, 1)
+
+    drawingHost = CreateFrame("Frame", nil, canvasFrame)
+    drawingHost:SetAllPoints(); drawingHost:EnableMouse(false)
+    placedHost = CreateFrame("Frame", nil, canvasFrame)
+    placedHost:SetAllPoints(); placedHost:EnableMouse(false)
+
+    canvasFrame:SetScript("OnMouseDown", canvasMouseDown)
+    canvasFrame:SetScript("OnMouseUp", canvasMouseUp)
+    canvasFrame:SetScript("OnUpdate", canvasUpdate)
+    canvasFrame:HookScript("OnSizeChanged", function()
+        refreshIcons(); refreshDrawings()
+    end)
+
+    refresh()
+end
+
+L3F.RegisterTab("guild.raidplanner", "Raid Planner", nil, buildRaidPlanner, {
+    parent = "guild",
+    preferredWidth = 1200, preferredHeight = 760,
+})
