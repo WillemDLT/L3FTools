@@ -217,6 +217,14 @@ local function scheduleRefresh()
     end
 end
 
+-- Module-level frame for the live picker poller. ONE per addon;
+-- re-wired each openColorPicker call. Lives outside the function
+-- because Lua 5.1 functions can't carry indexable fields (`f.x = y`
+-- throws "attempt to index a function value") -- the 0.23.1 attempt
+-- stored the poller on openColorPicker itself and silently errored
+-- on every invocation, which is why pen color still drew white.
+local colorPickerPoller
+
 -- Opens the WoW client's built-in color picker via the canonical
 -- OpenColorPicker(info) Blizzard helper. `initialHex` is six
 -- lowercase hex chars (no '#'); `onAccept(hex)` is called as the
@@ -236,17 +244,37 @@ local function openColorPicker(initialHex, onAccept)
             math.floor((nb or 1) * 255 + 0.5))
     end
 
+    -- Accept the color from EITHER the callback's positional args
+    -- (some TBC 2.5.x builds pass r,g,b directly to swatchFunc) OR
+    -- from ColorPickerFrame:GetColorRGB(). On builds where neither
+    -- is reliable in the swatchFunc context (the original bug), the
+    -- OnUpdate poller below catches the change.
+    local function applyFromCallback(arg1, arg2, arg3)
+        local cr, cg, cb
+        if type(arg1) == "number" then
+            cr, cg, cb = arg1, arg2, arg3
+        elseif type(arg1) == "table" then
+            cr, cg, cb = arg1.r, arg1.g, arg1.b
+        end
+        if not (cr and cg and cb) then
+            cr, cg, cb = ColorPickerFrame:GetColorRGB()
+        end
+        if cr and cg and cb then
+            onAccept(rgbToHex(cr, cg, cb))
+        end
+    end
+
     -- Use OpenColorPicker when available (TBC 2.5.x has it); fall
     -- back to the field-set + :Show() pattern as a safety net.
     local info = {
         r = r, g = g, b = b,
         hasOpacity = false,
-        swatchFunc = function()
-            onAccept(rgbToHex(ColorPickerFrame:GetColorRGB()))
-        end,
+        swatchFunc = applyFromCallback,
         cancelFunc = function(prev)
-            if prev and prev.r then
+            if type(prev) == "table" and prev.r then
                 onAccept(rgbToHex(prev.r, prev.g, prev.b))
+            elseif type(prev) == "table" and prev[1] then
+                onAccept(rgbToHex(prev[1], prev[2], prev[3]))
             else
                 onAccept(initialHex)
             end
@@ -266,26 +294,21 @@ local function openColorPicker(initialHex, onAccept)
         ColorPickerFrame:Show()
     end
 
-    -- TBC 2.5.x Anniversary: ColorPickerFrame.func / swatchFunc fires
-    -- before the picker has committed the slider's new RGB internally,
-    -- so ColorPickerFrame:GetColorRGB() returns nil during the
-    -- callback. With our defensive `(nr or 1)` defaults in rgbToHex,
-    -- that nil silently produces "ffffff" -- pen strokes draw white
-    -- after picking any color (Morpheours / Codex 2026-05-23 bug).
-    -- Belt-and-braces fix: poll ColorPickerFrame:GetColorRGB() on an
-    -- OnUpdate while the picker is visible and re-invoke onAccept
-    -- when the polled color actually changes. The poller self-
-    -- detaches on close. The original swatchFunc/cancelFunc still
-    -- fire for the Cancel-restore path, which already passes prev
-    -- explicitly.
+    -- Live poller fallback. The TBC 2.5.x ColorPickerFrame slider
+    -- callback (swatchFunc / func) is unreliable on this build:
+    -- ColorPickerFrame:GetColorRGB() can return nil during the
+    -- callback, and with rgbToHex's defensive `(nr or 1)` defaults
+    -- that silently produces "ffffff" -- pen strokes draw white
+    -- after picking any color. Polling the picker's live RGB on
+    -- OnUpdate while it's visible bypasses the broken callback.
+    -- The poller self-detaches on close. The original
+    -- swatchFunc/cancelFunc remain wired for the Cancel-restore path.
     if ColorPickerFrame then
-        local poller = openColorPicker._poller
-        if not poller then
-            poller = CreateFrame("Frame")
-            openColorPicker._poller = poller
+        if not colorPickerPoller then
+            colorPickerPoller = CreateFrame("Frame")
         end
         local lastHex = initialHex
-        poller:SetScript("OnUpdate", function(self)
+        colorPickerPoller:SetScript("OnUpdate", function(self)
             if not ColorPickerFrame:IsShown() then
                 self:SetScript("OnUpdate", nil)
                 return
