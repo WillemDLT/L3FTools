@@ -192,6 +192,16 @@ end
 -- stack. C_Timer.After(0, ...) defers to the NEXT frame, so the
 -- current event callback finishes before refresh runs.
 local refresh  -- forward decl
+
+-- Co-op delta hook. No-op when the co-op module isn't loaded OR when
+-- there's no active session OR when we're mid-apply of a remote delta
+-- (BroadcastDelta itself guards against the last). Wired into every
+-- local mutation site below.
+local function notifyEdit(deltaType, fields, opts)
+    if L3F.RPCoOp and L3F.RPCoOp.BroadcastDelta then
+        L3F.RPCoOp.BroadcastDelta(deltaType, fields, opts)
+    end
+end
 local refreshScheduled = false
 local function scheduleRefresh()
     if refreshScheduled then return end
@@ -448,11 +458,19 @@ local function buildPlacedIcon(plan, iconData, idx)
         elseif newX and l and cx >= l and cx <= r and cy >= b and cy <= t then
             iconData.x = newX
             iconData.y = newY
+            -- Co-op: broadcast MOVE with iconIdx + final position.
+            notifyEdit("MOVE", {
+                tostring(idx),
+                string.format("%.4f", newX),
+                string.format("%.4f", newY),
+            })
         else
             -- Released outside canvas after a meaningful drag = yeet.
             for i, ic in ipairs(plan.icons) do
                 if ic == iconData then
-                    table.remove(plan.icons, i); break
+                    table.remove(plan.icons, i)
+                    notifyEdit("RM", { tostring(i) })
+                    break
                 end
             end
         end
@@ -586,6 +604,16 @@ local function placeIconAt(kind, key, relX, relY, options)
     end
     table.insert(plan.icons, entry)
     currentSelection = #plan.icons
+    -- Co-op: broadcast PLACE. Position-by-iconIdx isn't sent; each
+    -- member appends to their own icons array. Out-of-order PLACE from
+    -- two members causes the local indexes to diverge briefly until
+    -- the next host snapshot resyncs. Acceptable for v1.
+    notifyEdit("PLACE", {
+        entry.kind or "", entry.key or "",
+        string.format("%.4f", entry.x), string.format("%.4f", entry.y),
+        entry.color or "ffffff", entry.text or "",
+        entry.variant or "", entry.locked and "1" or "0",
+    })
     -- Deferred: we're often called from an event-handler closure
     -- whose own frame is about to be destroyed by refreshPalette.
     scheduleRefresh()
@@ -661,9 +689,24 @@ local function canvasMouseDown(self, button)
     end
 end
 
+local function broadcastStroke(stroke)
+    if not stroke or not stroke.points or #stroke.points < 2 then return end
+    local pts = {}
+    for _, p in ipairs(stroke.points) do
+        table.insert(pts, string.format("%.3f,%.3f", p.x, p.y))
+    end
+    notifyEdit("DRAW", {
+        stroke.color or "ffffff",
+        tostring(stroke.size or 4),
+        tostring(stroke.fade or 0),
+        table.concat(pts, "/"),
+    })
+end
+
 local function canvasUpdate(self)
     if not currentStroke then return end
     if not (IsMouseButtonDown and IsMouseButtonDown("LeftButton")) then
+        broadcastStroke(currentStroke)
         currentStroke = nil
         return
     end
@@ -692,7 +735,10 @@ local function canvasUpdate(self)
 end
 
 local function canvasMouseUp(self, button)
-    if button == "LeftButton" then currentStroke = nil end
+    if button == "LeftButton" then
+        broadcastStroke(currentStroke)
+        currentStroke = nil
+    end
 end
 
 
@@ -740,6 +786,12 @@ openContextMenu = function(anchorBtn, iconIdx)
                 c.y = (icon and icon.y or 0.5) + 0.03
                 table.insert(plan.icons, c)
                 currentSelection = #plan.icons
+                notifyEdit("PLACE", {
+                    c.kind or "", c.key or "",
+                    string.format("%.4f", c.x), string.format("%.4f", c.y),
+                    c.color or "ffffff", c.text or "",
+                    c.variant or "", c.locked and "1" or "0",
+                })
                 scheduleRefresh()
             end
             f:Hide()
@@ -747,13 +799,21 @@ openContextMenu = function(anchorBtn, iconIdx)
         { label = "Delete", action = function()
             if icon then
                 table.remove(plan.icons, iconIdx)
+                notifyEdit("RM", { tostring(iconIdx) })
                 currentSelection = nil
                 scheduleRefresh()
             end
             f:Hide()
         end },
         { label = "Lock",   action = function()
-            if icon then icon.locked = not icon.locked end
+            if icon then
+                icon.locked = not icon.locked
+                notifyEdit("PROPS", {
+                    tostring(iconIdx),
+                    icon.color or "ffffff", icon.text or "",
+                    icon.variant or "", icon.locked and "1" or "0",
+                })
+            end
             refreshIcons()
             f:Hide()
         end },
@@ -958,7 +1018,11 @@ refreshPalette = function()
         clearBtn:SetPoint("TOPLEFT", penControls, "TOPLEFT", 0, -cy)
         clearBtn:SetScript("OnClick", function()
             local plan = currentPlan()
-            if plan then plan.drawings = {}; refreshDrawings() end
+            if plan then
+                plan.drawings = {}
+                notifyEdit("PEN_CLEAR", {})
+                refreshDrawings()
+            end
         end)
     end
 end
@@ -1064,12 +1128,22 @@ refreshPropsPanel = function()
     textEdit:SetPoint("TOPLEFT", propsHost, "TOPLEFT", 12, -row); row = row + 28
     textEdit:SetAutoFocus(false); textEdit:SetMaxLetters(24)
     textEdit:SetText(icon.text or "")
+    local function broadcastProps()
+        notifyEdit("PROPS", {
+            tostring(currentSelection or 0),
+            icon.color or "ffffff", icon.text or "",
+            icon.variant or "", icon.locked and "1" or "0",
+        })
+    end
     textEdit:SetScript("OnEnterPressed", function(self)
         icon.text = self:GetText() or ""
+        broadcastProps()
         self:ClearFocus(); refreshIcons()
     end)
     textEdit:SetScript("OnEditFocusLost", function(self)
-        icon.text = self:GetText() or ""; refreshIcons()
+        icon.text = self:GetText() or ""
+        broadcastProps()
+        refreshIcons()
     end)
 
     local colorLabel = propsHost:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -1122,6 +1196,7 @@ refreshPropsPanel = function()
             local b = tonumber(newHex:sub(5, 6), 16) / 255
             colorSwatch:SetVertexColor(r, g, b, 1)
             hexLabel:SetText("#" .. newHex)
+            broadcastProps()
             refreshIcons()
         end)
     end)
@@ -1149,7 +1224,11 @@ refreshPropsPanel = function()
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetText(v.label); GameTooltip:Show()
             end)
             b:SetScript("OnLeave", function() GameTooltip:Hide() end)
-            b:SetScript("OnClick", function() icon.variant = v.key; scheduleRefresh() end)
+            b:SetScript("OnClick", function()
+                icon.variant = v.key
+                broadcastProps()
+                scheduleRefresh()
+            end)
         end
     end
 end
@@ -1377,7 +1456,11 @@ refreshNotesPanel = function()
     edit:SetWidth(RIGHT_W - 40); edit:SetHeight(300)
     edit:SetText((currentPlan() and currentPlan().notes) or "")
     edit:SetScript("OnEditFocusLost", function(self)
-        local p = currentPlan(); if p then p.notes = self:GetText() or "" end
+        local p = currentPlan()
+        if p then
+            p.notes = self:GetText() or ""
+            notifyEdit("NOTES", { p.notes })
+        end
     end)
     scroll:SetScrollChild(edit)
 end
@@ -1451,6 +1534,10 @@ local function buildTopStrip(parent)
             L3F.db.raidPlanner.activeEncounter = value
             L3F.db.raidPlanner.activePlanIdx = 1
             ensurePlansFor(value)
+            -- Co-op: host-only navigation broadcast. The receiver's
+            -- BroadcastDelta NAV handler ignores planIdx/background
+            -- changes from non-hosts.
+            notifyEdit("NAV", { value, "1", "" })
             scheduleRefresh()
         end)
     encDD:SetPoint("LEFT", nameEdit, "RIGHT", 8, -2)
@@ -1468,7 +1555,17 @@ local function buildTopStrip(parent)
             return { { entries = entries } }
         end,
         function(value)
-            local p = currentPlan(); if p then p.background = value; scheduleRefresh() end
+            local p = currentPlan()
+            if p then
+                p.background = value
+                local rp = L3F.db.raidPlanner
+                notifyEdit("NAV", {
+                    rp.activeEncounter or "",
+                    tostring(rp.activePlanIdx or 1),
+                    value or "",
+                })
+                scheduleRefresh()
+            end
         end)
     bgDD:SetPoint("LEFT", encDD, "RIGHT", 2, 0)
 
@@ -1476,7 +1573,12 @@ local function buildTopStrip(parent)
     UIDropDownMenu_Initialize(utilDD, function(self, level)
         local opts = {
             { text = "Clear plan", func = function()
-                local p = currentPlan(); if p then p.icons = {}; p.drawings = {}; scheduleRefresh() end
+                local p = currentPlan()
+                if p then
+                    p.icons = {}; p.drawings = {}
+                    notifyEdit("CLEAR", {})
+                    scheduleRefresh()
+                end
             end },
             { text = "Clone plan", func = function()
                 local plans = ensurePlansFor(L3F.db.raidPlanner.activeEncounter)
@@ -1521,6 +1623,27 @@ local function buildTopStrip(parent)
         print("|cffffd100L3FTools:|r plan saved (auto-saves apply continuously)")
     end)
 
+    -- Co-op toggle button. Opens the floating roster + actions panel.
+    local coopBtn = CreateFrame("Button", nil, topStripFrame, "UIPanelButtonTemplate")
+    coopBtn:SetSize(56, 22); coopBtn:SetText("Co-op")
+    coopBtn:SetPoint("LEFT", saveBtn, "RIGHT", 4, 0)
+    coopBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:SetText("Toggle the co-op session panel")
+        GameTooltip:AddLine("Host a live multi-player editing session, or",
+            0.7, 0.7, 0.7, true)
+        GameTooltip:AddLine("accept an invite to join one.",
+            0.7, 0.7, 0.7, true)
+        GameTooltip:Show()
+    end)
+    coopBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    coopBtn:SetScript("OnClick", function()
+        if L3F.RPCoOp and L3F.RPCoOp.ToggleRosterPanel then
+            L3F.RPCoOp.ToggleRosterPanel()
+        end
+    end)
+    topStripFrame.coopBtn = coopBtn
+
     planTabsHost = CreateFrame("Frame", nil, topStripFrame)
     planTabsHost:SetPoint("TOPLEFT", thumb, "BOTTOMLEFT", 0, -6)
     planTabsHost:SetSize(400, 24)
@@ -1531,6 +1654,7 @@ local function buildTopStrip(parent)
         local plans = ensurePlansFor(L3F.db.raidPlanner.activeEncounter)
         table.insert(plans, newEmptyPlan(L3F.db.raidPlanner.activeEncounter))
         L3F.db.raidPlanner.activePlanIdx = #plans
+        notifyEdit("NEWPL", { tostring(#plans) })
         scheduleRefresh()
     end)
 
@@ -1542,6 +1666,7 @@ local function buildTopStrip(parent)
     prevBtn:SetScript("OnClick", function()
         local rp = L3F.db.raidPlanner
         rp.activePlanIdx = math.max(1, (rp.activePlanIdx or 1) - 1)
+        notifyEdit("NAV", { rp.activeEncounter or "", tostring(rp.activePlanIdx), "" })
         scheduleRefresh()
     end)
     nextBtn = CreateFrame("Button", nil, topStripFrame)
@@ -1553,6 +1678,7 @@ local function buildTopStrip(parent)
         local rp = L3F.db.raidPlanner
         local plans = ensurePlansFor(rp.activeEncounter)
         rp.activePlanIdx = math.min(#plans, (rp.activePlanIdx or 1) + 1)
+        notifyEdit("NAV", { rp.activeEncounter or "", tostring(rp.activePlanIdx), "" })
         scheduleRefresh()
     end)
 
@@ -1565,8 +1691,10 @@ local function buildTopStrip(parent)
         local rp = L3F.db.raidPlanner
         local plans = ensurePlansFor(rp.activeEncounter)
         if #plans > 1 then
-            table.remove(plans, rp.activePlanIdx or 1)
+            local idx = rp.activePlanIdx or 1
+            table.remove(plans, idx)
             rp.activePlanIdx = math.max(1, math.min(#plans, rp.activePlanIdx))
+            notifyEdit("DELPL", { tostring(idx) })
             scheduleRefresh()
         end
     end)
@@ -1589,7 +1717,9 @@ refreshTopStrip = function()
         b:SetPoint("LEFT", planTabsHost, "LEFT", cx, 0)
         if i == rp.activePlanIdx then b:SetButtonState("PUSHED", true) end
         b:SetScript("OnClick", function()
-            rp.activePlanIdx = i; scheduleRefresh()
+            rp.activePlanIdx = i
+            notifyEdit("NAV", { rp.activeEncounter or "", tostring(i), "" })
+            scheduleRefresh()
         end)
         cx = cx + 30
     end
@@ -1674,6 +1804,286 @@ end
 
 
 -- =============================================================
+-- 11b. CO-OP INTEGRATION (exports for RaidPlannerCoOp.lua)
+-- =============================================================
+-- Decode an L3FRP / L3FRP1 share string back to a plan table.
+local function deserializePlan(str)
+    if not str or str == "" then return nil end
+    local body
+    if str:sub(1, 7) == "L3FRP1:" then
+        body = str:sub(8)
+    elseif str:sub(1, 6) == "L3FRP:" then
+        if not LibDeflate then return nil end
+        local raw = LibDeflate:DecodeForPrint(str:sub(7))
+        if not raw then return nil end
+        body = LibDeflate:DecompressDeflate(raw)
+    else
+        return nil
+    end
+    if not body or body:sub(1, 7) ~= "RPLAN1|" then return nil end
+    local _, encName, planName, bgSlug, iconsCSV, drawCSV, notes =
+        strsplit("|", body)
+    local plan = {
+        name       = planName or "Plan",
+        background = (bgSlug ~= "" and bgSlug) or nil,
+        icons      = {},
+        drawings   = {},
+        notes      = notes or "",
+    }
+    if iconsCSV and iconsCSV ~= "" then
+        for entry in string.gmatch(iconsCSV, "[^;]+") do
+            local kind, key, xs, ys, color, variant, locked, text =
+                strsplit(":", entry)
+            table.insert(plan.icons, {
+                kind    = kind or "",
+                key     = key or "",
+                x       = tonumber(xs) or 0.5,
+                y       = tonumber(ys) or 0.5,
+                color   = (color ~= "" and color) or "ffffff",
+                variant = (variant ~= "" and variant) or nil,
+                locked  = locked == "1",
+                text    = (text and text ~= "") and text or nil,
+            })
+        end
+    end
+    if drawCSV and drawCSV ~= "" then
+        for entry in string.gmatch(drawCSV, "[^;]+") do
+            local color, sizeStr, fadeStr, ptsCSV = strsplit(":", entry)
+            local pts = {}
+            if ptsCSV then
+                for pair in string.gmatch(ptsCSV, "[^/]+") do
+                    local x, y = strsplit(",", pair)
+                    table.insert(pts, {
+                        x = tonumber(x) or 0,
+                        y = tonumber(y) or 0,
+                    })
+                end
+            end
+            table.insert(plan.drawings, {
+                color  = color or "ffffff",
+                size   = tonumber(sizeStr) or 4,
+                fade   = tonumber(fadeStr) or 0,
+                points = pts,
+            })
+        end
+    end
+    return plan, encName
+end
+
+L3F._RPSerializePlan = serializePlan
+
+function L3F._RPApplySnapshot(encName, planIdx, payload)
+    local plan = deserializePlan(payload)
+    if not plan then return end
+    L3F.db.raidPlanner = L3F.db.raidPlanner or {}
+    L3F.db.raidPlanner.plansByEncounter =
+        L3F.db.raidPlanner.plansByEncounter or {}
+    L3F.db.raidPlanner.plansByEncounter[encName] =
+        L3F.db.raidPlanner.plansByEncounter[encName] or {}
+    L3F.db.raidPlanner.plansByEncounter[encName][planIdx or 1] = plan
+    L3F.db.raidPlanner.activeEncounter = encName
+    L3F.db.raidPlanner.activePlanIdx = planIdx or 1
+    scheduleRefresh()
+end
+
+function L3F._RPApplyDelta(deltaType, encName, planIdx, ...)
+    local rp = L3F.db.raidPlanner
+    if not rp then return end
+    rp.plansByEncounter = rp.plansByEncounter or {}
+    rp.plansByEncounter[encName] = rp.plansByEncounter[encName] or {}
+    local plans = rp.plansByEncounter[encName]
+    if #plans == 0 then
+        table.insert(plans, newEmptyPlan(encName))
+    end
+    local plan = plans[planIdx] or plans[1]
+
+    if deltaType == "PLACE" then
+        local kind, key, xs, ys, color, text, variant, locked = ...
+        table.insert(plan.icons, {
+            kind    = kind or "",
+            key     = key or "",
+            x       = tonumber(xs) or 0.5,
+            y       = tonumber(ys) or 0.5,
+            color   = color or "ffffff",
+            text    = (text and text ~= "") and text or nil,
+            variant = (variant and variant ~= "") and variant or nil,
+            locked  = locked == "1",
+        })
+    elseif deltaType == "MOVE" then
+        local idxStr, xs, ys = ...
+        local idx = tonumber(idxStr)
+        local ic = idx and plan.icons[idx]
+        if ic then
+            ic.x = tonumber(xs) or ic.x
+            ic.y = tonumber(ys) or ic.y
+        end
+    elseif deltaType == "RM" then
+        local idxStr = ...
+        local idx = tonumber(idxStr)
+        if idx and plan.icons[idx] then
+            table.remove(plan.icons, idx)
+        end
+    elseif deltaType == "PROPS" then
+        local idxStr, color, text, variant, locked = ...
+        local idx = tonumber(idxStr)
+        local ic = idx and plan.icons[idx]
+        if ic then
+            ic.color   = color or ic.color
+            ic.text    = (text and text ~= "") and text or nil
+            ic.variant = (variant and variant ~= "") and variant or nil
+            ic.locked  = locked == "1"
+        end
+    elseif deltaType == "DRAW" then
+        local color, sizeStr, fadeStr, ptsCSV = ...
+        local pts = {}
+        if ptsCSV then
+            for pair in string.gmatch(ptsCSV, "[^/]+") do
+                local x, y = strsplit(",", pair)
+                table.insert(pts, {
+                    x = tonumber(x) or 0,
+                    y = tonumber(y) or 0,
+                })
+            end
+        end
+        plan.drawings = plan.drawings or {}
+        table.insert(plan.drawings, {
+            color  = color or "ffffff",
+            size   = tonumber(sizeStr) or 4,
+            fade   = tonumber(fadeStr) or 0,
+            points = pts,
+        })
+    elseif deltaType == "PEN_CLEAR" then
+        plan.drawings = {}
+    elseif deltaType == "CLEAR" then
+        plan.icons = {}; plan.drawings = {}
+    elseif deltaType == "NAV" then
+        local newEnc, newPlanIdxStr, bgSlug = ...
+        if newEnc and newEnc ~= "" then
+            rp.activeEncounter = newEnc
+            rp.plansByEncounter[newEnc] = rp.plansByEncounter[newEnc] or {}
+            if #rp.plansByEncounter[newEnc] == 0 then
+                table.insert(rp.plansByEncounter[newEnc], newEmptyPlan(newEnc))
+            end
+        end
+        if newPlanIdxStr then
+            rp.activePlanIdx = tonumber(newPlanIdxStr) or rp.activePlanIdx
+        end
+        if bgSlug and bgSlug ~= "" then
+            local p = rp.plansByEncounter[rp.activeEncounter]
+            local cur = p and p[rp.activePlanIdx]
+            if cur then cur.background = bgSlug end
+        end
+    elseif deltaType == "NEWPL" then
+        local newIdxStr = ...
+        table.insert(plans, newEmptyPlan(encName))
+        rp.activePlanIdx = tonumber(newIdxStr) or #plans
+    elseif deltaType == "DELPL" then
+        local idxStr = ...
+        local idx = tonumber(idxStr) or planIdx
+        if #plans > 1 and plans[idx] then
+            table.remove(plans, idx)
+            rp.activePlanIdx = math.max(1, math.min(#plans, rp.activePlanIdx or 1))
+        end
+    elseif deltaType == "NOTES" then
+        local text = ...
+        plan.notes = text or ""
+    end
+
+    scheduleRefresh()
+end
+
+
+-- =============================================================
+-- 11c. SHARE-BUTTON 2-CHOICE POPUP (Copy string / Share to raid)
+-- =============================================================
+local sharePopup
+local function openSharePopup()
+    if not sharePopup then
+        local f = CreateFrame("Frame", "L3FRPSharePopup", UIParent,
+            "BasicFrameTemplateWithInset")
+        f:SetSize(300, 150)
+        f:SetPoint("CENTER")
+        f:SetFrameStrata("FULLSCREEN_DIALOG")
+        f:SetToplevel(true); f:SetClampedToScreen(true)
+        f:EnableMouse(true); f:SetMovable(true)
+        f:RegisterForDrag("LeftButton")
+        f:SetScript("OnDragStart", f.StartMoving)
+        f:SetScript("OnDragStop", f.StopMovingOrSizing)
+        if f.TitleText then f.TitleText:SetText("Share plan") end
+        tinsert(UISpecialFrames, "L3FRPSharePopup")
+        local copyBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+        copyBtn:SetSize(260, 24); copyBtn:SetText("Copy as L3F2 string")
+        copyBtn:SetPoint("TOP", f, "TOP", 0, -34)
+        copyBtn:SetScript("OnClick", function()
+            f:Hide()
+            openShareDialog()
+        end)
+        local raidBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+        raidBtn:SetSize(260, 24); raidBtn:SetText("Share to raid")
+        raidBtn:SetPoint("TOP", copyBtn, "BOTTOM", 0, -6)
+        raidBtn:SetScript("OnClick", function()
+            f:Hide()
+            if L3F.RPCoOp and L3F.RPCoOp.ShareToRaid then
+                L3F.RPCoOp.ShareToRaid()
+            end
+        end)
+        f.raidBtn = raidBtn
+        sharePopup = f
+    end
+    -- Disable Share-to-raid when not in a party/raid.
+    if sharePopup.raidBtn then
+        if IsInRaid() or IsInGroup() then
+            sharePopup.raidBtn:Enable()
+        else
+            sharePopup.raidBtn:Disable()
+        end
+    end
+    sharePopup:Show()
+end
+
+
+-- =============================================================
+-- 11d. INCOMING SHARE POPUP (receiver of a "Share to raid")
+-- =============================================================
+local incomingSharePopup
+local function showIncomingShare(senderShort, encName, planIdx, payload)
+    if not incomingSharePopup then
+        local f = CreateFrame("Frame", "L3FRPIncomingShare", UIParent,
+            "BasicFrameTemplateWithInset")
+        f:SetSize(360, 130)
+        f:SetPoint("TOP", UIParent, "TOP", 0, -120)
+        f:SetFrameStrata("FULLSCREEN_DIALOG")
+        f:SetToplevel(true); f:SetClampedToScreen(true)
+        f:EnableMouse(true)
+        if f.TitleText then f.TitleText:SetText("Shared raid plan") end
+        f.msg = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        f.msg:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -32)
+        f.msg:SetPoint("TOPRIGHT", f, "TOPRIGHT", -14, -32)
+        f.msg:SetJustifyH("LEFT")
+        f.acc = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+        f.acc:SetSize(100, 22); f.acc:SetText("View")
+        f.acc:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -16, 12)
+        f.dec = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+        f.dec:SetSize(100, 22); f.dec:SetText("Discard")
+        f.dec:SetPoint("RIGHT", f.acc, "LEFT", -8, 0)
+        f.dec:SetScript("OnClick", function() f:Hide() end)
+        incomingSharePopup = f
+    end
+    incomingSharePopup.msg:SetText(string.format(
+        "|cffffd100%s|r shared a raid plan for |cffaaccff%s|r.\nView replaces your current plan for that encounter.",
+        senderShort or "?", encName or "?"))
+    incomingSharePopup.acc:SetScript("OnClick", function()
+        L3F._RPApplySnapshot(encName, planIdx, payload)
+        incomingSharePopup:Hide()
+        -- Open the Raid Planner tab so the user lands on the shared
+        -- plan immediately. The tab opener is exposed by Frame.lua.
+        if L3F.ShowTab then pcall(L3F.ShowTab, "guild.raidplanner") end
+    end)
+    incomingSharePopup:Show()
+end
+
+
+-- =============================================================
 -- 12. MAIN BUILDER + REFRESH
 -- =============================================================
 refreshIcons = function()
@@ -1718,10 +2128,24 @@ local function buildRaidPlanner(parent)
     ensureState()
 
     buildTopStrip(parent)
-    shareBtn:SetScript("OnClick", openShareDialog)
+    shareBtn:SetScript("OnClick", openSharePopup)
 
     buildLeftPanel(parent)
     buildRightPanel(parent)
+
+    -- Co-op: build the roster panel (hidden by default) parented to
+    -- the main planner area. The top-strip "Co-op" button toggles it.
+    if L3F.RPCoOp and L3F.RPCoOp.AttachRosterPanel then
+        local panel = L3F.RPCoOp.AttachRosterPanel(parent,
+            "TOPRIGHT", parent, "TOPRIGHT", -8, -TOP_H - 8)
+        if panel then panel:Hide() end
+    end
+    -- Co-op: route incoming SHARE-to-raid messages through our popup.
+    if L3F.RPCoOp then
+        L3F.RPCoOp.OnIncomingShare = function(sender, senderFull, enc, planIdx, payload)
+            showIncomingShare(sender, enc, planIdx, payload)
+        end
+    end
 
     canvasFrame = CreateFrame("Frame", nil, parent)
     canvasFrame:SetPoint("TOPLEFT", parent, "TOPLEFT", LEFT_W + 12, -TOP_H)
