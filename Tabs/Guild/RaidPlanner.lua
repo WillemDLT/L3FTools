@@ -265,6 +265,41 @@ local function openColorPicker(initialHex, onAccept)
         ColorPickerFrame:SetColorRGB(r, g, b)
         ColorPickerFrame:Show()
     end
+
+    -- TBC 2.5.x Anniversary: ColorPickerFrame.func / swatchFunc fires
+    -- before the picker has committed the slider's new RGB internally,
+    -- so ColorPickerFrame:GetColorRGB() returns nil during the
+    -- callback. With our defensive `(nr or 1)` defaults in rgbToHex,
+    -- that nil silently produces "ffffff" -- pen strokes draw white
+    -- after picking any color (Morpheours / Codex 2026-05-23 bug).
+    -- Belt-and-braces fix: poll ColorPickerFrame:GetColorRGB() on an
+    -- OnUpdate while the picker is visible and re-invoke onAccept
+    -- when the polled color actually changes. The poller self-
+    -- detaches on close. The original swatchFunc/cancelFunc still
+    -- fire for the Cancel-restore path, which already passes prev
+    -- explicitly.
+    if ColorPickerFrame then
+        local poller = openColorPicker._poller
+        if not poller then
+            poller = CreateFrame("Frame")
+            openColorPicker._poller = poller
+        end
+        local lastHex = initialHex
+        poller:SetScript("OnUpdate", function(self)
+            if not ColorPickerFrame:IsShown() then
+                self:SetScript("OnUpdate", nil)
+                return
+            end
+            local pr, pg, pb = ColorPickerFrame:GetColorRGB()
+            if pr and pg and pb then
+                local hex = rgbToHex(pr, pg, pb)
+                if hex ~= lastHex then
+                    lastHex = hex
+                    onAccept(hex)
+                end
+            end
+        end)
+    end
 end
 
 
