@@ -57,7 +57,6 @@ L3F:RegisterSections({
             { id = 22347, name = "Colossus Lurker" },
             { id = 21214, name = "Fathom-Lord Karathress" },
             { id = 21965, name = "Fathom-Guard Tidalvess" },
-            { id = 22091, name = "Spitfire Totem" },
             { id = 21964, name = "Fathom-Guard Caribdis" },
             { id = 21966, name = "Fathom-Guard Sharkkis" },
             { id = 22119, name = "Fathom Lurker" },

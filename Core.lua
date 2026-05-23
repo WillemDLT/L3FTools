@@ -134,6 +134,28 @@ function L3F.RegisterBonusCategory(catKey, displayName, entries)
     end
 end
 
+-- =============================================================
+-- BOSS TREE  (Atlas-only: per-raid hierarchical boss layout for the
+-- Bosses leaf in the Atlas tree). Default rendering is the flat
+-- kind="boss" list; calling RegisterBossTree(raid, tree) overlays an
+-- ordered parent/sub structure on top of it.
+--
+-- Tree entry shapes (all optional except where noted):
+--   { name="Attumen the Huntsman", npcID=16152,
+--     subs = { { npcID=16151 } } }        -- sub names auto-resolve via npcLookup
+--   { name="Servant Quarters", virtual=true,         -- virtual parent: no NPC,
+--     subs = { { npcID=16179 }, ... } }             -- just a container header
+--   { name="Kael's Legendaries", virtual=true,       -- item-bearing virtual parent:
+--     itemIDs = { 30312, 30311, ... } }             -- subs are item rows, not NPCs
+--
+-- The Atlas reads L3F.bossTrees[raidName] in its Bosses-leaf renderer.
+-- =============================================================
+L3F.bossTrees = {}
+function L3F:RegisterBossTree(raidName, tree)
+    L3F.bossTrees[raidName] = tree
+end
+
+
 local function buildLookup()
     L3F.npcLookup = {}
     L3F.itemLookup = {}
@@ -154,6 +176,40 @@ local function buildLookup()
                 table.insert(L3F.itemLookup[drop.id], {
                     npcID = npcID, npc = npc, chance = drop.chance,
                 })
+            end
+        end
+    end
+
+    -- Build the boss-tree index for fast parent/sub lookup. Each NPC
+    -- referenced anywhere in any L3F.bossTrees[raid] gets a record:
+    --   .isParent  = true if it's a top-level row in some tree
+    --   .isSub     = true if it's a sub of some parent
+    --   .parentEntry = the tree entry it belongs to (for aggregation)
+    --   .parentNPCID = npcID of the parent (for sub records)
+    --   .raidName  = which raid's tree it lives in
+    -- Used by Atlas to render hierarchical Boss leaves + decide
+    -- whether to hide the Drops sub-tab (subs hide it per Morpheours).
+    L3F.bossTreeIndex = {}
+    for raidName, tree in pairs(L3F.bossTrees) do
+        for _, parent in ipairs(tree) do
+            if parent.npcID then
+                L3F.bossTreeIndex[parent.npcID] = {
+                    isParent = true,
+                    parentEntry = parent,
+                    raidName = raidName,
+                }
+            end
+            if parent.subs then
+                for _, sub in ipairs(parent.subs) do
+                    if sub.npcID then
+                        L3F.bossTreeIndex[sub.npcID] = {
+                            isSub = true,
+                            parentEntry = parent,
+                            parentNPCID = parent.npcID,
+                            raidName = raidName,
+                        }
+                    end
+                end
             end
         end
     end

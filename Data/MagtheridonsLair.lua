@@ -30,3 +30,11 @@ L3F:RegisterRaid({
         },
     },
 })
+
+-- Atlas Bosses-leaf tree (Morpheours-spec).
+L3F:RegisterBossTree("Magtheridon's Lair", {
+    { name = "Magtheridon", npcID = 17257, subs = {
+        { npcID = 17256 },  -- Hellfire Channeler
+        { npcID = 17454 },  -- Burning Abyssal
+    } },
+})

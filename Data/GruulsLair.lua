@@ -50,3 +50,15 @@ L3F:RegisterRaid({
         },
     },
 })
+
+-- Atlas Bosses-leaf tree (Morpheours-spec).
+L3F:RegisterBossTree("Gruul's Lair", {
+    { name = "High King Maulgar", npcID = 18831, subs = {
+        { npcID = 18832 },  -- Krosh Firehand (Morpheours: "Kosh Firehand")
+        { npcID = 18835 },  -- Kiggler the Crazed
+        { npcID = 18836 },  -- Blindeye the Seer
+        { npcID = 18834 },  -- Olm the Summoner
+        { npcID = 18847 },  -- Wild Fel Stalker (Olm's pet)
+    } },
+    { name = "Gruul the Dragonkiller", npcID = 19044, subs = {} },
+})

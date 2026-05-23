@@ -38,9 +38,6 @@ L3F:RegisterRaid({
                 { id = 21965, name = "Fathom-Guard Tidalvess", kind = "boss", marks = {7},
                   spells = { 38229, 38234, 38236, 38306, 38304 },
                   notes = "Enhancement shaman add - Windfury procs and 6k Frost Shocks make his tank's damage extremely spiky. Top kill priority is his Spitfire Totem (25k HP, AoE fire damage) the moment it drops - everyone needs a /target Spitfire macro. Poison Cleansing and Earthbind totems can be ignored." },
-                { id = 22091, name = "Spitfire Totem",         kind = "boss", marks = TRASH,
-                  spells = { 38296 },
-                  notes = "Fire totem dropped by Fathom-Guard Tidalvess - about 25k HP, pulses AoE fire damage. Top kill priority the instant it lands; keep a /target Spitfire macro ready." },
                 { id = 21966, name = "Fathom-Guard Sharkkis",  kind = "boss", marks = {6},
                   spells = { 29576, 29436, 38373 },
                   notes = "Beast-Mastery hunter add who summons an uncontrollable pet (Fathom Lurker or Fathom Sporebat) that needs its own offtank. Leeching Throw is a Viper Sting clone that drains mana and ticks health - heal mana-hungry classes. Beware The Beast Within enrage on him and the pet." },
@@ -213,4 +210,31 @@ L3F:RegisterRaid({
             },
         },
     },
+})
+
+-- Atlas Bosses-leaf tree (Morpheours-spec; Spitfire Totem dropped).
+L3F:RegisterBossTree("Serpentshrine Cavern", {
+    { name = "Hydross the Unstable", npcID = 21216, subs = {
+        { npcID = 22036 },  -- Tainted Spawn of Hydross
+        { npcID = 22035 },  -- Pure Spawn of Hydross
+    } },
+    { name = "The Lurker Below", npcID = 21217, subs = {} },
+    { name = "Leotheras the Blind", npcID = 21215, subs = {
+        { npcID = 21875 },  -- Shadow of Leotheras
+        { npcID = 21857 },  -- Inner Demon
+    } },
+    { name = "Fathom-Lord Karathress", npcID = 21214, subs = {
+        { npcID = 21965 },  -- Fathom-Guard Tidalvess
+        { npcID = 21964 },  -- Fathom-Guard Caribdis
+        { npcID = 21966 },  -- Fathom-Guard Sharkkis
+        { npcID = 22119 },  -- Fathom Lurker
+        { npcID = 22120 },  -- Fathom Sporebat
+    } },
+    { name = "Morogrim Tidewalker", npcID = 21213, subs = {} },
+    { name = "Lady Vashj", npcID = 21212, subs = {
+        { npcID = 22056 },  -- Coilfang Strider (Morpheours: "Coilfand")
+        { npcID = 21958 },  -- Enchanted Elemental
+        { npcID = 22009 },  -- Tainted Elemental
+        { npcID = 22140 },  -- Toxic Sporebat
+    } },
 })

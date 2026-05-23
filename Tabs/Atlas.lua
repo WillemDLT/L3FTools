@@ -46,7 +46,7 @@ local CAT_CONSUMABLES = "Consumables"
 
 local treePane, listPane, detailPane
 local treeList, npcList, searchBox
-local currentNPC, currentConsumable, currentBonusItem
+local currentNPC, currentConsumable, currentBonusItem, currentVirtualBoss
 local subTabButtons = {}
 local consumableSubTabButtons = {}
 local subTabContent
@@ -594,6 +594,76 @@ local function buildListPane(parent)
         end)
         row:SetScript("OnLeave", function()
             if currentNPC and currentNPC.id == npc.id then rbg:SetColorTexture(0.30, 0.65, 1.0, 0.25)
+            else rbg:SetColorTexture(0, 0, 0, 0) end
+        end)
+        return y + rowH + 2
+    end
+
+    -- Boss-tree row. Used by raids that have a L3F.bossTrees[raid]
+    -- definition (Morpheours-spec hierarchical Boss leaf). Renders a
+    -- single row with optional expand-arrow + indent. Variants:
+    --   - real NPC (opts.npc): row uses NPC name + gold colour, click
+    --     selects + toggles expand if it has children.
+    --   - virtual parent (opts.virtualEntry): no NPC, just a header.
+    --     Click toggles expand; if the entry has itemIDs (Kael's
+    --     Legendaries), click also sets it as the virtual selection.
+    --   - sub-NPC (opts.npc with opts.indent): same as real NPC but
+    --     indented and uses muted text colour.
+    local function addBossTreeRow(opts, y)
+        local rowH = 20
+        local row = CreateFrame("Button", nil, npcList)
+        local indent = opts.indent or 0
+        row:SetSize(170 - indent, rowH)
+        row:SetPoint("TOPLEFT", npcList, "TOPLEFT", indent, -y)
+        local rbg = row:CreateTexture(nil, "BACKGROUND")
+        rbg:SetAllPoints()
+
+        local active = false
+        if opts.npc and currentNPC and currentNPC.id == opts.npc.id then
+            active = true
+        elseif opts.virtualEntry and currentVirtualBoss == opts.virtualEntry then
+            active = true
+        end
+        rbg:SetColorTexture(active and 0.30 or 0, active and 0.65 or 0,
+            active and 1 or 0, active and 0.25 or 0)
+
+        local textX = 4
+        if opts.hasArrow then
+            local arrow = row:CreateTexture(nil, "OVERLAY")
+            arrow:SetSize(10, 10)
+            arrow:SetPoint("LEFT", row, "LEFT", 2, 0)
+            arrow:SetTexture(opts.expanded
+                and "Interface\\Buttons\\UI-MinusButton-Up"
+                or  "Interface\\Buttons\\UI-PlusButton-Up")
+            textX = 14
+        end
+
+        local txt = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        txt:SetPoint("LEFT", row, "LEFT", textX, 0)
+        txt:SetPoint("RIGHT", row, "RIGHT", -2, 0)
+        txt:SetJustifyH("LEFT"); txt:SetWordWrap(false)
+        txt:SetText(opts.label)
+        -- Colour: real boss = gold, virtual = soft blue, sub = grey.
+        if opts.virtualEntry then
+            txt:SetTextColor(active and 1 or 0.6,
+                             active and 1 or 0.8,
+                             active and 1 or 1.0, 1)
+        elseif opts.isSub then
+            txt:SetTextColor(active and 1 or 0.75,
+                             active and 1 or 0.75,
+                             active and 1 or 0.75, 1)
+        else
+            txt:SetTextColor(active and 1 or 1,
+                             active and 1 or 0.82,
+                             active and 1 or 0, 1)
+        end
+
+        row:SetScript("OnClick", opts.onClick)
+        row:SetScript("OnEnter", function()
+            if not active then rbg:SetColorTexture(1, 1, 1, 0.07) end
+        end)
+        row:SetScript("OnLeave", function()
+            if active then rbg:SetColorTexture(0.30, 0.65, 1.0, 0.25)
             else rbg:SetColorTexture(0, 0, 0, 0) end
         end)
         return y + rowH + 2
@@ -1252,12 +1322,117 @@ local function buildListPane(parent)
             for _, npc in ipairs(out) do y = addNPC(npc, y, nil) end
         end
 
+        -- Render a raid that has a Morpheours-spec boss tree
+        -- (L3F.bossTrees[raid.name]). Top-level rows are real bosses
+        -- or virtual containers (Servant Quarters, Opera Event: ...,
+        -- Kael's Legendaries); their `subs` (or `itemIDs`) appear
+        -- indented when the parent is expanded.
+        local function renderBossTree(raid, tree)
+            for _, parent in ipairs(tree) do
+                local expandKey = "boss-tree:" .. raid.name .. ":" .. parent.name
+                local expanded = isExpanded(expandKey)
+                local hasChildren = (parent.subs and #parent.subs > 0)
+                                 or (parent.itemIDs and #parent.itemIDs > 0)
+
+                if parent.virtual then
+                    -- Virtual parent: header only. Click toggles
+                    -- expand; for itemIDs variants (Kael's
+                    -- Legendaries), also set virtual selection.
+                    y = addBossTreeRow({
+                        label    = parent.name,
+                        indent   = 0,
+                        hasArrow = hasChildren,
+                        expanded = expanded,
+                        virtualEntry = parent,
+                        onClick  = function()
+                            if hasChildren then
+                                setExpanded(expandKey, not expanded)
+                            end
+                            if parent.itemIDs then
+                                currentVirtualBoss = parent
+                                currentNPC        = nil
+                                currentConsumable = nil
+                                currentBonusItem  = nil
+                            end
+                            if L3F.RefreshNPCList   then L3F.RefreshNPCList()   end
+                            if L3F.RefreshDetailPane then L3F.RefreshDetailPane() end
+                        end,
+                    }, y)
+                elseif parent.npcID then
+                    local pNpc = L3F.npcLookup[parent.npcID]
+                    if pNpc then
+                        y = addBossTreeRow({
+                            npc      = pNpc,
+                            label    = parent.name or pNpc.name,
+                            indent   = 0,
+                            hasArrow = hasChildren,
+                            expanded = expanded,
+                            onClick  = function()
+                                if hasChildren then
+                                    setExpanded(expandKey, not expanded)
+                                end
+                                currentNPC        = pNpc
+                                currentConsumable = nil
+                                currentBonusItem  = nil
+                                currentVirtualBoss = nil
+                                L3F.db.atlas.lastSelectedNPC = pNpc.id
+                                if L3F.RefreshNPCList   then L3F.RefreshNPCList()   end
+                                if L3F.RefreshDetailPane then L3F.RefreshDetailPane() end
+                            end,
+                        }, y)
+                    end
+                end
+
+                if expanded then
+                    if parent.subs then
+                        for _, sub in ipairs(parent.subs) do
+                            if sub.npcID then
+                                local sNpc = L3F.npcLookup[sub.npcID]
+                                if sNpc then
+                                    y = addBossTreeRow({
+                                        npc      = sNpc,
+                                        label    = sub.name or sNpc.name,
+                                        indent   = 18,
+                                        hasArrow = false,
+                                        isSub    = true,
+                                        onClick  = function()
+                                            currentNPC        = sNpc
+                                            currentConsumable = nil
+                                            currentBonusItem  = nil
+                                            currentVirtualBoss = nil
+                                            L3F.db.atlas.lastSelectedNPC = sNpc.id
+                                            if L3F.RefreshNPCList   then L3F.RefreshNPCList()   end
+                                            if L3F.RefreshDetailPane then L3F.RefreshDetailPane() end
+                                        end,
+                                    }, y)
+                                end
+                            end
+                        end
+                    elseif parent.itemIDs then
+                        -- Indented item rows (Kael's Legendaries).
+                        -- Use addBonusItemRow for the icon-name-tooltip
+                        -- treatment (re-used from bonus categories).
+                        for _, itemID in ipairs(parent.itemIDs) do
+                            y = addBonusItemRow(itemID, nil, nil, y)
+                        end
+                    end
+                end
+            end
+        end
+
         -- Order matters: the longer-prefix keys must match before their
         -- shorter cousins (raid-bosses: starts with "raid", heroic-bosses:
         -- starts with "heroic").
         if sel:sub(1, 12) == "raid-bosses:" then
             local raid = findRaid(sel:sub(13))
-            if raid then renderOneSide(collectRoster(raid), true) end
+            if raid then
+                local tree = L3F.bossTrees and L3F.bossTrees[raid.name]
+                if tree then
+                    renderBossTree(raid, tree)
+                else
+                    renderOneSide(collectRoster(raid), true)
+                end
+            end
 
         elseif sel:sub(1, 11) == "raid-trash:" then
             local raid = findRaid(sel:sub(12))
@@ -1494,10 +1669,28 @@ local function buildDetailPane(parent)
         local npc = currentNPC
         local item = currentConsumable
         local bonus = currentBonusItem
+        local virtual = currentVirtualBoss
+
+        -- Hide the Drops sub-tab when a tree sub-entity is selected
+        -- (per Morpheours: subs only show Spells + Notes). Auto-switch
+        -- to Spells if the active tab was Drops, so the user isn't
+        -- stuck on a hidden tab.
+        local isSubEntity = npc and L3F.bossTreeIndex
+                            and L3F.bossTreeIndex[npc.id]
+                            and L3F.bossTreeIndex[npc.id].isSub
+        if isSubEntity and L3F.db.atlas.lastActiveSubTab == "drops" then
+            L3F.db.atlas.lastActiveSubTab = "spells"
+        end
+
         for k, btn in pairs(subTabButtons) do
             local active = (k == L3F.db.atlas.lastActiveSubTab)
             btn.label:SetTextColor(active and 1 or 0.7, active and 1 or 0.7, active and 1 or 0.7, 1)
             if active then btn.underline:Show() else btn.underline:Hide() end
+            if isSubEntity and k == "drops" then
+                btn:Hide()
+            else
+                btn:Show()
+            end
         end
         -- Drop any resize callback from the previous sub-tab; the new
         -- render below installs its own if needed.
@@ -1654,6 +1847,60 @@ local function buildDetailPane(parent)
             return
         end
 
+        -- ---------------------------------------------------------
+        -- VIRTUAL-BOSS PATH - Morpheours-spec parents that aren't real
+        -- NPCs but list items (Kael's Legendaries with its 7 P2
+        -- weapons). Hide the 3D model, render only the Drops sub-tab
+        -- with the item rows; Spells / Notes don't apply.
+        -- ---------------------------------------------------------
+        if virtual then
+            viewer.frame:Hide()
+            subStrip:Show()
+            consumableSubStrip:Hide()
+            detailPane.consumableIcon:Hide()
+            npcTitle:SetText(virtual.name or "")
+            npcTitle:SetTextColor(0.6, 0.85, 1.0, 1)
+            npcMeta:SetText("")
+
+            -- Only the Drops tab is meaningful here; force it active
+            -- and hide the others.
+            L3F.db.atlas.lastActiveSubTab = "drops"
+            for k, btn in pairs(subTabButtons) do
+                if k == "drops" then
+                    btn:Show()
+                    btn.label:SetTextColor(1, 1, 1, 1); btn.underline:Show()
+                else
+                    btn:Hide()
+                end
+            end
+
+            local y = 0
+            if virtual.itemIDs then
+                for _, itemID in ipairs(virtual.itemIDs) do
+                    local row = CreateFrame("Button", nil, subTabContent.body)
+                    row:SetSize(420, 24)
+                    row:SetPoint("TOPLEFT", subTabContent.body, "TOPLEFT", 4, -y)
+                    local icon = row:CreateTexture(nil, "ARTWORK")
+                    icon:SetSize(20, 20); icon:SetPoint("LEFT", row, "LEFT", 0, 0)
+                    icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+                    local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                    lbl:SetPoint("LEFT", icon, "RIGHT", 6, 0)
+                    lbl:SetText("Item #" .. itemID)
+                    queueItemUI(itemID, lbl, icon)
+                    row:SetScript("OnEnter", function(self)
+                        GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+                        if GameTooltip.SetItemByID then GameTooltip:SetItemByID(itemID)
+                        else GameTooltip:SetHyperlink("item:" .. itemID) end
+                        GameTooltip:Show()
+                    end)
+                    row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+                    y = y + 26
+                end
+            end
+            subTabContent.body:SetHeight(math.max(y, 1))
+            return
+        end
+
         -- NPC / empty paths re-show the widgets the consumable path hid.
         viewer.frame:Show()
         subStrip:Show()
@@ -1742,13 +1989,41 @@ local function buildDetailPane(parent)
             subTabContent.body.onWidthChange = relayoutNotes
 
         elseif sub == "drops" then
-            if npc.drops and #npc.drops > 0 then
+            -- Aggregate drops from `npc` PLUS its sub-entities if this
+            -- is a tree parent. Morpheours-spec: clicking Attumen
+            -- shows Attumen's drops + Midnight's drops as one Drops
+            -- view; clicking Midnight directly shows nothing (Drops
+            -- tab is hidden for subs - handled at sub-tab level above).
+            local effectiveDrops = npc.drops or {}
+            local treeInfo = L3F.bossTreeIndex and L3F.bossTreeIndex[npc.id]
+            if treeInfo and treeInfo.isParent and treeInfo.parentEntry
+               and treeInfo.parentEntry.subs then
+                local seen, agg = {}, {}
+                for _, d in ipairs(effectiveDrops) do
+                    table.insert(agg, d); seen[d.id] = true
+                end
+                for _, sub in ipairs(treeInfo.parentEntry.subs) do
+                    if sub.npcID then
+                        local sNpc = L3F.npcLookup[sub.npcID]
+                        if sNpc and sNpc.drops then
+                            for _, d in ipairs(sNpc.drops) do
+                                if not seen[d.id] then
+                                    table.insert(agg, d); seen[d.id] = true
+                                end
+                            end
+                        end
+                    end
+                end
+                effectiveDrops = agg
+            end
+
+            if #effectiveDrops > 0 then
                 -- Split into Normal / Heroic. Heroic-only entries (heroic
                 -- dungeon bosses) ship without name + chance - GetItemInfo
                 -- populates the name async; we hide the chance label entirely
                 -- so we never display a misleading "0.0%".
                 local normalDrops, heroicDrops = {}, {}
-                for _, drop in ipairs(npc.drops) do
+                for _, drop in ipairs(effectiveDrops) do
                     if drop.difficulty == "heroic" then
                         table.insert(heroicDrops, drop)
                     else

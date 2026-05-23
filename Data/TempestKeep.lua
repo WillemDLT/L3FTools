@@ -169,3 +169,35 @@ L3F:RegisterRaid({
         },
     },
 })
+
+-- Atlas Bosses-leaf tree (Morpheours-spec). "Legendaries Weapons" is
+-- a virtual parent listing the 7 weapons Kael drops in P2 - rendered
+-- as items, not NPCs. Item IDs cross-checked against AtlasLoot's
+-- DungeonsAndRaids/data-tbc.lua so the canonical TBC IDs ship.
+L3F:RegisterBossTree("The Eye: Tempest Keep", {
+    { name = "Al'ar", npcID = 19514, subs = {
+        { npcID = 19551 },  -- Ember of Al'ar
+    } },
+    { name = "Void Reaver", npcID = 19516, subs = {} },
+    { name = "High Astromancer Solarian", npcID = 18805, subs = {
+        { npcID = 18806 },  -- Solarium Priest
+        { npcID = 18925 },  -- Solarium Agent
+    } },
+    { name = "Kael'thas Sunstrider", npcID = 19622, subs = {
+        { npcID = 20064 },  -- Thaladred the Darkener
+        { npcID = 20060 },  -- Lord Sanguinar
+        { npcID = 20062 },  -- Grand Astromancer Capernian
+        { npcID = 20063 },  -- Master Engineer Telonicus
+        { npcID = 21362 },  -- Phoenix
+        { npcID = 21364 },  -- Phoenix Egg
+    } },
+    { name = "Legendaries Weapons", virtual = true, itemIDs = {
+        30312,  -- Infinity Blade
+        30311,  -- Warp Slicer
+        30317,  -- Cosmic Infuser
+        30316,  -- Devastation
+        30313,  -- Staff of Disintegration
+        30314,  -- Phaseshift Bulwark
+        30318,  -- Netherstrand Longbow
+    } },
+})

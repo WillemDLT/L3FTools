@@ -354,3 +354,54 @@ L3F:RegisterRaid({
         },
     },
 })
+
+-- Atlas Bosses-leaf tree (Morpheours-spec). Virtual parents synthesise
+-- containers around groups our flat NPC data doesn't already wrap:
+-- Servant Quarters' three rares, and the three Opera Event variants.
+-- "Netherspike" in Morpheours's spec is the canonical "Netherspite".
+L3F:RegisterBossTree("Karazhan", {
+    { name = "Attumen the Huntsman", npcID = 16152, subs = {
+        { npcID = 16151 },  -- Midnight
+    } },
+    { name = "Servant Quarters", virtual = true, subs = {
+        { npcID = 16179 },  -- Hyakiss the Lurker
+        { npcID = 16181 },  -- Rokad the Ravager
+        { npcID = 16180 },  -- Shadikith the Glider
+    } },
+    { name = "Moroes", npcID = 15687, subs = {
+        { npcID = 19874 },  -- Baron Rafe Dreuger
+        { npcID = 19875 },  -- Baroness Dorothea Millstipe
+        { npcID = 19872 },  -- Lady Catriona Von'Indi
+        { npcID = 17007 },  -- Lady Keira Berrybuck
+        { npcID = 19873 },  -- Lord Crispin Ference
+        { npcID = 19876 },  -- Lord Robin Daris
+    } },
+    { name = "Maiden of Virtue", npcID = 16457, subs = {} },
+    { name = "Opera Event: The Wizard of Oz", virtual = true, subs = {
+        { npcID = 17535 },  -- Dorothee
+        { npcID = 17548 },  -- Tito
+        { npcID = 17543 },  -- Strawman
+        { npcID = 17547 },  -- Tinhead
+        { npcID = 17546 },  -- Roar
+        { npcID = 18168 },  -- The Crone
+    } },
+    { name = "Opera Event: Romulo & Julianne", virtual = true, subs = {
+        { npcID = 17533 },  -- Romulo
+        { npcID = 17534 },  -- Julianne
+    } },
+    { name = "Opera Event: The Big Bad Wolf", virtual = true, subs = {
+        { npcID = 17521 },  -- The Big Bad Wolf
+    } },
+    { name = "The Curator", npcID = 15691, subs = {} },
+    { name = "Terestian Illhoof", npcID = 15688, subs = {
+        { npcID = 17229 },  -- Kil'rek
+        { npcID = 17248 },  -- Demon Chains
+        { npcID = 17267 },  -- Fiendish Imp
+    } },
+    { name = "Shade of Aran", npcID = 16524, subs = {} },
+    { name = "Netherspite", npcID = 15689, subs = {} },
+    { name = "Nightbane", npcID = 17225, subs = {
+        { npcID = 17261 },  -- Restless Skeleton
+    } },
+    { name = "Prince Malchezaar", npcID = 15690, subs = {} },
+})
