@@ -28,8 +28,14 @@ jobs:
           else
             TAG="beta"; PRE="--prerelease"
           fi
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" $PRE --title "$TAG" \
-              --notes "Auto-packaged on every push to the $REF branch. Download L3FTools.zip and extract it straight into Interface/AddOns/ - no renaming needed."
-          fi
+          # `gh release view` is flaky -- it can return non-zero on
+          # transient API hiccups even when the release exists, which
+          # then makes `gh release create` fail with
+          # "Release.tag_name already exists" (the 0.23.2 failure mode).
+          # Just attempt create unconditionally; swallow the "already
+          # exists" error. Then upload with --clobber, which overwrites
+          # the asset on an existing release.
+          gh release create "$TAG" $PRE --title "$TAG" \
+              --notes "Auto-packaged on every push to the $REF branch. Download L3FTools.zip and extract it straight into Interface/AddOns/ - no renaming needed." \
+              || echo "Release $TAG already exists, skipping create."
           gh release upload "$TAG" L3FTools.zip --clobber
