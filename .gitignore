@@ -1,0 +1,16 @@
+# OS clutter
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor swap / temp
+*.bak
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Build / packaging
+.release/
+.pkgmeta-cache/

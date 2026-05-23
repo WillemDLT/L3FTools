@@ -1,0 +1,6 @@
+# Exclude dev-only files from `git archive` / GitHub download zips.
+verify.sh       export-ignore
+CLAUDE.md       export-ignore
+.gitignore      export-ignore
+.gitattributes  export-ignore
+.github         export-ignore
