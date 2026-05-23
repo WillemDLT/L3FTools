@@ -32,6 +32,12 @@ local RPCoOp = L3F.RPCoOp
 
 local PREFIX = "L3F_RPCO"
 C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
+local MAX_ADDON_MSG_BYTES = 255
+local CHUNK_KIND = "CHNK"
+-- 60 keeps worst-case escaped chunk under 255 bytes:
+-- each byte can expand to 3 chars ("%xx"), plus header.
+local CHUNK_RAW_BYTES = 60
+local CHUNK_TTL = 30
 
 -- =============================================================
 -- Settings (in SavedVariables under L3F.db.rpCoOp)
@@ -187,13 +193,58 @@ end
 -- =============================================================
 -- Wire layer
 -- =============================================================
-local function sendAddon(channel, target, msg, priority)
+local pendingChunks = {}
+
+local function sendRawAddon(channel, target, msg, priority)
     priority = priority or "NORMAL"
     local CTL = _G.ChatThrottleLib
     if CTL and CTL.SendAddonMessage then
         CTL:SendAddonMessage(priority, PREFIX, msg, channel, target)
     else
         C_ChatInfo.SendAddonMessage(PREFIX, msg, channel, target)
+    end
+end
+
+local function encodeChunkPayload(s)
+    return (s:gsub(".", function(c)
+        return string.format("%02x", string.byte(c))
+    end))
+end
+
+local function decodeChunkPayload(s)
+    return (s:gsub("%x%x", function(h)
+        return string.char(tonumber(h, 16))
+    end))
+end
+
+local function sendChunked(channel, target, msg, priority)
+    local chunkId = string.format("%06x", math.random(0, 0xFFFFFF))
+    local rawChunks = {}
+    local p = 1
+    local n = #msg
+    while p <= n do
+        rawChunks[#rawChunks + 1] = msg:sub(p, p + CHUNK_RAW_BYTES - 1)
+        p = p + CHUNK_RAW_BYTES
+    end
+    local total = #rawChunks
+    for idx = 1, total do
+        local enc = encodeChunkPayload(rawChunks[idx])
+        local wire = table.concat({
+            CHUNK_KIND, chunkId, tostring(idx), tostring(total), enc
+        }, "|")
+        if #wire > MAX_ADDON_MSG_BYTES then
+            return
+        end
+        sendRawAddon(channel, target, wire, priority)
+    end
+end
+
+local function sendAddon(channel, target, msg, priority)
+    if not msg or msg == "" then return end
+    if #msg > MAX_ADDON_MSG_BYTES then
+        sendChunked(channel, target, msg, priority)
+    else
+        sendRawAddon(channel, target, msg, priority)
     end
 end
 
@@ -614,13 +665,7 @@ end
 -- =============================================================
 -- CHAT_MSG_ADDON dispatcher
 -- =============================================================
-local recvFrame = CreateFrame("Frame")
-recvFrame:RegisterEvent("CHAT_MSG_ADDON")
-recvFrame:SetScript("OnEvent", function(_, _, prefix, text, channel, sender)
-    if prefix ~= PREFIX or not text then return end
-    local me = selfShort()
-    local senderShort = shortName(sender)
-    if senderShort == me then return end
+local function dispatchMessage(text, senderShort, sender)
     local kind, a, b, c, d, e, f, g, h, i, j = strsplit("|", text)
     if not kind then return end
     if kind == "INV" then
@@ -647,6 +692,64 @@ recvFrame:SetScript("OnEvent", function(_, _, prefix, text, channel, sender)
         or kind == "NOTES" then
         applyRemoteDelta(kind, a, b, c, d, e, f, g, h, i, j)
     end
+end
+
+local function cleanupPendingChunks(now)
+    for k, data in pairs(pendingChunks) do
+        if (now - (data.t or now)) > CHUNK_TTL then
+            pendingChunks[k] = nil
+        end
+    end
+end
+
+local function ingestChunk(senderShort, text)
+    local _, chunkId, idxStr, totalStr, payloadEnc = strsplit("|", text, 5)
+    local idx = tonumber(idxStr)
+    local total = tonumber(totalStr)
+    if not chunkId or not idx or not total or idx < 1 or total < 1 then
+        return nil
+    end
+    cleanupPendingChunks(GetTime())
+    local key = senderShort .. ":" .. chunkId
+    local slot = pendingChunks[key]
+    if not slot then
+        slot = { total = total, parts = {}, got = 0, t = GetTime() }
+        pendingChunks[key] = slot
+    end
+    if slot.total ~= total then
+        pendingChunks[key] = nil
+        return nil
+    end
+    if not slot.parts[idx] then
+        slot.parts[idx] = decodeChunkPayload(payloadEnc or "")
+        slot.got = slot.got + 1
+    end
+    slot.t = GetTime()
+    if slot.got < slot.total then
+        return nil
+    end
+    local joined = {}
+    for n = 1, slot.total do
+        if not slot.parts[n] then return nil end
+        joined[n] = slot.parts[n]
+    end
+    pendingChunks[key] = nil
+    return table.concat(joined)
+end
+
+local recvFrame = CreateFrame("Frame")
+recvFrame:RegisterEvent("CHAT_MSG_ADDON")
+recvFrame:SetScript("OnEvent", function(_, _, prefix, text, channel, sender)
+    if prefix ~= PREFIX or not text then return end
+    local me = selfShort()
+    local senderShort = shortName(sender)
+    if senderShort == me then return end
+    if text:sub(1, #CHUNK_KIND + 1) == (CHUNK_KIND .. "|") then
+        local rebuilt = ingestChunk(senderShort, text)
+        if not rebuilt then return end
+        text = rebuilt
+    end
+    dispatchMessage(text, senderShort, sender)
 end)
 
 

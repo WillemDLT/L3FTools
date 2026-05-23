@@ -217,27 +217,6 @@ local function scheduleRefresh()
     end
 end
 
--- Accepts rrggbb, #rrggbb, or rrggbbaa; strips any non-hex prefix,
--- truncates to 6 chars, and guarantees a valid lowercase rrggbb.
--- Falls back to "ffffff" if the result is not exactly 6 valid hex chars.
-local function normalizeHexColor(hex)
-    if type(hex) ~= "string" then return "ffffff" end
-    hex = hex:lower():gsub("[^0-9a-f]", "")
-    if #hex >= 8 then hex = hex:sub(1, 6) end  -- strip alpha
-    if #hex == 6 and hex:find("^[0-9a-f]+$") then return hex end
-    return "ffffff"
-end
-
--- Converts a hex color (any shape normalizeHexColor accepts) to
--- three 0..1 floats. Safe: tonumber on a validated 2-char hex substring
--- is always non-nil, so the / 255 never NaN-divides.
-local function hexToRgb01(hex)
-    hex = normalizeHexColor(hex)
-    return tonumber(hex:sub(1, 2), 16) / 255,
-           tonumber(hex:sub(3, 4), 16) / 255,
-           tonumber(hex:sub(5, 6), 16) / 255
-end
-
 -- Module-level frame for the live picker poller. ONE per addon;
 -- re-wired each openColorPicker call. Lives outside the function
 -- because Lua 5.1 functions can't carry indexable fields (`f.x = y`
@@ -253,8 +232,10 @@ local colorPickerPoller
 -- previous values). The helper writes `previousValues = {r=r,
 -- g=g, b=b, opacity=op}` for us, so cancelFunc can read by key.
 local function openColorPicker(initialHex, onAccept)
-    initialHex = normalizeHexColor(initialHex)
-    local r, g, b = hexToRgb01(initialHex)
+    initialHex = (initialHex and #initialHex == 6) and initialHex or "ffffff"
+    local r = tonumber(initialHex:sub(1, 2), 16) / 255
+    local g = tonumber(initialHex:sub(3, 4), 16) / 255
+    local b = tonumber(initialHex:sub(5, 6), 16) / 255
 
     local function rgbToHex(nr, ng, nb)
         return string.format("%02x%02x%02x",
@@ -299,6 +280,12 @@ local function openColorPicker(initialHex, onAccept)
             end
         end,
     }
+    -- Some client builds call ColorPickerFrame.swatchFunc from the
+    -- OK button path even when opened via OpenColorPicker(info).
+    if ColorPickerFrame then
+        ColorPickerFrame.swatchFunc = info.swatchFunc
+        ColorPickerFrame.cancelFunc = info.cancelFunc
+    end
     if type(OpenColorPicker) == "function" then
         OpenColorPicker(info)
     elseif ColorPickerFrame then
@@ -306,25 +293,14 @@ local function openColorPicker(initialHex, onAccept)
         ColorPickerFrame.hasOpacity = false
         ColorPickerFrame.opacity = 1
         ColorPickerFrame.previousValues = { r = r, g = g, b = b }
+        -- Client compatibility: some builds invoke swatchFunc
+        -- directly from the OK button handler.
+        ColorPickerFrame.swatchFunc = info.swatchFunc
+        ColorPickerFrame.func = info.swatchFunc
+        ColorPickerFrame.opacityFunc = info.swatchFunc
+        ColorPickerFrame.cancelFunc = info.cancelFunc
         ColorPickerFrame:SetColorRGB(r, g, b)
         ColorPickerFrame:Show()
-    end
-
-    -- TBC 2.5.x Anniversary ships an XML OK button OnClick that calls
-    -- ColorPickerFrame.swatchFunc(), but the OpenColorPicker(info)
-    -- helper on this build only writes ColorPickerFrame.func. That
-    -- naming-mismatch leaves .swatchFunc nil and the OK click errors
-    -- with "attempt to call field 'swatchFunc' (a nil value)" -- which
-    -- shows up RANDOMLY while the user drags icons because the drop
-    -- click sometimes lands on the still-visible OK button after they
-    -- opened a color picker and never closed it. Set BOTH names
-    -- explicitly so the XML handler can find a callable function under
-    -- whichever field name it's coded to read.
-    if ColorPickerFrame then
-        ColorPickerFrame.func        = info.swatchFunc
-        ColorPickerFrame.swatchFunc  = info.swatchFunc
-        ColorPickerFrame.opacityFunc = info.swatchFunc
-        ColorPickerFrame.cancelFunc  = info.cancelFunc
     end
 
     -- Live poller fallback. The TBC 2.5.x ColorPickerFrame slider
@@ -402,6 +378,7 @@ local canvasFrame, canvasBg, placedHost, drawingHost
 local refreshIcons, refreshDrawings, refreshTopStrip
 local refreshPalette, refreshPropsPanel, refreshEncounterPanel
 local refreshSearchPanel, refreshNotesPanel
+local drawingSegments = {}
 local currentSelection
 
 local penMode = {
@@ -544,22 +521,11 @@ local function buildPlacedIcon(plan, iconData, idx)
         if not moved then
             -- Treated as a click - select instead of move (the frame
             -- snaps back to its original anchored position on the
-            -- next scheduleRefresh tick). scheduleRefresh also rebuilds
-            -- the props panel for the new selection, which is needed.
+            -- next scheduleRefresh tick).
             currentSelection = idx
-            scheduleRefresh()
         elseif newX and l and cx >= l and cx <= r and cy >= b and cy <= t then
-            -- Pure position update: re-anchor the frame in-place without
-            -- a full refresh(). This prevents the repeated teardown-and-
-            -- rebuild cycle that orphans Textures and causes the render
-            -- breakdown on fast drag-spam.
             iconData.x = newX
             iconData.y = newY
-            -- Re-anchor the live frame to the new fractional position.
-            -- Formula mirrors buildPlacedIcon: TOPLEFT + (x*w, -(y*h)).
-            local w, h = canvasSizePx()
-            f:ClearAllPoints()
-            f:SetPoint("CENTER", placedHost, "TOPLEFT", newX * w, -(newY * h))
             -- Co-op: broadcast MOVE with iconIdx + final position.
             notifyEdit("MOVE", {
                 tostring(idx),
@@ -568,7 +534,6 @@ local function buildPlacedIcon(plan, iconData, idx)
             })
         else
             -- Released outside canvas after a meaningful drag = yeet.
-            -- Full refresh needed because the icon is removed from the list.
             for i, ic in ipairs(plan.icons) do
                 if ic == iconData then
                     table.remove(plan.icons, i)
@@ -576,8 +541,10 @@ local function buildPlacedIcon(plan, iconData, idx)
                     break
                 end
             end
-            scheduleRefresh()
         end
+        -- Defer the rebuild - never recurse from inside the
+        -- OnDragStop callback.
+        scheduleRefresh()
     end)
 
     return f
@@ -599,18 +566,28 @@ local function drawSegment(parent, x1, y1, x2, y2, size, r, g, b, a)
     tex:ClearAllPoints()
     tex:SetPoint("CENTER", parent, "TOPLEFT", (x1 + x2) / 2, -(y1 + y2) / 2)
     tex:SetRotation(math.atan2(-dy, dx))
+    drawingSegments[#drawingSegments + 1] = tex
 end
 
 refreshDrawings = function()
     if not drawingHost then return end
-    for _, c in ipairs({drawingHost:GetChildren()}) do c:Hide(); c:SetParent(nil) end
-    for _, r in ipairs({drawingHost:GetRegions()}) do r:Hide(); r:ClearAllPoints() end
+    for i = 1, #drawingSegments do
+        local tex = drawingSegments[i]
+        if tex then
+            tex:Hide()
+            tex:SetParent(nil)
+        end
+    end
+    wipe(drawingSegments)
     local plan = currentPlan()
     if not plan or not plan.drawings then return end
     local w, h = canvasSizePx()
     if w == 0 then return end
     for _, stroke in ipairs(plan.drawings) do
-        local r, g, b = hexToRgb01(stroke.color)
+        local hex = stroke.color or "ffffff"
+        local r = tonumber(hex:sub(1, 2), 16) / 255
+        local g = tonumber(hex:sub(3, 4), 16) / 255
+        local b = tonumber(hex:sub(5, 6), 16) / 255
         local size = stroke.size or 4
         local pts = stroke.points or {}
         for i = 2, #pts do
@@ -632,7 +609,10 @@ local function appendStrokeSegment(stroke, prevPt, newPt)
     if not drawingHost then return end
     local w, h = canvasSizePx()
     if w == 0 then return end
-    local r, g, b = hexToRgb01(stroke.color)
+    local hex = stroke.color or "ffffff"
+    local r = tonumber(hex:sub(1, 2), 16) / 255
+    local g = tonumber(hex:sub(3, 4), 16) / 255
+    local b = tonumber(hex:sub(5, 6), 16) / 255
     local size = stroke.size or 4
     drawSegment(drawingHost,
         prevPt.x * w, prevPt.y * h, newPt.x * w, newPt.y * h,
@@ -773,7 +753,7 @@ local function canvasMouseDown(self, button)
         local plan = currentPlan()
         plan.drawings = plan.drawings or {}
         currentStroke = {
-            color  = normalizeHexColor(penMode.color),
+            color  = penMode.color,
             size   = penMode.size,
             fade   = penMode.fadeOut,
             points = {},
@@ -1079,9 +1059,10 @@ refreshPalette = function()
         penColorBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
         penColorBtn:SetScript("OnClick", function()
             openColorPicker(penMode.color, function(newHex)
-                newHex = normalizeHexColor(newHex)
                 penMode.color = newHex
-                local r, g, b = hexToRgb01(newHex)
+                local r = tonumber(newHex:sub(1, 2), 16) / 255
+                local g = tonumber(newHex:sub(3, 4), 16) / 255
+                local b = tonumber(newHex:sub(5, 6), 16) / 255
                 penColorSwatch:SetVertexColor(r, g, b, 1)
                 if prevDot then prevDot:SetVertexColor(r, g, b, 1) end
             end)
