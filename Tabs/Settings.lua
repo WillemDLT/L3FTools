@@ -65,7 +65,7 @@ local function buildSettings(parent)
     -- =========================================================
     local coopHeader = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     coopHeader:SetPoint("TOPLEFT", help, "BOTTOMLEFT", 0, -24)
-    coopHeader:SetText("Raid Planner co-op")
+    coopHeader:SetText("Co-op invites (Raid Planner + Composer)")
 
     -- Privacy dropdown.
     local privacyLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")

@@ -504,6 +504,27 @@ end
 -- =============================================================
 local LibDeflate = LibStub and LibStub("LibDeflate", true)
 
+-- Co-op snapshot debounce. The Composer follows a mutate-then-refresh
+-- pattern with ~15 mutation sites; per-mutation snapshot broadcast is
+-- fine bandwidth-wise (~1KB profile), but a burst (e.g. drag-swap that
+-- writes two slots in succession) would send two snapshots back-to-
+-- back. Debounce at 300ms so a burst coalesces into one packet.
+local snapshotPending = false
+local function notifyComposerEdit()
+    if snapshotPending then return end
+    if not (L3F.ComposerCoOp and L3F.ComposerCoOp.IsActive
+            and L3F.ComposerCoOp.IsActive()) then
+        return
+    end
+    snapshotPending = true
+    C_Timer.After(0.3, function()
+        snapshotPending = false
+        if L3F.ComposerCoOp and L3F.ComposerCoOp.BroadcastSnapshot then
+            L3F.ComposerCoOp.BroadcastSnapshot()
+        end
+    end)
+end
+
 -- Wire format (COMP2): NAME|GC|BC|G1..G5|B1..B5|GN1//..//GN5|BN1//..//BN5
 -- Each Gx/Bx slot row is 5 comma-separated "speckey:label" cells.
 -- COMP1 (older 0.15.x) is still accepted by the decoder for forward
@@ -784,6 +805,7 @@ local function finishDrag()
         fromTarget.slots[fromIdx] = nil
     end
 
+    notifyComposerEdit()
     if refresh then refresh() end
 end
 
@@ -875,7 +897,7 @@ clickAddSpec = function(spec)
     local p = currentProfile()
     for g = 1, p.groupCount do
         local idx = firstEmptySlot(p.groups[g])
-        if idx then setSlot(p.groups[g], idx, spec.key); refresh(); return end
+        if idx then setSlot(p.groups[g], idx, spec.key); notifyComposerEdit(); refresh(); return end
     end
     print("|cffffd100L3FComp|r all groups full - add a group first.")
 end
@@ -1037,10 +1059,10 @@ local function buildSlotRow(parent, target, idx, y)
         end
         editBtn:SetScript("OnClick", function()
             promptText("Rename slot:", slot.label or "", function(txt)
-                if txt and txt ~= "" then slot.label = txt; refresh() end
+                if txt and txt ~= "" then slot.label = txt; notifyComposerEdit(); refresh() end
             end)
         end)
-        xBtn:SetScript("OnClick", function() clearSlot(target, idx); refresh() end)
+        xBtn:SetScript("OnClick", function() clearSlot(target, idx); notifyComposerEdit(); refresh() end)
 
         -- Drag-from-slot: pick up THIS slot's spec and drop on another
         -- slot to move it (or off any slot to remove it). Same drag
@@ -1077,6 +1099,7 @@ local function buildSlotRow(parent, target, idx, y)
                     slot.label = newSpec.label
                 end
                 slot.specKey = newKey
+                notifyComposerEdit()
                 refresh()
             end)
         end
@@ -1148,6 +1171,7 @@ local function buildSquadFrame(parent, target, x, y, idxLabel, kind, auras)
             else
                 pp.groupCount = math.max(GROUP_MIN, pp.groupCount - 1)
             end
+            notifyComposerEdit()
             refresh()
         end)
     end
@@ -1173,7 +1197,7 @@ local function buildSquadFrame(parent, target, x, y, idxLabel, kind, auras)
     quill:SetScript("OnClick", function()
         promptText(kind == "bench" and "Rename bench:" or "Rename group:",
             target.name or "", function(txt)
-            if txt and txt ~= "" then target.name = txt; refresh() end
+            if txt and txt ~= "" then target.name = txt; notifyComposerEdit(); refresh() end
         end)
     end)
 
@@ -1504,6 +1528,7 @@ local function buildTopStrip(parent)
                 info.checked = (name == L3F.db.composer.activeProfile)
                 info.func = function()
                     L3F.db.composer.activeProfile = name
+                    notifyComposerEdit()
                     refresh()
                 end
                 UIDropDownMenu_AddButton(info, level)
@@ -1542,6 +1567,7 @@ local function buildTopStrip(parent)
                 L3F.db.composer.profiles[name] = newEmptyProfile()
                 L3F.db.composer.activeProfile = name
                 refreshProfileDD()
+                notifyComposerEdit()
                 refresh()
                 print("|cffffd100L3FComp|r created profile '" .. name .. "'.")
             end,
@@ -1576,6 +1602,7 @@ local function buildTopStrip(parent)
                 L3F.db.composer.profiles[active] = nil
                 L3F.db.composer.activeProfile = next(L3F.db.composer.profiles)
                 refreshProfileDD()
+                notifyComposerEdit()
                 refresh()
                 print("|cffffd100L3FComp|r deleted '" .. active .. "'.")
             end,
@@ -1622,6 +1649,7 @@ local function buildTopStrip(parent)
                 L3F.db.composer.profiles[name] = profile
                 L3F.db.composer.activeProfile = name
                 refreshProfileDD()
+                notifyComposerEdit()
                 refresh()
                 print("|cffffd100L3FComp|r imported '" .. name .. "'.")
             end,
@@ -1638,6 +1666,24 @@ local function buildTopStrip(parent)
         GameTooltip:Show()
     end)
     dispBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    -- Co-op: toggles the floating roster + actions panel. Guild-scoped
+    -- live multi-player editing of the active profile.
+    local coopBtn = mkBtn("Co-op", dispBtn, 2, 56, function()
+        if L3F.ComposerCoOp and L3F.ComposerCoOp.ToggleRosterPanel then
+            L3F.ComposerCoOp.ToggleRosterPanel()
+        end
+    end)
+    coopBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:SetText("Toggle the co-op session panel")
+        GameTooltip:AddLine("Host a live multi-player editing session, or",
+            0.7, 0.7, 0.7, true)
+        GameTooltip:AddLine("accept an invite from a guildie.",
+            0.7, 0.7, 0.7, true)
+        GameTooltip:Show()
+    end)
+    coopBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 end
 
 
@@ -1700,6 +1746,7 @@ local function buildComposer(parent)
                 local cur = L3F.db.composer.activeProfile
                 if not cur then return end
                 L3F.db.composer.profiles[cur] = newEmptyProfile()
+                notifyComposerEdit()
                 refresh()
             end)
             clearBtn:SetScript("OnEnter", function(self)
@@ -1760,6 +1807,7 @@ local function buildComposer(parent)
             addG:SetScript("OnClick", function()
                 local pp = currentProfile()
                 pp.groupCount = math.min(GROUP_MAX, pp.groupCount + 1)
+                notifyComposerEdit()
                 refresh()
             end)
             addX = addX + GROUP_W + colGap
@@ -1771,6 +1819,7 @@ local function buildComposer(parent)
             addB:SetScript("OnClick", function()
                 local pp = currentProfile()
                 pp.benchCount = math.min(BENCH_MAX, pp.benchCount + 1)
+                notifyComposerEdit()
                 refresh()
             end)
         end
@@ -1795,8 +1844,38 @@ local function buildComposer(parent)
         body:SetHeight(math.max(groupsBottom, sidebarBottom) + 24)
     end
 
+    -- Co-op: attach the roster panel (hidden by default) parented to
+    -- the composer tab area; the top-strip "Co-op" button toggles it.
+    if L3F.ComposerCoOp and L3F.ComposerCoOp.AttachRosterPanel then
+        local panel = L3F.ComposerCoOp.AttachRosterPanel(parent,
+            "TOPRIGHT", parent, "TOPRIGHT", -28, -8)
+        if panel then panel:Hide() end
+    end
+
     refresh()
 end
+
+
+-- =============================================================
+-- 9. CO-OP INTEGRATION (exports for ComposerCoOp.lua)
+-- =============================================================
+L3F._CompSerializeProfile = serializeProfile
+
+function L3F._CompApplySnapshot(activeName, payload)
+    if not payload or payload == "" then return end
+    local name, profile = deserializeProfile(payload)
+    if not name or not profile then return end
+    -- Use the activeName the host sent us (the snapshot's embedded
+    -- name carries the host's profile slot label, which may collide
+    -- with an existing local profile). Fall back to the embedded name.
+    local slotName = (activeName and activeName ~= "") and activeName or name
+    L3F.db.composer = L3F.db.composer or {}
+    L3F.db.composer.profiles = L3F.db.composer.profiles or {}
+    L3F.db.composer.profiles[slotName] = profile
+    L3F.db.composer.activeProfile = slotName
+    if refresh then refresh() end
+end
+
 
 L3F.RegisterTab("guild.composer", "Composer", nil, buildComposer, {
     parent = "guild",
