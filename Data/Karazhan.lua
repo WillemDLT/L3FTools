@@ -1,0 +1,407 @@
+-- =============================================================
+-- Automarker L3F - Karazhan
+-- =============================================================
+-- Boss entries include `spells` (icon list + tooltip via SetSpellByID)
+-- and `notes` (strategy text). Spell IDs verified against Wowhead TBC.
+-- =============================================================
+
+local _, L3F = ...
+
+local TRASH = {8, 7, 6, 5, 4, 3, 2, 1}
+
+L3F:RegisterRaid({
+    name = "Karazhan",
+    sections = {
+        {
+            name = "Attumen's Stables",
+            npcs = {
+                { id = 16152, name = "Attumen the Huntsman", kind = "boss", marks = {8},
+                  spells = { 29832, 29833 },
+                  notes = "Pull Midnight first; Attumen joins at 95%. DPS Midnight to 25% then they merge into mounted Attumen at full HP. Stack behind the boss to avoid the Charge knockback. Disarm reduces his damage dramatically. Decurse Amplify Curse fast." },
+                { id = 16151, name = "Midnight",             kind = "boss", marks = {7},
+                  spells = { 29711 },
+                  notes = "Attumen's horse. Off-tanked first while DPS focuses her down. At 95% Attumen spawns; at 25% they merge into one mounted target at full HP." },
+                { id = 15551, name = "Spectral Stable Hand", kind = "trash", marks = TRASH,
+                  spells = { 29339, 29340, 18812, 6016 },
+                  notes = "HIGHEST priority - Healing Touch (29339) tops off chargers and Whip Frenzy (29340) gives them +60% attack speed for 30s. Shackle Undead or interrupt every cast; tank also eats Knockdown (18812) stuns and Pierce Armor (6016)." },
+                { id = 15547, name = "Spectral Charger",     kind = "trash", marks = TRASH,
+                  spells = { 29320, 29321 },
+                  notes = "Charges (29320) the furthest target then immediately AoE-Fears (29321) everyone in melee for 4s - Tremor Totem or pre-dispel ready. Stack ranged outside fear radius." },
+                { id = 15548, name = "Spectral Stallion",    kind = "trash", marks = TRASH,
+                  spells = { 29577, 29326 },
+                  notes = "Pure melee skeletal horse - Hoof Strike (29577) hits the tank and Absorb Vitality (29326) lifesteal keeps it topped. Tank and spank; nothing dispellable." },
+            },
+        },
+        {
+            name = "Servants' Quarters (Rares)",
+            npcs = {
+                { id = 16179, name = "Hyakiss the Lurker",   kind = "boss", marks = {8},
+                  spells = { 29896, 29901, 40481 },
+                  notes = "Stealthed spider rare - Hyakiss' Web (29896) stuns and Acidic Fang (29901) plus stacking Acidic Wound (40481) shred the tank. Cleanse poisons aggressively; otherwise tank and spank." },
+                { id = 16181, name = "Rokad the Ravager",    kind = "boss", marks = {8},
+                  spells = { 29906 },
+                  notes = "Rare darkhound - Ravage (29906) is a heavy melee strike that knocks the tank back. Pure physical fight, no dispels - just out-heal with rotating cooldowns." },
+                { id = 16180, name = "Shadikith the Glider", kind = "boss", marks = {8},
+                  spells = { 29904, 29905, 29903 },
+                  notes = "Sonic Burst (29904) silences nearby raid; Wing Buffet (29905) knocks back; Dive (29903) is a target-wiping charge. Keep ranged 20+yd from tank and have an off-tank ready for charge victims." },
+            },
+        },
+        {
+            name = "Servants' Quarters Trash",
+            npcs = {
+                { id = 16171, name = "Coldmist Widow",       kind = "trash", marks = TRASH,
+                  spells = { 29293, 29292 },
+                  notes = "Poison Bolt Volley (29293) and Frost Mist (29292) AoE the group - interrupt the volleys when possible and cleanse poisons. Group with Stalkers and AoE down." },
+                { id = 16170, name = "Coldmist Stalker",     kind = "trash", marks = TRASH,
+                  spells = { 29290 },
+                  notes = "Smaller stealth spider - Chilling Poison (29290) slows the tank. AoE down with Widows; nothing critical to interrupt." },
+                { id = 16173, name = "Shadowbat",            kind = "trash", marks = TRASH,
+                  spells = { 29298 },
+                  notes = "Basic flying bat - Dark Shriek (29298) deals small shadow damage to nearby targets. Low HP filler, AoE with the pack." },
+                { id = 16174, name = "Greater Shadowbat",    kind = "trash", marks = TRASH,
+                  spells = { 29300, 29303 },
+                  notes = "Sonic Blast (29300) and Wing Beat (29303) AoE silence/knockback - keep ranged out of melee. Tank-and-spank otherwise." },
+                { id = 16175, name = "Vampiric Shadowbat",   kind = "trash", marks = TRASH,
+                  spells = { 32429 },
+                  notes = "Draining Touch (32429) channels life-drain that heals it for damage dealt - KILL FIRST in any bat pack and interrupt the channel." },
+                { id = 16178, name = "Phase Hound",          kind = "trash", marks = TRASH,
+                  spells = { 29309 },
+                  notes = "Periodically casts Phase Shift (29309) becoming untargetable - save burst cooldowns for when it phases back in. No curses or dispels." },
+                { id = 16177, name = "Dreadbeast",           kind = "trash", marks = TRASH,
+                  spells = { 29561 },
+                  notes = "Demon dog with Cleave (29561) - tank facing away from group. Pure physical; save Demo Shout / Curse of Weakness for the pack." },
+                { id = 16176, name = "Shadowbeast",          kind = "trash", marks = TRASH,
+                  spells = { 29304 },
+                  notes = "Largest demon dog - Howl of the Broken Hills (29304) is an AoE fear-style howl. Heavy melee hitter; warlocks can Banish one as CC." },
+            },
+        },
+        {
+            name = "Approach to Moroes",
+            npcs = {
+                { id = 16410, name = "Spectral Retainer",   kind = "trash", marks = TRASH,
+                  spells = { 29546, 29578 },
+                  notes = "HIGHEST PRIORITY - Oath of Fealty (29546) is an undispellable Mind Control; Shaman should drop Grounding Totem on pull. Also applies Rend (29578) bleed. Immune to Shackle/Taunt/Stun; cleave-carefully so charmed allies don't die." },
+                { id = 16407, name = "Spectral Servant",    kind = "trash", marks = TRASH,
+                  spells = { 29540 },
+                  notes = "Casts Curse of Past Burdens (29540) - slows attack/cast speed on the tank. Decurse and burn down; nothing else notable." },
+                { id = 16389, name = "Spectral Apprentice", kind = "trash", marks = TRASH,
+                  spells = { 29618 },
+                  notes = "Caster - Burning Brand (29618) DoT on the tank. Sheep or interrupt; kill priority in mixed pulls." },
+                { id = 16408, name = "Phantom Valet",       kind = "trash", marks = TRASH,
+                  spells = { 29584 },
+                  notes = "Hits incredibly hard on the tank and casts Demoralizing Shout (29584) AoE attack-power reduction. Immune to Shackle/Taunt/Stun - healers must keep tank topped." },
+                { id = 16406, name = "Phantom Attendant",   kind = "trash", marks = TRASH,
+                  spells = { 29586, 29587 },
+                  notes = "Kick (29586) interrupts casters and Shadow Rejuvenation (29587) self-heals - interrupt the heal cast. Pack mob, AoE-friendly but priority kill the ones casting." },
+                { id = 16414, name = "Ghostly Steward",     kind = "trash", marks = TRASH,
+                  spells = { 29690, 29691 },
+                  notes = "Drunken Skull Crack (29690) stuns highest-threat for 4s, and at 50% HP casts Enrage (29691) wiping threat. Immune to Shackle/Taunt/Stun - let both tanks hit it first; rebuild threat after the enrage." },
+            },
+        },
+        {
+            name = "Banquet Hall (Moroes & Guests)",
+            npcs = {
+                { id = 15687, name = "Moroes",                       kind = "boss", marks = {8},
+                  spells = { 37066, 29448, 29425 },
+                  notes = "4 of 6 random guests spawn with him. CC priority: Shackle the priests, Sap/Sheep others. Garrote bleed on a random target needs healer cooldown. Vanish + Gouge rotates target. Standard kill order: clear all 4 guests first, then burn Moroes. Soft-enrage at 30%." },
+                { id = 19874, name = "Baron Rafe Dreuger",           kind = "boss", marks = {7},
+                  spells = { 37369, 29385, 29386 },
+                  notes = "Retri Paladin guest - Hammer of Justice (37369) stuns; Seal/Judgement of Command (29385/29386) for heavy holy damage. Sap/Sheep CC; tank facing away to minimize cleaves." },
+                { id = 19875, name = "Baroness Dorothea Millstipe",  kind = "boss", marks = {7},
+                  spells = { 29570, 34441, 29405 },
+                  notes = "Shadow Priest guest - channels Mind Flay (29570), applies Shadow Word: Pain (34441), and Mana Burn (29405) drains healers. Shackle Undead priority or interrupt every cast." },
+                { id = 19872, name = "Lady Catriona Von'Indi",       kind = "boss", marks = {7},
+                  spells = { 29564, 29563, 29408 },
+                  notes = "HIGHEST priority - Holy Priest guest casts Greater Heal (29564) and Power Word: Shield (29408), keeping the pack alive forever if ignored. Also drops Holy Fire (29563) DoT. Shackle Undead or kick every cast." },
+                { id = 17007, name = "Lady Keira Berrybuck",         kind = "boss", marks = {7},
+                  spells = { 29383, 29382, 29381, 29380 },
+                  notes = "Holy Paladin guest - Holy Light (29383) heals, Divine Shield (29382) bubbles, Greater Blessing of Might (29381) on adds, Cleanse (29380) removes debuffs. Priority kill/CC with Catriona; Sap or stun-lock if no shackles." },
+                { id = 19873, name = "Lord Crispin Ference",         kind = "boss", marks = {7},
+                  spells = { 41180, 30013, 41196 },
+                  notes = "Prot Warrior guest - Shield Bash (41180) silences casters, Disarm (30013) on the tank, and pops Shield Wall (41196) for 75% damage reduction. Save CDs to burst through Shield Wall; interrupters on the bash." },
+                { id = 19876, name = "Lord Robin Daris",             kind = "boss", marks = {7},
+                  spells = { 29572, 29573 },
+                  notes = "Arms Warrior guest - Mortal Strike (29572) applies 50% healing reduction and Whirlwind (29573) cleaves nearby. Highest physical-damage guest; tank with cooldowns and keep raid outside whirlwind range." },
+                { id = 16411, name = "Spectral Chef",                kind = "trash", marks = TRASH,
+                  spells = { 29665, 29667 },
+                  notes = "Melee trash with Cleave (29665) and Hamstring (29667). Tank facing away; AoE with Patrons/Waiters." },
+                { id = 16415, name = "Skeletal Waiter",              kind = "trash", marks = TRASH,
+                  spells = { 32441 },
+                  notes = "Brittle Bones (32441) is a passive armor-reduction aura. Shackle Undead works; otherwise AoE-friendly skeleton trash." },
+                { id = 16412, name = "Ghostly Baker",                kind = "trash", marks = TRASH,
+                  spells = { 29675, 29676 },
+                  notes = "Roast (29675) is a fire DoT on the tank and Rolling Pin (29676) is a melee stun-strike. AoE with the pack; nothing dispel-critical." },
+                { id = 16481, name = "Ghastly Haunt",                kind = "trash", marks = TRASH,
+                  spells = { 29712, 29716 },
+                  notes = "Shadow Shock (29712) ranged shadow damage and Ethereal Curse (29716) on raid members. Decurse and AoE down." },
+            },
+        },
+        {
+            name = "Maiden's Pavilion (Guest Chambers)",
+            npcs = {
+                { id = 16457, name = "Maiden of Virtue",   kind = "boss", marks = {8},
+                  spells = { 29511, 29522, 32445, 29512 },
+                  notes = "Stand 8+ yards apart for Holy Ground splash damage. Dispel Repentance fast (1.5s cast - silences priests). Tank in the middle of the room; ranged + healers spread on the walls. Holy Fire DoT can be dispelled." },
+                { id = 16461, name = "Zealous Paramour",   kind = "trash", marks = TRASH,
+                  spells = { 29497, 29490, 29494 },
+                  notes = "Concubine variant - Jealousy (29497) curse causes self-damage on attack, Seduction (29490) charms nearby players for 6s, and Temptation (29494) heals it on hit. Decurse Jealousy; ranged-only DPS." },
+                { id = 184263, name = "Zealous Consort",   kind = "trash", marks = TRASH,
+                  spells = { 29497, 29490, 29494 },
+                  notes = "Concubine variant - same kit as Paramour: Jealousy (29497), Seduction (29490), Temptation (29494). Decurse, ranged DPS, never melee." },
+                { id = 16459, name = "Wanton Hostess",     kind = "trash", marks = TRASH,
+                  spells = { 29505, 29485, 29486, 29477 },
+                  notes = "HIGHEST priority for melee - Banshee Shriek (29505) silences for 5s, plus Alluring Aura (29485, -50% melee taken) and Bewitching Aura (29486, -50% spell taken). Banshee Wail (29477) hits the tank. Melee focuses this; casters stay 20+yd away." },
+                { id = 184261, name = "Wanton Host",       kind = "trash", marks = TRASH,
+                  spells = { 29505, 29485, 29486, 29477 },
+                  notes = "Male Wanton Hostess - identical kit (Banshee Shriek 29505, Alluring Aura 29485, Bewitching Aura 29486, Banshee Wail 29477). Melee close, casters back." },
+                { id = 16460, name = "Night Mistress",     kind = "trash", marks = TRASH,
+                  spells = { 29487, 30358, 29491 },
+                  notes = "Shadow caster - Shadow Bolt (29487), Searing Pain (30358) ranged damage, plus Impending Betrayal (29491) debuff. Sheep or kick every cast; ranged spread." },
+                { id = 184259, name = "Night Lord",        kind = "trash", marks = TRASH,
+                  spells = { 29505, 29485, 29486, 29477 },
+                  notes = "Male variant sharing the Wanton Host's kit - Banshee Shriek (29505) silence, Alluring/Bewitching Auras (29485/29486), Banshee Wail (29477). Melee close, casters back." },
+                { id = 16425, name = "Phantom Guardsman",  kind = "trash", marks = TRASH,
+                  spells = { 29684, 29537 },
+                  notes = "Shield Slam (29684) hits the tank hard and Summon Phantom Hound (29537) adds a pet mid-fight. Kill the Guardsman first to prevent more hound spawns." },
+                { id = 17067, name = "Phantom Hound",      kind = "trash", marks = TRASH,
+                  spells = { 29574 },
+                  notes = "Pet hound - applies Rend (29574) bleed on the tank. AoE down with Guardsmen; pure physical." },
+                { id = 16424, name = "Spectral Sentry",    kind = "trash", marks = TRASH,
+                  spells = { 29576, 29575 },
+                  notes = "Ranged hunter-type - Multi-Shot (29576) hits multiple raiders and basic Shoot (29575). Line of sight or kill priority; tank body-blocks ranged shots to the raid." },
+            },
+        },
+        {
+            name = "Opera Hall",
+            npcs = {
+                { id = 16468, name = "Spectral Patron",              kind = "trash", marks = TRASH,
+                  spells = { 29560, 29555 },
+                  notes = "Kick (29560) interrupts and Left Hook (29555) hits hard on the tank. Low HP - AoE the cluster but interrupt the kicks on healers/casters." },
+
+                { id = 16470, name = "Ghostly Philanthropist",       kind = "trash", marks = TRASH,
+                  spells = { 29609, 29612 },
+                  notes = "Ill Gift (29609) places a magic debuff on a random raider and Incite Rage (29612) buffs nearby ghosts. Dispel the debuff; kill priority for the buff." },
+
+                { id = 16471, name = "Skeletal Usher",     kind = "trash", marks = TRASH,
+                  spells = { 29670, 29666, 29661 },
+                  notes = "Ice Tomb (29670) stuns highest threat AND wipes their threat - both tanks attack each Usher so taunt swaps cleanly. Frost Shock (29666) slows; Magnetic Pull (29661) yanks anyone out of range back to it. Free Action Potion immunes the tomb stun." },
+                { id = 16473, name = "Spectral Performer", kind = "trash", marks = TRASH,
+                  spells = { 29679, 29680, 29683 },
+                  notes = "Keep it OUT of the Spotlight (29683) or it gets a huge damage buff. Bad Poetry (29679) sleeps a random raider (dispel) and on death casts Curtain Call (29680) - a fire AoE bomb. Kill at full raid HP." },
+                { id = 16472, name = "Phantom Stagehand",  kind = "trash", marks = TRASH,
+                  spells = { 29677, 29673 },
+                  notes = "Mallet Toss (29677) ranged stun and Sandbag (29673) AoE drop. Pack trash - interrupt the throws and AoE down with Performers." },
+                { id = 16409, name = "Phantom Guest",      kind = "trash", marks = TRASH,
+                  spells = { 29492, 29513, 29514, 29579, 29580, 29581, 29582, 29583, 29928, 29930 },
+                  notes = "Audience phantom that randomly picks an 'actor' role with wildly varied abilities - no consistent kit to flag. Tank gathers and AoE the cluster; spread for the random ranged abilities." },
+            },
+        },
+        {
+            name = "Opera Event",
+            npcs = {
+                { id = 16812, name = "Barnes the Stage Manager", kind = "trash", marks = TRASH,
+                  spells = {},
+                  notes = "Stage manager and event trigger - speak to him to begin the Opera. Randomly announces Wizard of Oz, Romulo & Julianne, or Big Bad Wolf. Non-combat; despawns when the play begins." },
+
+                -- Variant A: The Wizard of Oz
+                { id = 17535, name = "Dorothee",                kind = "boss", marks = {8},
+                  spells = { 31013, 31014, 31012 },
+                  notes = "Wizard of Oz - main caster. Summons Tito (31014) at ~50% HP; kill the dog first when it spawns. Water Bolt (31012) cannot be interrupted/silenced. Frightened Scream (31013) is a short AoE fear - spread casters out." },
+                { id = 17548, name = "Tito",                     kind = "boss", marks = {7},
+                  spells = { 31016 },
+                  notes = "Dorothee's summoned dog. Yipping (31016) is a short AoE silence/disorient. Burn immediately when summoned - he ignores aggro and chases the silence target." },
+                { id = 17543, name = "Strawman",                 kind = "boss", marks = {6},
+                  spells = { 31046, 31075 },
+                  notes = "Takes bonus damage from fire. Brain Bash (31046) is a 4s stun on the tank - rotate tanks or trinket. Burning Straw (31075) disorients Strawman when fire damage procs it; usable to interrupt his casts." },
+                { id = 17547, name = "Tinhead",                  kind = "boss", marks = {5},
+                  spells = { 845, 31086 },
+                  notes = "Melee mechanical - Cleave (845) hits 3 in front; keep ranged out of the cone. Rust (31086) stacks on himself over time, slowing his attacks - just outlast him." },
+                { id = 17546, name = "Roar",                     kind = "boss", marks = {4},
+                  spells = { 31041, 31013 },
+                  notes = "Tigon melee - Mangle (31041) bleed debuff on tank, stacks with raid bleeds. Uses Frightened Scream (31013) too. Tank with bleed-mitigation cooldowns." },
+                { id = 18168, name = "The Crone",                kind = "boss", marks = {8},
+                  spells = { 33786, 32337 },
+                  notes = "Spawns after Dorothee, Strawman, Tinhead and Roar are all dead. Cyclone (33786) drops tornadoes that knock players up - dodge them. Chain Lightning (32337) hits 5 nearby targets - spread to 10+ yards." },
+
+                -- Variant B: Romulo and Julianne
+                { id = 17534, name = "Julianne",                 kind = "boss", marks = {8},
+                  spells = { 30878, 30907, 30888, 30890 },
+                  notes = "Phase 1 caster. Interrupt Eternal Affection (30878) - self/Romulo heal. Powerful Attraction (30888) random 6s stun. Blinding Passion (30890) Holy DoT. At ~10% she Drinks Poison (30907) to fake-die. BOTH must die within ~10 seconds or they resurrect." },
+                { id = 17533, name = "Romulo",                   kind = "boss", marks = {7},
+                  spells = { 30815, 30841, 30822, 34586 },
+                  notes = "Phase 2 melee, spawns after Julianne 'dies'. Daring (30841) is +35% damage/haste self-buff - dispel (enrage) or burn tank cooldowns. Backward Lunge (30815) knocks tank back; face him away from raid. Poisoned Thrust (30822) + Romulo's Poison (34586) stack on tank. Coordinate kill timer with Julianne." },
+
+                -- Variant C: The Big Bad Wolf
+                { id = 17521, name = "The Big Bad Wolf",         kind = "boss", marks = {8},
+                  spells = { 30753, 30769, 30752, 30761 },
+                  notes = "Single boss. Picks a random raider via Pick Red Riding Hood (30769), applies Red Riding Hood (30753) - target is pacified/silenced and must kite. Terrifying Howl (30752) AoE fear every ~30s - tremor totem / fear ward. Wide Swipe (30761) is a 4s tank stun. Save trinkets for the howl." },
+            },
+        },
+        {
+            name = "Curator's Atrium (Menagerie)",
+            npcs = {
+                { id = 15691, name = "The Curator",      kind = "boss", marks = {8},
+                  spells = { 30383, 26662 },
+                  notes = "Builds energy; at 10 stacks releases Evocate (20s free DPS phase). Astral Flares spawn every ~10s during energy build - AoE them before they reach you. Hateful Bolt hits the 2nd-highest aggro - off-tank threat must stay below MT. Berserks at 20% HP for last-phase burn." },
+                { id = 16504, name = "Arcane Protector", kind = "trash", marks = TRASH,
+                  spells = { 29837 },
+                  notes = "Casts Fist of Stone (29837) on itself (+35% physical damage, slowed) - kite or pop tank cooldown while active. Resistant to magic; melee burn between windows." },
+                { id = 16488, name = "Arcane Anomaly",   kind = "trash", marks = TRASH,
+                  spells = { 29882, 29880, 29885 },
+                  notes = "Mana Shield (29880) absorbs damage from its mana pool - on death casts Loose Mana (29882) restoring raid mana. Casts Arcane Volley (29885) on the group. Kill first in Syphoner pulls to give raid the mana refresh." },
+                { id = 16485, name = "Arcane Watchman",  kind = "trash", marks = TRASH,
+                  spells = { 29765, 29768 },
+                  notes = "Crystal Strike (29765) ignores armor on the tank and Overload (29768) marks a random player who explodes for arcane damage on nearby allies. Immune to Shackle/Taunt/Stun - Overload targets MUST run out." },
+                { id = 16529, name = "Magical Horror",   kind = "trash", marks = TRASH,
+                  spells = { 37078, 29911 },
+                  notes = "Kill these FIRST in their packs - Arcane Volley (37078) AoEs the raid and Power Distortion (29911) raises melee-range spell costs. Then burn the Mana Warps with stuns ready for low HP." },
+                { id = 16530, name = "Mana Warp",        kind = "trash", marks = TRASH,
+                  spells = { 29919 },
+                  notes = "Warp Breach (29919) explodes for heavy arcane AoE if cast finishes at low HP. DO NOT cleave multiple Mana Warps - back-to-back breaches wipe raids; stun (Kidney Shot) at execute range." },
+                { id = 16491, name = "Mana Feeder",      kind = "trash", marks = TRASH,
+                  spells = { 29908 },
+                  notes = "Immune to magic damage - physical DPS only. Casts Astral Bite (29908) draining mana from anyone who spell-casts it. Melee priority; casters auto-attack only." },
+                { id = 16492, name = "Syphoner",         kind = "trash", marks = TRASH,
+                  spells = { 29881 },
+                  notes = "Channels Drain Mana (29881) on nearby spellcasters - interrupt aggressively and CC (Sheep) if not killing first. Kill Arcane Anomalies first to refund mana lost." },
+                { id = 16482, name = "Trapped Soul",     kind = "trash", marks = TRASH,
+                  spells = { 29717, 29718 },
+                  notes = "Pulled on the approach to the Curator, right before the Arcane Watchman pull. Cone of Cold (29717) AoE frost slow on the front, plus Elemental Armor (29718) self-buff (mages can Spellsteal +200 all resistances). Tank facing away from raid; kill alongside Menagerie packs." },
+            },
+        },
+        {
+            name = "Illhoof's Tower",
+            npcs = {
+                { id = 15688, name = "Terestian Illhoof", kind = "boss", marks = {8},
+                  spells = { 30115 },
+                  notes = "Kill Kil'rek first - he gives Illhoof a damage-taken buff while alive. Sacrifice chains a random player to Demon Chains - free them with focused damage. Fiendish Imps spawn at his feet - AoE them or banish if you have warlocks. Don't kill imps too far from the chains or new ones spawn faster." },
+                { id = 17229, name = "Kil'rek",           kind = "boss", marks = {7},
+                  spells = { 30053, 30065 },
+                  notes = "Illhoof's imp companion. Respawns every 30s. Kill quickly each time - while he's alive Illhoof takes 25% less damage." },
+                { id = 17267, name = "Fiendish Imp",      kind = "boss", marks = TRASH,
+                  spells = { 30050 },
+                  notes = "Spawns under Illhoof's feet during the fight - casts Firebolt (30050) at random raid members. AoE down (Hellfire/Blizzard/Consecrate); Banish if they live too long. Kill close to Illhoof - far kills speed up spawn timer." },
+                { id = 17248, name = "Demon Chains",      kind = "boss", marks = TRASH,
+                  spells = { 30206 },
+                  notes = "Spawned by Illhoof's Sacrifice - a passive chain object holding a chained player. Burn its low HP immediately to free the player; no abilities of its own but takes priority over Illhoof." },
+            },
+        },
+        {
+            name = "Aran's Library / Chess Approach",
+            npcs = {
+                { id = 16489, name = "Chaotic Sentience",    kind = "trash", marks = TRASH,
+                  spells = { 29900 },
+                  notes = "Casts Unstable Magic (29900) - random arcane bolts on raid members. Stay spread; interrupt when possible, kill fast." },
+
+                { id = 16524, name = "Shade of Aran",        kind = "boss", marks = {8},
+                  spells = { 30004, 29963, 29964, 29973, 29969 },
+                  notes = "Flame Wreath: NOBODY MOVES (3 stationary markers - moving triggers explosion). Blizzard: move with the storm slowly. Arcane Explosion casts at ~40% mana - stack at the edge and bandage through it. At 40% HP summons 4 water elementals, then loses mana and runs OOM (free DPS). Counterspell priority on Polymorph and big nukes." },
+                { id = 16525, name = "Spell Shade",          kind = "trash", marks = TRASH,
+                  spells = { 29920, 29925, 29926, 29927 },
+                  notes = "Phasing Invisibility (29920) makes them invisible between casts - pull carefully or you'll chain two packs. Casts random Fireball (29925) / Frostbolt (29926) / Shadow Bolt (29927). Interrupt rotation; hunters can Flare to spot them." },
+                { id = 16526, name = "Sorcerous Shade",      kind = "trash", marks = TRASH,
+                  spells = { 29922, 29923, 29924 },
+                  notes = "Stronger Spell Shade variant - casts Fireball Volley (29922), Frostbolt Volley (29923), and Shadow Bolt Volley (29924) AoE versions hitting the raid. HIGHEST kill/CC priority in library packs; spread casters." },
+                { id = 16544, name = "Ethereal Thief",       kind = "trash", marks = TRASH,
+                  spells = { 30036 },
+                  notes = "Casts Steal Magic (30036) - removes a buff from a raid member each cast. Kick aggressively and burn down; especially dangerous when it steals Power Word: Shield or Blessing of Salvation." },
+                { id = 16545, name = "Ethereal Spellfilcher", kind = "trash", marks = TRASH,
+                  spells = { 30036 },
+                  notes = "Same Steal Magic (30036) as the Thief plus a small mana-drain. Kick/kill priority - removes raid buffs and starves healers if left up." },
+                { id = 16540, name = "Shadow Pillager",      kind = "trash", marks = TRASH,
+                  spells = { 29928, 29930, 29492 },
+                  notes = "Casts Immolate (29928), Curse of Agony (29930), and Searing Pain (29492) - basically a warlock. Decurse Curse of Agony; interrupt Immolate; kill priority before Sorcerous Shades." },
+                { id = 16539, name = "Homunculus",           kind = "trash", marks = TRASH,
+                  spells = { 30180 },
+                  notes = "Small construct adds - only cast Firebolt (30180) at random targets. Pure AoE target - drop them with Blizzard/Consecrate/Hellfire." },
+                { id = 17167, name = "Conjured Elemental",   kind = "trash", marks = TRASH,
+                  spells = { 37054 },
+                  notes = "Aran's elemental phase summons - cast Water Bolt (37054) at random raid members. Spread, AoE/Frost Trap them down before they outrange interrupts; Banish (one) is cleanest CC." },
+            },
+        },
+        {
+            name = "Netherspite's Chamber",
+            npcs = {
+                { id = 15689, name = "Netherspite", kind = "boss", marks = {8},
+                  spells = { 37634, 37063 },
+                  notes = "Three beams (Red/Blue/Green) appear during the portal phase - assign one player per beam to absorb it. Don't cross beams (they kill you fast). Beam roles: Red = tank, Blue = healer, Green = DPS. Banish phase he casts Netherbreath cone - avoid the front. Void Zones spawn under his feet - move him." },
+            },
+        },
+        {
+            name = "Master's Terrace",
+            npcs = {
+                { id = 17225, name = "Nightbane", kind = "boss", marks = {8},
+                  spells = { 36922, 30129, 30210, 30130 },
+                  notes = "Optional encounter, summoned by clicking the Brazier on Master's Terrace (requires the boss quest). Ground phase: Charred Earth puddles - move out. Bellowing Roar AoE fear - tremor totem / fear ward / Berserker Rage ready. Air phase casts Smoldering Breath cones; stack to share damage." },
+                { id = 17261, name = "Restless Skeleton", kind = "boss", marks = TRASH,
+                  spells = {},
+                  notes = "Spawned by Nightbane's Rain of Bones during the flight phase - swarms of weak melee skeletons that must be AoE'd down before the dragon lands. No notable abilities; Shackle Undead works on isolated ones, but Hellfire/Consecrate/Blizzard clears them fastest." },
+            },
+        },
+        {
+            name = "Prince's Tower",
+            npcs = {
+                { id = 15690, name = "Prince Malchezaar", kind = "boss", marks = {8},
+                  spells = { 30843, 30852, 30854 },
+                  notes = "Phase 1 (100-60%): Enfeeble debuff drops 5 random targets to 1 HP - healers MUST be ready immediately (especially Renew/HoTs ticking pre-cast). Phase 2 (60-30%): Infernals start falling around the room - kite, predict safe spots. Phase 3 (<30%): Infernals continue + Shadow Nova hits the raid + tanks need cooldowns for Sunder Armor stacks. Stay spread the whole fight." },
+                { id = 16595, name = "Fleshbeast",        kind = "trash", marks = TRASH,
+                  spells = { 29935, 29939 },
+                  notes = "Melee pack mob - Gaping Maw (29935) bleed and Infectious Poison (29939) DoT on random raiders. Cleanse poisons; tank facing away from raid." },
+                { id = 16596, name = "Greater Fleshbeast", kind = "trash", marks = TRASH,
+                  spells = { 29935, 29939 },
+                  notes = "Larger Fleshbeast - same kit (Gaping Maw 29935, Infectious Poison 29939) but much harder melee. Tank with cooldowns; healers focus tank while raid abolishes poison." },
+            },
+        },
+    },
+})
+
+-- Atlas Bosses-leaf tree (Morpheours-spec). Virtual parents synthesise
+-- containers around groups our flat NPC data doesn't already wrap:
+-- Servant Quarters' three rares, and the three Opera Event variants.
+-- "Netherspike" in Morpheours's spec is the canonical "Netherspite".
+L3F:RegisterBossTree("Karazhan", {
+    { name = "Attumen the Huntsman", npcID = 16152, subs = {
+        { npcID = 16151 },  -- Midnight
+    } },
+    { name = "Servant Quarters", virtual = true, subs = {
+        { npcID = 16179 },  -- Hyakiss the Lurker
+        { npcID = 16181 },  -- Rokad the Ravager
+        { npcID = 16180 },  -- Shadikith the Glider
+    } },
+    { name = "Moroes", npcID = 15687, subs = {
+        { npcID = 19874 },  -- Baron Rafe Dreuger
+        { npcID = 19875 },  -- Baroness Dorothea Millstipe
+        { npcID = 19872 },  -- Lady Catriona Von'Indi
+        { npcID = 17007 },  -- Lady Keira Berrybuck
+        { npcID = 19873 },  -- Lord Crispin Ference
+        { npcID = 19876 },  -- Lord Robin Daris
+    } },
+    { name = "Maiden of Virtue", npcID = 16457, subs = {} },
+    { name = "Opera Event: The Wizard of Oz", virtual = true, subs = {
+        { npcID = 17535 },  -- Dorothee
+        { npcID = 17548 },  -- Tito
+        { npcID = 17543 },  -- Strawman
+        { npcID = 17547 },  -- Tinhead
+        { npcID = 17546 },  -- Roar
+        { npcID = 18168 },  -- The Crone
+    } },
+    { name = "Opera Event: Romulo & Julianne", virtual = true, subs = {
+        { npcID = 17533 },  -- Romulo
+        { npcID = 17534 },  -- Julianne
+    } },
+    { name = "Opera Event: The Big Bad Wolf", virtual = true, subs = {
+        { npcID = 17521 },  -- The Big Bad Wolf
+    } },
+    { name = "The Curator", npcID = 15691, subs = {} },
+    { name = "Terestian Illhoof", npcID = 15688, subs = {
+        { npcID = 17229 },  -- Kil'rek
+        { npcID = 17248 },  -- Demon Chains
+        { npcID = 17267 },  -- Fiendish Imp
+    } },
+    { name = "Shade of Aran", npcID = 16524, subs = {} },
+    { name = "Netherspite", npcID = 15689, subs = {} },
+    { name = "Nightbane", npcID = 17225, subs = {
+        { npcID = 17261 },  -- Restless Skeleton
+    } },
+    { name = "Prince Malchezaar", npcID = 15690, subs = {} },
+})

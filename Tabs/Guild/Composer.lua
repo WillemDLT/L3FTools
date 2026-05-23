@@ -1,0 +1,1887 @@
+-- =============================================================
+-- L3FTools - Tabs/Guild/Composer.lua
+-- =============================================================
+-- TBC Classic Raid Comp Planner. Personal mode: client-side comp
+-- with multiple named profiles, plus an L3F2 export/import string.
+-- 27 specs (9 classes x 3) drag-drop or click-add into up to 9
+-- groups of 5 slots + a Bench. Live buff/debuff coverage panel.
+-- =============================================================
+
+local addonName, L3F = ...
+
+-- =============================================================
+-- 1. SPEC + BUFF/DEBUFF DATA
+-- =============================================================
+-- Icon paths follow the in-client texture root. Where the literal
+-- "Interface\\Icons\\<name>" doesn't resolve to a recognisable
+-- texture, the row will render as the default question-mark glyph
+-- and a beta-tester correction is the path forward (one entry per
+-- spec is easy to swap). Buffs/debuffs are the canonical
+-- raid-tracking strings - the bottom coverage panel keys off them.
+local SPECS = {
+    -- =============== DRUID ===============
+    { key = "balance", class = "Druid", spec = "Balance",
+      label = "Balance Druid",
+      icon = "Interface\\Icons\\Spell_Nature_StarFall",
+      buffs   = { "Mark of the Wild", "Improved Mark of the Wild", "Innervate", "Moonkin Form" },
+      debuffs = { "Faerie Fire", "Improved Faerie Fire", "Insect Swarm" },
+      partyAuras = {
+          { name = "Moonkin Aura", icon = "Interface\\Icons\\Spell_Nature_ForceOfNature" },
+      } },
+    { key = "feral", class = "Druid", spec = "Feral",
+      label = "Feral Druid",
+      icon = "Interface\\Icons\\Ability_Druid_CatForm",
+      buffs   = { "Mark of the Wild", "Innervate", "Leader of the Pack" },
+      debuffs = { "Faerie Fire", "Mangle" },
+      partyAuras = {
+          { name = "Leader of the Pack", icon = "Interface\\Icons\\Spell_Nature_UnyeildingStamina" },
+      } },
+    -- Bear-form sibling of Feral. Identical buff/debuff coverage (same
+    -- talent tree, same auras) - the only differences are the spell
+    -- icon (Bear Form 5487 vs Cat Form 768) and the role count (tank
+    -- vs dps). Hidden from the palette: the Feral palette icon
+    -- handles the swap via right-click. Slot rows toggle in place via
+    -- right-click too. Both keys round-trip through serialize/import.
+    { key = "feralbear", class = "Druid", spec = "Feral",
+      label = "Feral Druid (Bear)",
+      icon = "Interface\\Icons\\Ability_Racial_BearForm",
+      buffs   = { "Mark of the Wild", "Innervate", "Leader of the Pack" },
+      debuffs = { "Faerie Fire", "Mangle" },
+      partyAuras = {
+          { name = "Leader of the Pack", icon = "Interface\\Icons\\Spell_Nature_UnyeildingStamina" },
+      },
+      hiddenFromPalette = true },
+    { key = "restodruid", class = "Druid", spec = "Restoration",
+      label = "Restoration Druid",
+      icon = "Interface\\Icons\\Spell_Nature_Healingtouch",
+      buffs   = { "Mark of the Wild", "Improved Mark of the Wild", "Innervate", "Tree of Life" },
+      debuffs = { "Faerie Fire" },
+      partyAuras = {
+          { name = "Tree of Life", icon = "Interface\\Icons\\Ability_Druid_TreeofLife" },
+      } },
+
+    -- =============== HUNTER ===============
+    { key = "bm", class = "Hunter", spec = "Beast Mastery",
+      label = "Beast Mastery Hunter",
+      icon = "Interface\\Icons\\Ability_Hunter_BeastTaming",
+      buffs   = { "Ferocious Inspiration" },
+      debuffs = { "Scorpid Sting" },
+      partyAuras = {
+          { name = "Ferocious Inspiration", icon = "Interface\\Icons\\Ability_Hunter_FerociousInspiration" },
+      } },
+    { key = "mm", class = "Hunter", spec = "Marksmanship",
+      label = "Marksmanship Hunter",
+      icon = "Interface\\Icons\\Ability_Marksmanship",
+      buffs   = { "Trueshot Aura" },
+      debuffs = { "Scorpid Sting" },
+      partyAuras = {
+          { name = "Trueshot Aura", icon = "Interface\\Icons\\Ability_TrueShot" },
+      } },
+    { key = "sv", class = "Hunter", spec = "Survival",
+      label = "Survival Hunter",
+      icon = "Interface\\Icons\\Ability_Hunter_SwiftStrike",
+      buffs   = {},
+      debuffs = { "Scorpid Sting", "Expose Weakness" },
+      partyAuras = {} },
+
+    -- =============== MAGE ===============
+    { key = "arcanemage", class = "Mage", spec = "Arcane",
+      label = "Arcane Mage",
+      icon = "Interface\\Icons\\Spell_Holy_MagicalSentry",
+      buffs   = { "Arcane Intellect" },
+      debuffs = {},
+      partyAuras = {} },
+    { key = "firemage", class = "Mage", spec = "Fire",
+      label = "Fire Mage",
+      icon = "Interface\\Icons\\Spell_Fire_FireBolt02",
+      buffs   = { "Arcane Intellect" },
+      debuffs = { "Improved Scorch" },
+      partyAuras = {} },
+    { key = "frostmage", class = "Mage", spec = "Frost",
+      label = "Frost Mage",
+      icon = "Interface\\Icons\\Spell_Frost_FrostBolt02",
+      buffs   = { "Arcane Intellect" },
+      debuffs = { "Winter's Chill" },
+      partyAuras = {} },
+
+    -- =============== PALADIN ===============
+    { key = "holypala", class = "Paladin", spec = "Holy",
+      label = "Holy Paladin",
+      icon = "Interface\\Icons\\Spell_Holy_HolyBolt",
+      buffs   = { "Blessing of Kings", "Devotion Aura" },
+      debuffs = {},
+      partyAuras = {
+          { name = "Devotion Aura", icon = "Interface\\Icons\\Spell_Holy_DevotionAura" },
+      } },
+    { key = "protpala", class = "Paladin", spec = "Protection",
+      label = "Protection Paladin",
+      icon = "Interface\\Icons\\Spell_Holy_DevotionAura",
+      buffs   = { "Blessing of Kings", "Blessing of Sanctuary", "Devotion Aura" },
+      debuffs = {},
+      partyAuras = {
+          { name = "Devotion Aura", icon = "Interface\\Icons\\Spell_Holy_DevotionAura" },
+      } },
+    { key = "retpala", class = "Paladin", spec = "Retribution",
+      label = "Retribution Paladin",
+      icon = "Interface\\Icons\\Spell_Holy_AuraOfLight",
+      buffs   = { "Blessing of Kings", "Sanctity Aura" },
+      debuffs = { "Improved Seal of the Crusader" },
+      partyAuras = {
+          { name = "Sanctity Aura", icon = "Interface\\Icons\\Spell_Holy_MindVision" },
+      } },
+
+    -- =============== PRIEST ===============
+    { key = "discpriest", class = "Priest", spec = "Discipline",
+      label = "Discipline Priest",
+      icon = "Interface\\Icons\\Spell_Holy_PowerWordShield",
+      buffs   = { "Pain Suppression", "Power Word: Fortitude", "Shadow Protection", "Divine Spirit" },
+      debuffs = {},
+      partyAuras = {} },
+    { key = "holypriest", class = "Priest", spec = "Holy",
+      label = "Holy Priest",
+      icon = "Interface\\Icons\\Spell_Holy_GuardianSpirit",
+      buffs   = { "Power Word: Fortitude", "Shadow Protection", "Divine Spirit" },
+      debuffs = {},
+      partyAuras = {} },
+    { key = "shadowpriest", class = "Priest", spec = "Shadow",
+      label = "Shadow Priest",
+      icon = "Interface\\Icons\\Spell_Shadow_ShadowWordPain",
+      buffs   = { "Power Word: Fortitude", "Shadow Protection" },
+      debuffs = { "Shadow Weaving" },
+      partyAuras = {
+          { name = "Vampiric Touch", icon = "Interface\\Icons\\Spell_Holy_Stoicism" },
+      } },
+
+    -- =============== ROGUE ===============
+    { key = "assrogue", class = "Rogue", spec = "Assassination",
+      label = "Assassination Rogue",
+      icon = "Interface\\Icons\\Ability_Rogue_Eviscerate",
+      buffs   = {},
+      debuffs = {},
+      partyAuras = {} },
+    { key = "combatrogue", class = "Rogue", spec = "Combat",
+      label = "Combat Rogue",
+      icon = "Interface\\Icons\\Ability_BackStab",
+      buffs   = {},
+      debuffs = { "Improved Expose Armor" },
+      partyAuras = {} },
+    { key = "subrogue", class = "Rogue", spec = "Subtlety",
+      label = "Subtlety Rogue",
+      icon = "Interface\\Icons\\Ability_Stealth",
+      buffs   = {},
+      debuffs = { "Hemorrhage" },
+      partyAuras = {} },
+
+    -- =============== SHAMAN ===============
+    { key = "elesham", class = "Shaman", spec = "Elemental",
+      label = "Elemental Shaman",
+      icon = "Interface\\Icons\\Spell_Nature_Lightning",
+      buffs   = { "Bloodlust", "Totem of Wrath" },
+      debuffs = {},
+      partyAuras = {
+          { name = "Totem of Wrath", icon = "Interface\\Icons\\Spell_Fire_TotemOfWrath" },
+          { name = "Wrath of Air Totem", icon = "Interface\\Icons\\Spell_Nature_SlowingTotem" },
+      } },
+    { key = "enhsham", class = "Shaman", spec = "Enhancement",
+      label = "Enhancement Shaman",
+      icon = "Interface\\Icons\\Spell_Nature_LightningShield",
+      buffs   = { "Bloodlust", "Unleashed Rage" },
+      debuffs = {},
+      partyAuras = {
+          { name = "Strength of Earth Totem", icon = "Interface\\Icons\\Spell_Nature_EarthBindTotem" },
+          { name = "Windfury Totem", icon = "Interface\\Icons\\Spell_Nature_Cyclone" },
+      } },
+    { key = "restosham", class = "Shaman", spec = "Restoration",
+      label = "Restoration Shaman",
+      icon = "Interface\\Icons\\Spell_Nature_MagicImmunity",
+      buffs   = { "Bloodlust", "Earth Shield", "Mana Tide Totem" },
+      debuffs = {},
+      partyAuras = {
+          { name = "Mana Tide Totem", icon = "Interface\\Icons\\Spell_Frost_SummonWaterElemental" },
+          { name = "Mana Spring Totem", icon = "Interface\\Icons\\Spell_Nature_ManaRegenTotem" },
+      } },
+
+    -- =============== WARLOCK ===============
+    { key = "afflock", class = "Warlock", spec = "Affliction",
+      label = "Affliction Warlock",
+      icon = "Interface\\Icons\\Spell_Shadow_DeathCoil",
+      buffs   = { "Improved Imp" },
+      debuffs = { "Improved Shadow Bolt", "Malediction" },
+      partyAuras = {
+          { name = "Blood Pact", icon = "Interface\\Icons\\Spell_Shadow_BloodBoil" },
+      } },
+    { key = "demolock", class = "Warlock", spec = "Demonology",
+      label = "Demonology Warlock",
+      icon = "Interface\\Icons\\Spell_Shadow_Metamorphosis",
+      buffs   = { "Improved Healthstone" },
+      debuffs = { "Improved Shadow Bolt" },
+      partyAuras = {} },
+    { key = "destrolock", class = "Warlock", spec = "Destruction",
+      label = "Destruction Warlock",
+      icon = "Interface\\Icons\\Spell_Shadow_RainOfFire",
+      buffs   = { "Improved Healthstone" },
+      debuffs = { "Improved Shadow Bolt" },
+      partyAuras = {} },
+
+    -- =============== WARRIOR ===============
+    { key = "armswar", class = "Warrior", spec = "Arms",
+      label = "Arms Warrior",
+      icon = "Interface\\Icons\\Ability_Warrior_SavageBlow",
+      buffs   = { "Battle Shout" },
+      debuffs = { "Blood Frenzy", "Improved Demoralizing Shout", "Improved Thunder Clap" },
+      partyAuras = {} },
+    { key = "furywar", class = "Warrior", spec = "Fury",
+      label = "Fury Warrior",
+      icon = "Interface\\Icons\\Ability_Warrior_InnerRage",
+      buffs   = { "Battle Shout" },
+      debuffs = { "Improved Demoralizing Shout", "Improved Thunder Clap" },
+      partyAuras = {} },
+    { key = "protwar", class = "Warrior", spec = "Protection",
+      label = "Protection Warrior",
+      icon = "Interface\\Icons\\Ability_Warrior_DefensiveStance",
+      buffs   = { "Commanding Shout" },
+      debuffs = { "Improved Demoralizing Shout", "Improved Thunder Clap" },
+      partyAuras = {} },
+}
+
+-- Class display order in the palette: 5 classes in row 1, 4 in row 2.
+local CLASS_ORDER = {
+    "Druid", "Hunter", "Mage", "Paladin", "Priest",
+    "Rogue", "Shaman", "Warlock", "Warrior",
+}
+
+-- Master raid-wide buff list (alphabetical) for the coverage panel.
+local BUFFS_LIST = {
+    "Arcane Intellect", "Battle Shout",
+    "Blessing of Kings", "Blessing of Sanctuary",
+    "Bloodlust", "Commanding Shout",
+    "Devotion Aura", "Divine Spirit",
+    "Earth Shield", "Ferocious Inspiration",
+    "Improved Healthstone", "Improved Imp",
+    "Improved Mark of the Wild", "Innervate",
+    "Leader of the Pack", "Mana Tide Totem",
+    "Mark of the Wild", "Moonkin Form",
+    "Pain Suppression", "Power Word: Fortitude",
+    "Sanctity Aura", "Shadow Protection",
+    "Totem of Wrath", "Tree of Life",
+    "Trueshot Aura", "Unleashed Rage",
+}
+
+local DEBUFFS_LIST = {
+    "Blood Frenzy", "Expose Weakness",
+    "Faerie Fire", "Hemorrhage",
+    "Improved Demoralizing Shout", "Improved Expose Armor",
+    "Improved Faerie Fire", "Improved Scorch",
+    "Improved Seal of the Crusader", "Improved Shadow Bolt",
+    "Improved Thunder Clap", "Insect Swarm",
+    "Malediction", "Mangle",
+    "Scorpid Sting", "Shadow Weaving",
+    "Winter's Chill",
+}
+
+-- TBC max-rank spell IDs used by the buff/debuff tooltip on hover.
+-- GameTooltip:SetSpellByID resolves these to the canonical, localized
+-- in-game tooltip (rank, mana, range, cast time, description). IDs
+-- verified against Wowhead /tbc/ + multiple secondary databases
+-- (wowclassicdb.com, cavernoftime.com) in 0.16.3 - Morphéours saw
+-- rank-1 tooltips on several entries because earlier IDs pointed at
+-- talent rank 1 / spell rank 1 instead of the max-rank variant.
+local SPELL_IDS = {
+    -- Buffs
+    ["Arcane Intellect"]              = 27126,  -- Rank 6 (TBC max)
+    ["Battle Shout"]                  = 25289,  -- Rank 8 (TBC max)
+    ["Blessing of Kings"]             = 20217,  -- Single rank
+    ["Blessing of Sanctuary"]         = 27168,  -- Rank 6 (TBC max)
+    ["Bloodlust"]                     =  2825,  -- Single rank
+    ["Commanding Shout"]              =   469,  -- TBC warrior lvl 68; was incorrectly 25289 (Battle Shout)
+    ["Devotion Aura"]                 = 27149,  -- Rank 8 (TBC max)
+    ["Divine Spirit"]                 = 25312,  -- Rank 5 (TBC max)
+    ["Earth Shield"]                  = 32594,  -- Rank 3 (TBC max)
+    ["Ferocious Inspiration"]         = 34460,  -- Rank 3 talent (TBC max)
+    ["Improved Healthstone"]          = 18692,  -- Rank 2 talent (TBC max)
+    ["Improved Imp"]                  = 18696,  -- Rank 3 talent (TBC max)
+    ["Improved Mark of the Wild"]     = 17051,  -- Rank 5 talent (TBC max)
+    ["Innervate"]                     = 29166,  -- Single rank
+    ["Leader of the Pack"]            = 24932,  -- Aura
+    ["Mana Tide Totem"]               = 16190,  -- Single TBC rank; was 16191 (didn't exist)
+    ["Mark of the Wild"]              = 26990,  -- Rank 8 (TBC max)
+    ["Moonkin Form"]                  = 24858,  -- Single rank
+    ["Pain Suppression"]              = 33206,  -- Single rank
+    ["Power Word: Fortitude"]         = 25389,  -- Rank 7 (TBC max)
+    ["Sanctity Aura"]                 = 20218,  -- Base aura single rank; was 31870 (Imp SA talent rank 2)
+    ["Shadow Protection"]             = 25433,  -- Rank 4 (TBC max)
+    ["Totem of Wrath"]                = 30706,  -- Single rank talent
+    ["Tree of Life"]                  = 33891,  -- Single rank talent
+    ["Trueshot Aura"]                 = 27066,  -- Rank 4 (TBC max)
+    ["Unleashed Rage"]                = 30802,  -- Rank 5 talent (TBC max)
+    -- Debuffs
+    ["Blood Frenzy"]                  = 29859,  -- Rank 2 talent (TBC max)
+    ["Expose Weakness"]               = 34503,  -- Rank 3 talent (TBC max)
+    ["Faerie Fire"]                   =  9907,  -- Rank 5 (TBC max); was 26993 (doesn't exist)
+    ["Hemorrhage"]                    = 26864,  -- Rank 4 (TBC max); was 16511 (talent / rank 1)
+    ["Improved Demoralizing Shout"]   = 12879,  -- Rank 5 talent (TBC max)
+    ["Improved Expose Armor"]         = 14169,  -- Rank 2 talent (TBC max)
+    ["Improved Faerie Fire"]          = 33602,  -- Rank 3 talent (TBC max)
+    ["Improved Scorch"]               = 22959,  -- Rank 5 talent (TBC max)
+    ["Improved Seal of the Crusader"] = 33557,  -- Rank 3 talent (TBC max); was 20335 (Seal rank 1)
+    ["Improved Shadow Bolt"]          = 17800,  -- Rank 5 talent (TBC max)
+    ["Improved Thunder Clap"]         = 12666,  -- Rank 3 talent (TBC max)
+    ["Insect Swarm"]                  = 27013,  -- Rank 6 (TBC max)
+    ["Malediction"]                   = 32379,  -- Rank 3 talent (TBC max)
+    ["Mangle"]                        = 33917,  -- The Mangle talent itself; was 33878 (Mangle Bear rank 1)
+    ["Scorpid Sting"]                 =  3043,  -- Single rank
+    ["Shadow Weaving"]                = 15334,  -- Rank 5 talent (TBC max)
+    ["Winter's Chill"]                = 28593,  -- Rank 5 talent (TBC max)
+}
+
+local SPEC_LOOKUP = {}
+for _, s in ipairs(SPECS) do SPEC_LOOKUP[s.key] = s end
+
+-- Spec -> role for the Display popup's role-count footer. Anything
+-- not listed here counts as "dps". `feral` (Cat) defaults to dps;
+-- `feralbear` (the right-click toggle's other half) is a tank.
+local SPEC_ROLE = {
+    protpala    = "tank",
+    protwar     = "tank",
+    feralbear   = "tank",
+    holypala    = "healer",
+    discpriest  = "healer",
+    holypriest  = "healer",
+    restodruid  = "healer",
+    restosham   = "healer",
+}
+
+-- Resolves the currently-active Feral form spec key based on the
+-- per-account `L3F.db.composer.feralForm` toggle. The Feral palette
+-- icon and any newly placed Feral slot use this; existing slots keep
+-- whichever key they were stored with until the user right-clicks.
+local function activeFeralKey()
+    if L3F.db and L3F.db.composer and L3F.db.composer.feralForm == "bear" then
+        return "feralbear"
+    end
+    return "feral"
+end
+
+
+-- =============================================================
+-- 2. PROFILE STATE
+-- =============================================================
+-- 0.16.0 limits: 1-5 groups visible, 0-5 benches visible. Defaults to
+-- a full 5-group raid + a single 5-slot bench so the player lands on
+-- the standard 25-man-plus-substitutes layout without needing to add
+-- anything by hand.
+local GROUP_MIN, GROUP_MAX = 1, 5
+local BENCH_MIN, BENCH_MAX = 0, 5
+local DEFAULT_GROUP_COUNT = 5
+local DEFAULT_BENCH_COUNT = 1
+
+local function newEmptyProfile()
+    local p = {
+        groups = {}, groupCount = DEFAULT_GROUP_COUNT,
+        benches = {}, benchCount = DEFAULT_BENCH_COUNT,
+    }
+    for g = 1, GROUP_MAX do
+        local slots = {}
+        for i = 1, 5 do slots[i] = nil end
+        p.groups[g] = { name = "Group " .. g, slots = slots }
+    end
+    for b = 1, BENCH_MAX do
+        local slots = {}
+        for i = 1, 5 do slots[i] = nil end
+        p.benches[b] = { name = (b == 1) and "Bench" or ("Bench " .. b), slots = slots }
+    end
+    return p
+end
+
+local function ensureComposerState()
+    L3F.db.composer = L3F.db.composer or {}
+    -- Feral Cat/Bear toggle - account-wide setting. Cat is the more
+    -- common spec; bear stays sticky once selected so a tank-build
+    -- raider doesn't have to toggle every session.
+    if L3F.db.composer.feralForm ~= "bear" then
+        L3F.db.composer.feralForm = "cat"
+    end
+    if not L3F.db.composer.profiles or not next(L3F.db.composer.profiles) then
+        L3F.db.composer.profiles = { ["Default"] = newEmptyProfile() }
+        L3F.db.composer.activeProfile = "Default"
+    end
+    if not L3F.db.composer.activeProfile
+       or not L3F.db.composer.profiles[L3F.db.composer.activeProfile] then
+        L3F.db.composer.activeProfile =
+            (next(L3F.db.composer.profiles)) or "Default"
+        L3F.db.composer.profiles[L3F.db.composer.activeProfile] =
+            L3F.db.composer.profiles[L3F.db.composer.activeProfile] or newEmptyProfile()
+    end
+    local p = L3F.db.composer.profiles[L3F.db.composer.activeProfile]
+    p.groupCount = math.max(GROUP_MIN, math.min(GROUP_MAX, p.groupCount or DEFAULT_GROUP_COUNT))
+    p.groups = p.groups or {}
+    for g = 1, GROUP_MAX do
+        p.groups[g] = p.groups[g] or { name = "Group " .. g, slots = {} }
+        for i = 1, 5 do p.groups[g].slots[i] = p.groups[g].slots[i] or nil end
+    end
+    -- Heal benches array. Pre-0.16.0 profiles may have a singleton
+    -- `bench` field (0.15.0) or nothing (0.15.1) - migrate either to
+    -- the new `benches[1..BENCH_MAX]` array, keeping the legacy bench's
+    -- name + slots as benches[1] if it existed.
+    p.benches = p.benches or {}
+    if p.bench and type(p.bench) == "table" then
+        p.benches[1] = p.benches[1] or p.bench
+        p.bench = nil
+    end
+    p.benchCount = math.max(BENCH_MIN, math.min(BENCH_MAX, p.benchCount or DEFAULT_BENCH_COUNT))
+    for b = 1, BENCH_MAX do
+        p.benches[b] = p.benches[b] or { name = (b == 1) and "Bench" or ("Bench " .. b), slots = {} }
+        for i = 1, 5 do p.benches[b].slots[i] = p.benches[b].slots[i] or nil end
+    end
+end
+
+local function currentProfile()
+    ensureComposerState()
+    return L3F.db.composer.profiles[L3F.db.composer.activeProfile]
+end
+
+
+-- =============================================================
+-- 3. BUFF/DEBUFF COVERAGE
+-- =============================================================
+-- Walk every filled slot. Group slots feed both raid-wide coverage
+-- AND per-group party-aura icons. Bench slots feed ONLY the per-bench
+-- aura icons (a hint of what auras would activate if subbed in) -
+-- benched players are inactive by definition, so their buffs/debuffs
+-- do NOT light up the global coverage panel.
+local function computeCoverage()
+    local covered = { buffs = {}, debuffs = {} }
+    local groupAuras = {}
+    local benchAuras = {}
+    local p = currentProfile()
+
+    local function tallyAurasOnly(slots, into)
+        local seen = {}
+        for _, slot in pairs(slots) do
+            if slot and slot.specKey then
+                local s = SPEC_LOOKUP[slot.specKey]
+                if s then
+                    for _, a in ipairs(s.partyAuras or {}) do
+                        if not seen[a.name] then
+                            seen[a.name] = true
+                            table.insert(into, a)
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    for g = 1, p.groupCount do
+        groupAuras[g] = {}
+        local seenAura = {}
+        for _, slot in pairs(p.groups[g].slots) do
+            if slot and slot.specKey then
+                local s = SPEC_LOOKUP[slot.specKey]
+                if s then
+                    for _, b in ipairs(s.buffs or {})   do covered.buffs[b]   = true end
+                    for _, d in ipairs(s.debuffs or {}) do covered.debuffs[d] = true end
+                    for _, a in ipairs(s.partyAuras or {}) do
+                        if not seenAura[a.name] then
+                            seenAura[a.name] = true
+                            table.insert(groupAuras[g], a)
+                        end
+                    end
+                end
+            end
+        end
+    end
+    for b = 1, p.benchCount do
+        benchAuras[b] = {}
+        tallyAurasOnly(p.benches[b].slots, benchAuras[b])
+    end
+    return covered, groupAuras, benchAuras
+end
+
+
+-- =============================================================
+-- 4. PROFILE EXPORT / IMPORT
+-- =============================================================
+local LibDeflate = LibStub and LibStub("LibDeflate", true)
+
+-- Co-op snapshot debounce. The Composer follows a mutate-then-refresh
+-- pattern with ~15 mutation sites; per-mutation snapshot broadcast is
+-- fine bandwidth-wise (~1KB profile), but a burst (e.g. drag-swap that
+-- writes two slots in succession) would send two snapshots back-to-
+-- back. Debounce at 300ms so a burst coalesces into one packet.
+local snapshotPending = false
+local function notifyComposerEdit()
+    if snapshotPending then return end
+    if not (L3F.ComposerCoOp and L3F.ComposerCoOp.IsActive
+            and L3F.ComposerCoOp.IsActive()) then
+        return
+    end
+    snapshotPending = true
+    C_Timer.After(0.3, function()
+        snapshotPending = false
+        if L3F.ComposerCoOp and L3F.ComposerCoOp.BroadcastSnapshot then
+            L3F.ComposerCoOp.BroadcastSnapshot()
+        end
+    end)
+end
+
+-- Wire format (COMP2): NAME|GC|BC|G1..G5|B1..B5|GN1//..//GN5|BN1//..//BN5
+-- Each Gx/Bx slot row is 5 comma-separated "speckey:label" cells.
+-- COMP1 (older 0.15.x) is still accepted by the decoder for forward
+-- compatibility - it doesn't carry the bench count or per-bench rows.
+local function serializeProfile(name, profile)
+    local function encodeSlot(slot)
+        if not slot or not slot.specKey then return "" end
+        local label = (slot.label or ""):gsub("|", "/"):gsub(",", " ")
+        return slot.specKey .. ":" .. label
+    end
+    local parts = {
+        name:gsub("|", "/"),
+        tostring(profile.groupCount or DEFAULT_GROUP_COUNT),
+        tostring(profile.benchCount or DEFAULT_BENCH_COUNT),
+    }
+    for g = 1, GROUP_MAX do
+        local row = {}
+        for i = 1, 5 do row[i] = encodeSlot(profile.groups[g] and profile.groups[g].slots[i]) end
+        table.insert(parts, table.concat(row, ","))
+    end
+    for b = 1, BENCH_MAX do
+        local row = {}
+        for i = 1, 5 do row[i] = encodeSlot(profile.benches[b] and profile.benches[b].slots[i]) end
+        table.insert(parts, table.concat(row, ","))
+    end
+    local gNames = {}
+    for g = 1, GROUP_MAX do gNames[g] = (profile.groups[g].name or ("Group " .. g)):gsub("|", "/") end
+    table.insert(parts, table.concat(gNames, "//"))
+    local bNames = {}
+    for b = 1, BENCH_MAX do bNames[b] = (profile.benches[b].name or ("Bench " .. b)):gsub("|", "/") end
+    table.insert(parts, table.concat(bNames, "//"))
+
+    local inner = "COMP2|" .. table.concat(parts, "|")
+    if LibDeflate then
+        local compressed = LibDeflate:CompressDeflate(inner)
+        return "L3F2C:" .. LibDeflate:EncodeForPrint(compressed)
+    end
+    return "L3F1C:" .. inner
+end
+
+local function deserializeProfile(str)
+    if type(str) ~= "string" then return nil, "Not a string" end
+    str = str:gsub("^%s+", ""):gsub("%s+$", "")
+    local inner
+    if str:sub(1, 6) == "L3F2C:" then
+        if not LibDeflate then return nil, "LibDeflate not loaded; cannot decode" end
+        local encoded = str:sub(7)
+        local compressed = LibDeflate:DecodeForPrint(encoded)
+        if not compressed then return nil, "Decode failed (corrupted string?)" end
+        inner = LibDeflate:DecompressDeflate(compressed)
+        if not inner then return nil, "Decompress failed (corrupted string?)" end
+    elseif str:sub(1, 6) == "L3F1C:" then
+        inner = str:sub(7)
+    else
+        return nil, "Invalid format (expected L3F1C: or L3F2C:)"
+    end
+    local version
+    if inner:match("^COMP2|") then version = 2; inner = inner:sub(7)
+    elseif inner:match("^COMP1|") then version = 1; inner = inner:sub(7)
+    else return nil, "Not a Composer profile string" end
+
+    local parts = {}
+    for piece in (inner .. "|"):gmatch("([^|]*)|") do table.insert(parts, piece) end
+
+    local p = newEmptyProfile()
+    local function decodeRow(row, into)
+        local i = 0
+        for slotStr in ((row or "") .. ","):gmatch("([^,]*),") do
+            i = i + 1
+            if i > 5 then break end
+            if slotStr ~= "" then
+                local key, label = slotStr:match("^([^:]+):(.*)$")
+                if key and SPEC_LOOKUP[key] then
+                    into[i] = { specKey = key, label = label ~= "" and label or SPEC_LOOKUP[key].label }
+                end
+            end
+        end
+    end
+
+    if version == 2 then
+        if #parts < 3 + GROUP_MAX + BENCH_MAX then
+            return nil, "Truncated COMP2 string"
+        end
+        p.groupCount = math.max(GROUP_MIN, math.min(GROUP_MAX, tonumber(parts[2]) or DEFAULT_GROUP_COUNT))
+        p.benchCount = math.max(BENCH_MIN, math.min(BENCH_MAX, tonumber(parts[3]) or DEFAULT_BENCH_COUNT))
+        for g = 1, GROUP_MAX do decodeRow(parts[3 + g], p.groups[g].slots) end
+        for b = 1, BENCH_MAX do decodeRow(parts[3 + GROUP_MAX + b], p.benches[b].slots) end
+        local gNameRow = parts[4 + GROUP_MAX + BENCH_MAX]
+        local bNameRow = parts[5 + GROUP_MAX + BENCH_MAX]
+        if gNameRow and gNameRow ~= "" then
+            local g = 0
+            for nm in (gNameRow .. "//"):gmatch("([^/][^/]*)//") do
+                g = g + 1; if g > GROUP_MAX then break end
+                p.groups[g].name = nm
+            end
+        end
+        if bNameRow and bNameRow ~= "" then
+            local b = 0
+            for nm in (bNameRow .. "//"):gmatch("([^/][^/]*)//") do
+                b = b + 1; if b > BENCH_MAX then break end
+                p.benches[b].name = nm
+            end
+        end
+    else
+        -- Legacy COMP1: only groups + optional group-names row at parts[12]
+        -- (0.15.1) or parts[13] (0.15.0 with bench row at parts[12]).
+        if #parts < 11 then return nil, "Truncated COMP1 string" end
+        p.groupCount = math.max(GROUP_MIN, math.min(GROUP_MAX, tonumber(parts[2]) or DEFAULT_GROUP_COUNT))
+        for g = 1, math.min(9, #parts - 2) do
+            if g <= GROUP_MAX then decodeRow(parts[2 + g], p.groups[g].slots) end
+        end
+        local nameRow
+        if parts[12] and parts[12]:find("//") then nameRow = parts[12]
+        elseif parts[13] and parts[13]:find("//") then nameRow = parts[13] end
+        if nameRow then
+            local g = 0
+            for nm in (nameRow .. "//"):gmatch("([^/][^/]*)//") do
+                g = g + 1; if g > GROUP_MAX then break end
+                p.groups[g].name = nm
+            end
+        end
+        -- Legacy strings carry no bench count; we keep the default.
+        p.benchCount = DEFAULT_BENCH_COUNT
+    end
+    return parts[1] or "Imported", p
+end
+
+
+-- =============================================================
+-- 5. UI
+-- =============================================================
+local composerRoot
+-- Forward decls so the drag machinery (defined immediately below)
+-- can reach helpers declared further down the file:
+--   refresh             - assigned inside buildComposer
+--   clickAddSpec        - assigned after the popups block
+--   findSlotUnderFrame  - assigned in the helpers section
+local refresh, clickAddSpec, findSlotUnderFrame
+
+-- Drag-and-drop. Verified-working Classic pattern (cross-checked
+-- against AuraTracker and ZOMGBuffs_BlessingsManager source):
+--   * RegisterForDrag("LeftButton") + OnDragStart on the source.
+--     WoW's built-in drag detection (mouse-press + motion past its
+--     internal threshold) fires OnDragStart. The folklore that this
+--     "needs a Blizzard cursor payload" applies to OnReceiveDrag and
+--     GetCursorInfo, not OnDragStart - OnDragStart fires on a plain
+--     CreateFrame button as long as RegisterForDrag + EnableMouse
+--     are set.
+--   * OnDragStop on the source fires when the mouse is released
+--     anywhere. Inside it, GetMouseFocus() returns the frame the
+--     cursor is over at release; walk the parent chain looking for a
+--     composerSlot tag to identify the drop target.
+--   * RegisterForClicks("LeftButtonUp") + OnClick on the source for
+--     the click-to-add convenience (a click that doesn't move past
+--     the drag threshold doesn't initiate a drag, so OnClick fires
+--     instead of OnDragStart).
+--
+-- Prior attempts used OnMouseDown + IsMouseButtonDown polling + a
+-- row OnMouseUp handler on the receiver. That pattern fails because
+-- Frame:OnMouseUp fires on the press source, NOT the cursor target -
+-- a drop on a slot row across the screen never receives OnMouseUp.
+
+local follower = CreateFrame("Frame", "L3FComposerDragFollower", UIParent)
+follower:SetSize(28, 28)
+follower:SetFrameStrata("TOOLTIP")
+follower:EnableMouse(false)  -- explicit: do NOT intercept hit-testing
+follower:Hide()
+local followerTex = follower:CreateTexture(nil, "OVERLAY")
+followerTex:SetAllPoints()
+followerTex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+
+-- dragState.spec     = { key, label }
+-- dragState.fromTarget, dragState.fromIdx = present when dragging FROM a slot
+--                                           (nil when dragging from the palette)
+local dragState = { spec = nil, fromTarget = nil, fromIdx = nil }
+
+-- Drag driver: positions the follower icon at the cursor while a
+-- drag is in flight. Drag start and stop are handled by the source
+-- icon's OnDragStart / OnDragStop scripts (set in buildPaletteIcon),
+-- so this OnUpdate has no release-detection responsibility.
+local dragDriver = CreateFrame("Frame")
+dragDriver:SetScript("OnUpdate", function()
+    if not (dragState.spec and follower:IsShown()) then return end
+    local x, y = GetCursorPosition()
+    local s = follower:GetEffectiveScale()
+    follower:ClearAllPoints()
+    follower:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x / s, y / s)
+end)
+
+-- Diagnostic toggle. Flip back to true if drop ever stops working
+-- and we need to see what the cursor was over at release.
+local DEBUG_DROP = false
+
+-- Live list of all currently rendered slot row frames. Wiped at the
+-- start of each refresh() pass and re-populated by buildSlotRow.
+-- Powers coord-based drop hit-testing (more reliable than
+-- GetMouseFocus, which Morphéours saw return nil at release time
+-- despite the cursor being squarely over a slot - likely because the
+-- TOOLTIP-strata follower confuses 2.5.x's hit cache).
+local liveSlots = {}
+
+local function findSlotAtCursor()
+    local cx, cy = GetCursorPosition()
+    if not cx then return nil end
+    local scale = UIParent:GetEffectiveScale()
+    cx, cy = cx / scale, cy / scale
+    for _, frame in ipairs(liveSlots) do
+        if frame:IsVisible() then
+            local l, r = frame:GetLeft(), frame:GetRight()
+            local t, b = frame:GetTop(), frame:GetBottom()
+            if l and r and t and b
+               and cx >= l and cx <= r and cy >= b and cy <= t then
+                return frame.composerSlot
+            end
+        end
+    end
+    return nil
+end
+
+-- Shared end-of-drag handler. Uses coordinate-based hit-testing
+-- (findSlotAtCursor) rather than GetMouseFocus.
+--
+-- Semantics (per Morphéours 0.16.10):
+--   * palette  -> empty slot     : place
+--   * palette  -> occupied slot  : REJECT (no silent overwrite; user
+--                                  must hit the slot's X first - this
+--                                  avoids accidental delete when the
+--                                  player misses their target)
+--   * slot A   -> empty slot B   : move (A cleared, B filled)
+--   * slot A   -> occupied slot B: SWAP (A and B exchange contents)
+--   * slot A   -> off any slot   : remove A (intentional yeet)
+--   * slot A   -> same slot A    : no-op
+local function finishDrag()
+    if not dragState.spec then follower:Hide(); return end
+    local sp = dragState.spec
+    local fromTarget, fromIdx = dragState.fromTarget, dragState.fromIdx
+    dragState.spec = nil
+    dragState.fromTarget = nil
+    dragState.fromIdx = nil
+
+    follower:Hide()
+
+    local hit = findSlotAtCursor()
+
+    if DEBUG_DROP then
+        local cx, cy = GetCursorPosition()
+        local scale = UIParent:GetEffectiveScale()
+        print(("|cffffd100L3FComp|r drop: cursor=(%.0f,%.0f) scale=%.2f hit=%s"):format(
+            cx or 0, cy or 0, scale or 1,
+            hit and ("slot " .. tostring(hit.idx)) or "NIL"))
+    end
+
+    local function pack()
+        local s = SPEC_LOOKUP[sp.key]
+        return s and { specKey = sp.key, label = sp.label or s.label } or nil
+    end
+
+    if hit then
+        local sameSlot = fromTarget == hit.target and fromIdx == hit.idx
+        if sameSlot then
+            -- drop on self, no-op
+        elseif fromTarget then
+            -- slot -> slot: swap if target occupied, otherwise move
+            local existing = hit.target.slots[hit.idx]
+            hit.target.slots[hit.idx]   = pack()
+            fromTarget.slots[fromIdx]   = existing  -- nil if target was empty
+        else
+            -- palette -> slot: only fill if target is empty
+            if hit.target.slots[hit.idx] then
+                print("|cffffd100L3FComp|r slot " .. hit.idx
+                    .. " is already taken - clear it with the red X first.")
+            else
+                hit.target.slots[hit.idx] = pack()
+            end
+        end
+    elseif fromTarget then
+        -- dragged a filled slot off any target: yeet
+        fromTarget.slots[fromIdx] = nil
+    end
+
+    notifyComposerEdit()
+    if refresh then refresh() end
+end
+
+local function setSlot(target, idx, specKey)
+    local s = SPEC_LOOKUP[specKey]
+    if not s then return end
+    target.slots[idx] = { specKey = specKey, label = s.label }
+end
+
+local function clearSlot(target, idx) target.slots[idx] = nil end
+
+local function firstEmptySlot(target)
+    for i = 1, 5 do if not target.slots[i] then return i end end
+    return nil
+end
+
+-- Walk the parent chain of `frame` looking for one tagged with
+-- `composerSlot = { target, idx }`. Drag-drop's OnDragStop reads
+-- GetMouseFocus() which returns the deepest frame under the cursor
+-- (often a child of the slot row - icon, label region, edit/X
+-- button); the walk climbs to the actual slot row. Assigns to the
+-- forward-declared upvalue so finishDrag at the top of the file
+-- can see it.
+findSlotUnderFrame = function(frame)
+    while frame do
+        if frame.composerSlot then return frame.composerSlot end
+        if frame.GetParent then
+            frame = frame:GetParent()
+        else
+            return nil
+        end
+    end
+    return nil
+end
+
+-- Short inline-text prompt (group/bench name, slot label, profile name).
+-- TBC Anniversary popups use `self.EditBox` (capitalised) - using the
+-- lowercase form silently no-ops and was the 0.15.0 "save doesn't
+-- work" bug. The popup is keyed L3FCOMPOSER_TEXT and reused across
+-- every short prompt; the data table carries the prompt/preset and
+-- the onAccept callback.
+StaticPopupDialogs["L3FCOMPOSER_TEXT"] = {
+    text = "",
+    button1 = OKAY or "Okay",
+    button2 = CANCEL or "Cancel",
+    hasEditBox = true,
+    maxLetters = 32,
+    timeout = 0, whileDead = true, hideOnEscape = true,
+    OnShow = function(self, data)
+        self.EditBox:SetText(data.preset or "")
+        self.EditBox:HighlightText()
+        self.EditBox:SetFocus()
+        self.text:SetText(data.prompt or "Enter text:")
+    end,
+    OnAccept = function(self, data)
+        local txt = self.EditBox:GetText() or ""
+        if data and data.onAccept then data.onAccept(txt) end
+    end,
+    EditBoxOnEnterPressed = function(self)
+        local p = self:GetParent()
+        local data = p.data
+        if data and data.onAccept then data.onAccept(self:GetText() or "") end
+        p:Hide()
+    end,
+    EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
+}
+
+local function promptText(prompt, preset, onAccept)
+    StaticPopup_Show("L3FCOMPOSER_TEXT", nil, nil,
+        { prompt = prompt, preset = preset, onAccept = onAccept })
+end
+
+local SLOT_W, SLOT_H = 178, 22
+local GROUP_W = 200
+local PALETTE_ICON = 26
+local PALETTE_GAP = 4
+local PALETTE_CLASS_GAP = 10
+-- "Ink-feather" icon Morphéours asked for - used on the rename
+-- affordance for both group/bench headers and slot rows. The
+-- texture is the same WoW feather glyph at all sites for visual
+-- consistency.
+local QUILL_ICON = "Interface\\Icons\\INV_Feather_07"
+
+-- Click-without-drag handler: drop into the first empty group slot.
+-- Called by the dragDriver's release detector when the cursor never
+-- moved past DRAG_THRESHOLD. Bench is intentionally skipped (0.15.1).
+-- Assigns to the forward-declared upvalue.
+clickAddSpec = function(spec)
+    local p = currentProfile()
+    for g = 1, p.groupCount do
+        local idx = firstEmptySlot(p.groups[g])
+        if idx then setSlot(p.groups[g], idx, spec.key); notifyComposerEdit(); refresh(); return end
+    end
+    print("|cffffd100L3FComp|r all groups full - add a group first.")
+end
+
+local function buildPaletteIcon(parent, spec, x, y)
+    -- Feral palette icon swaps in place between Cat (spec.key="feral")
+    -- and Bear (spec.key="feralbear") via the `feralForm` toggle.
+    -- Every script that needs the "what would this drop / display now"
+    -- spec calls `effective()` instead of capturing `spec` once.
+    local isFeral = (spec.key == "feral")
+    local function effective()
+        if isFeral then return SPEC_LOOKUP[activeFeralKey()] or spec end
+        return spec
+    end
+    local eff = effective()
+
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetSize(PALETTE_ICON, PALETTE_ICON)
+    btn:SetPoint("TOPLEFT", parent, "TOPLEFT", x, -y)
+    local tex = btn:CreateTexture(nil, "ARTWORK")
+    tex:SetAllPoints()
+    tex:SetTexture(eff.icon)
+    tex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    btn:SetNormalTexture(tex)
+    local hl = btn:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetAllPoints(); hl:SetTexture("Interface\\Buttons\\ButtonHilight-Square"); hl:SetBlendMode("ADD")
+
+    -- Drag handling per the canonical Classic pattern:
+    --   * RegisterForDrag arms OnDragStart on press + motion.
+    --   * RegisterForClicks lets OnClick fire for press-without-motion
+    --     (click-to-add).
+    -- See the block above the dragDriver definition for why this is
+    -- the correct pattern.
+    --
+    -- Feral icon additionally registers RightButtonUp so right-clicking
+    -- it cycles the cat/bear toggle (OnClick handler branches on
+    -- `button`).
+    btn:EnableMouse(true)
+    btn:RegisterForDrag("LeftButton")
+    if isFeral then
+        btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    else
+        btn:RegisterForClicks("LeftButtonUp")
+    end
+
+    btn:SetScript("OnEnter", function(self)
+        local s = effective()
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(s.label)
+        if #s.buffs > 0 then
+            GameTooltip:AddLine("Buffs: " .. table.concat(s.buffs, ", "), 0.7, 0.9, 0.7, true)
+        end
+        if #s.debuffs > 0 then
+            GameTooltip:AddLine("Debuffs: " .. table.concat(s.debuffs, ", "), 0.9, 0.7, 0.7, true)
+        end
+        if isFeral then
+            GameTooltip:AddLine("Drag onto a slot or click to add.", 0.6, 0.6, 0.6, true)
+            GameTooltip:AddLine("Right-click to toggle Cat / Bear.", 0.55, 0.8, 1.0, true)
+        else
+            GameTooltip:AddLine("Drag onto a slot or click to add.", 0.6, 0.6, 0.6, true)
+        end
+        GameTooltip:Show()
+    end)
+    btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    btn:SetScript("OnDragStart", function()
+        local s = effective()
+        dragState.spec = { key = s.key, label = s.label }
+        dragState.fromTarget = nil  -- palette drag has no source slot
+        dragState.fromIdx = nil
+        followerTex:SetTexture(s.icon)
+        follower:Show()
+        if DEBUG_DROP then
+            print("|cffffd100L3FComp|r drag from palette: " .. s.label)
+        end
+    end)
+    btn:SetScript("OnDragStop", finishDrag)
+    btn:SetScript("OnClick", function(self, button)
+        if isFeral and button == "RightButton" then
+            L3F.db.composer.feralForm =
+                (L3F.db.composer.feralForm == "bear") and "cat" or "bear"
+            refresh()
+            return
+        end
+        clickAddSpec(effective())
+    end)
+end
+
+local function buildPalette(parent, x, y)
+    local byClass = {}
+    for _, s in ipairs(SPECS) do
+        -- hiddenFromPalette specs (currently just feralbear) are
+        -- reachable via right-click toggle on their visible sibling.
+        if not s.hiddenFromPalette then
+            byClass[s.class] = byClass[s.class] or {}
+            table.insert(byClass[s.class], s)
+        end
+    end
+    local rowBreak = 5
+    local cursorX, cursorY = x, y
+    for i, className in ipairs(CLASS_ORDER) do
+        local specs = byClass[className] or {}
+        for j, sp in ipairs(specs) do
+            local dx = (j - 1) * (PALETTE_ICON + PALETTE_GAP)
+            buildPaletteIcon(parent, sp, cursorX + dx, cursorY)
+        end
+        cursorX = cursorX + #specs * (PALETTE_ICON + PALETTE_GAP) + PALETTE_CLASS_GAP
+        if i == rowBreak then
+            cursorX = x
+            cursorY = cursorY + PALETTE_ICON + PALETTE_GAP + 4
+        end
+    end
+end
+
+local function buildSlotRow(parent, target, idx, y)
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetSize(SLOT_W, SLOT_H)
+    row:SetPoint("TOPLEFT", parent, "TOPLEFT", 6, -y)
+    row:EnableMouse(true)
+    -- composerSlot is the tag findSlotAtCursor reads to identify the
+    -- drop target. The row also pushes itself into liveSlots so the
+    -- coordinate-based hit-tester can iterate the current rows.
+    row.composerSlot = { target = target, idx = idx }
+    table.insert(liveSlots, row)
+
+    local bg = row:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints(); bg:SetColorTexture(0, 0, 0, 0.18)
+
+    local icon = row:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(18, 18)
+    icon:SetPoint("LEFT", row, "LEFT", 2, 0)
+
+    local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lbl:SetPoint("LEFT", icon, "RIGHT", 6, 0)
+    lbl:SetPoint("RIGHT", row, "RIGHT", -36, 0)
+    lbl:SetJustifyH("LEFT")
+    lbl:SetWordWrap(false)
+
+    local editBtn = CreateFrame("Button", nil, row)
+    editBtn:SetSize(14, 14)
+    editBtn:SetPoint("RIGHT", row, "RIGHT", -20, 0)
+    editBtn:SetNormalTexture(QUILL_ICON)
+    editBtn:GetNormalTexture():SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    editBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+
+    local xBtn = CreateFrame("Button", nil, row)
+    xBtn:SetSize(16, 16)
+    xBtn:SetPoint("RIGHT", row, "RIGHT", -2, 0)
+    xBtn:SetNormalTexture("Interface\\Buttons\\UI-StopButton")
+    xBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+
+    local slot = target.slots[idx]
+    if slot then
+        local s = SPEC_LOOKUP[slot.specKey]
+        if s then
+            icon:SetTexture(s.icon); icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+            lbl:SetText(slot.label or s.label)
+            lbl:SetTextColor(1, 0.6, 0.1, 1)
+        end
+        editBtn:SetScript("OnClick", function()
+            promptText("Rename slot:", slot.label or "", function(txt)
+                if txt and txt ~= "" then slot.label = txt; notifyComposerEdit(); refresh() end
+            end)
+        end)
+        xBtn:SetScript("OnClick", function() clearSlot(target, idx); notifyComposerEdit(); refresh() end)
+
+        -- Drag-from-slot: pick up THIS slot's spec and drop on another
+        -- slot to move it (or off any slot to remove it). Same drag
+        -- machinery as the palette icons, but dragState.fromTarget /
+        -- fromIdx are populated so finishDrag knows to clear the
+        -- source slot on a successful move.
+        row:RegisterForDrag("LeftButton")
+        row:SetScript("OnDragStart", function()
+            dragState.spec = { key = slot.specKey, label = slot.label or (s and s.label) }
+            dragState.fromTarget = target
+            dragState.fromIdx = idx
+            if s then followerTex:SetTexture(s.icon) end
+            follower:Show()
+            if DEBUG_DROP then
+                print(("|cffffd100L3FComp|r drag from slot %d: %s"):format(idx, slot.specKey))
+            end
+        end)
+        row:SetScript("OnDragStop", finishDrag)
+
+        -- Right-click on a Feral slot toggles Cat <-> Bear in place.
+        -- The label updates only when it still matches the previous
+        -- form's default - user-typed labels (player names) are kept
+        -- verbatim. Left-button OnMouseUp is intentionally ignored so
+        -- the drag flow above stays the source of truth for moves.
+        if slot.specKey == "feral" or slot.specKey == "feralbear" then
+            row:SetScript("OnMouseUp", function(self, button)
+                if button ~= "RightButton" then return end
+                local newKey = (slot.specKey == "feral") and "feralbear" or "feral"
+                local oldSpec = SPEC_LOOKUP[slot.specKey]
+                local newSpec = SPEC_LOOKUP[newKey]
+                if not newSpec then return end
+                if not slot.label or slot.label == "" or
+                   (oldSpec and slot.label == oldSpec.label) then
+                    slot.label = newSpec.label
+                end
+                slot.specKey = newKey
+                notifyComposerEdit()
+                refresh()
+            end)
+        end
+    else
+        icon:SetColorTexture(0.08, 0.08, 0.08, 1)
+        lbl:SetText("")
+        editBtn:Hide(); xBtn:Hide()
+    end
+end
+
+-- Generic group/bench frame builder. `kind` is "group" or "bench" and
+-- determines (a) the remove-button condition (groups can't fall below
+-- 1, benches can go to 0) and (b) which aura map feeds the per-frame
+-- party-aura strip (groupAuras or benchAuras).
+--
+-- Frame height (176) is tight against the rendered content: header
+-- 18 + 5 slot rows (5 * 24 = 120) + 4 gap + 26 aura strip + 8 padding.
+-- 0.16.5 trimmed this from 220 (which had a 44px empty tail) per
+-- Morphéours's "halve the gap" feedback.
+local function buildSquadFrame(parent, target, x, y, idxLabel, kind, auras)
+    local f = CreateFrame("Frame", nil, parent)
+    f:SetSize(GROUP_W, 176)
+    f:SetPoint("TOPLEFT", parent, "TOPLEFT", x, -y)
+
+    -- Header is a plain Frame (no longer click-to-rename in 0.16.1);
+    -- renaming goes through the explicit quill button to the right.
+    local hdr = CreateFrame("Frame", nil, f)
+    hdr:SetSize(GROUP_W - 22, 18)
+    hdr:SetPoint("TOPLEFT", f, "TOPLEFT", 0, 0)
+    local hdrTxt = hdr:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    hdrTxt:SetPoint("LEFT", hdr, "LEFT", 4, 0)
+    hdrTxt:SetText(target.name or (kind == "bench" and "Bench" or "Group"))
+    if kind == "bench" then hdrTxt:SetTextColor(0.55, 0.85, 1.0) end
+
+    -- Right-side controls in the header. Order left-to-right:
+    --   [quill rename]  [minus remove (conditional)]
+    -- The quill is always present; the minus is hidden when the
+    -- count is at its lower bound (last group can't be removed,
+    -- benches can be removed to zero so always present when count > 0).
+    local p = currentProfile()
+    local canRemove
+    if kind == "group" then
+        canRemove = p.groupCount > GROUP_MIN
+    else
+        canRemove = p.benchCount > BENCH_MIN
+    end
+
+    if canRemove then
+        local rm = CreateFrame("Button", nil, f)
+        rm:SetSize(16, 16)
+        rm:SetPoint("TOPRIGHT", f, "TOPRIGHT", -2, -1)
+        rm:SetNormalTexture("Interface\\Buttons\\UI-MinusButton-Up")
+        rm:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+        rm:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText("Remove this " .. kind)
+            GameTooltip:Show()
+        end)
+        rm:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        rm:SetScript("OnClick", function()
+            local pp = currentProfile()
+            local arr = (kind == "bench") and pp.benches or pp.groups
+            local maxN = (kind == "bench") and BENCH_MAX or GROUP_MAX
+            for i = idxLabel, maxN - 1 do arr[i] = arr[i + 1] end
+            arr[maxN] = { name = (kind == "bench" and "Bench " .. maxN or "Group " .. maxN),
+                          slots = { nil, nil, nil, nil, nil } }
+            if kind == "bench" then
+                pp.benchCount = math.max(BENCH_MIN, pp.benchCount - 1)
+            else
+                pp.groupCount = math.max(GROUP_MIN, pp.groupCount - 1)
+            end
+            notifyComposerEdit()
+            refresh()
+        end)
+    end
+
+    -- Quill rename button. Sits to the LEFT of the minus when minus
+    -- is present, otherwise anchors flush to the right edge.
+    local quill = CreateFrame("Button", nil, f)
+    quill:SetSize(14, 14)
+    if canRemove then
+        quill:SetPoint("TOPRIGHT", f, "TOPRIGHT", -22, -2)
+    else
+        quill:SetPoint("TOPRIGHT", f, "TOPRIGHT", -3, -2)
+    end
+    quill:SetNormalTexture(QUILL_ICON)
+    quill:GetNormalTexture():SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    quill:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+    quill:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(kind == "bench" and "Rename bench" or "Rename group")
+        GameTooltip:Show()
+    end)
+    quill:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    quill:SetScript("OnClick", function()
+        promptText(kind == "bench" and "Rename bench:" or "Rename group:",
+            target.name or "", function(txt)
+            if txt and txt ~= "" then target.name = txt; notifyComposerEdit(); refresh() end
+        end)
+    end)
+
+    local yy = 22
+    for i = 1, 5 do
+        buildSlotRow(f, target, i, yy)
+        yy = yy + SLOT_H + 2
+    end
+
+    -- Party-aura strip. Bench strips show the auras that WOULD activate
+    -- if the player were subbed in - useful planning info; never tallied
+    -- into the global coverage panel.
+    local strip = CreateFrame("Frame", nil, f)
+    strip:SetSize(GROUP_W - 4, 26)
+    strip:SetPoint("TOPLEFT", f, "TOPLEFT", 6, -(yy + 4))
+    local stripBg = strip:CreateTexture(nil, "BACKGROUND")
+    stripBg:SetAllPoints(); stripBg:SetColorTexture(0, 0, 0, 0.18)
+    auras = auras or {}
+    if #auras == 0 then
+        local txt = strip:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        txt:SetPoint("LEFT", strip, "LEFT", 4, 0)
+        txt:SetText(kind == "bench" and "Bench (inactive)" or "No active group buffs")
+    else
+        local ax = 4
+        for _, a in ipairs(auras) do
+            local ic = strip:CreateTexture(nil, "ARTWORK")
+            ic:SetSize(22, 22)
+            ic:SetPoint("LEFT", strip, "LEFT", ax, 0)
+            ic:SetTexture(a.icon); ic:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+            local ib = CreateFrame("Frame", nil, strip)
+            ib:SetAllPoints(ic)
+            ib:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText(a.name)
+                if kind == "bench" then
+                    GameTooltip:AddLine("(inactive while benched)", 0.7, 0.7, 0.7, true)
+                end
+                GameTooltip:Show()
+            end)
+            ib:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            ax = ax + 26
+        end
+    end
+end
+
+local function buildGroupFrame(parent, target, x, y, idxLabel, groupAurasMap)
+    buildSquadFrame(parent, target, x, y, idxLabel, "group", groupAurasMap[idxLabel])
+end
+
+local function buildBenchFrame(parent, target, x, y, idxLabel, benchAurasMap)
+    buildSquadFrame(parent, target, x, y, idxLabel, "bench", benchAurasMap[idxLabel])
+end
+
+-- Single buff/debuff list row. Returns the row Button so the caller
+-- can install hover scripts; the row itself owns its dot + text.
+local function buildBuffRow(parent, name, covered, y, panelW)
+    local row = CreateFrame("Button", nil, parent)
+    row:SetSize(panelW - 8, 20)
+    row:SetPoint("TOPLEFT", parent, "TOPLEFT", 4, -y)
+
+    local dot = row:CreateTexture(nil, "OVERLAY")
+    dot:SetSize(8, 8)
+    dot:SetPoint("LEFT", row, "LEFT", 4, 0)
+    if covered then
+        dot:SetColorTexture(0.30, 0.85, 0.30, 1)
+    else
+        dot:SetColorTexture(0.40, 0.40, 0.40, 1)
+    end
+
+    local txt = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    txt:SetPoint("LEFT", row, "LEFT", 18, 0)
+    txt:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+    txt:SetJustifyH("LEFT")
+    txt:SetWordWrap(false)
+    txt:SetText(name)
+    if covered then
+        txt:SetTextColor(1, 1, 1, 1)
+    else
+        txt:SetTextColor(0.6, 0.6, 0.6, 1)
+    end
+
+    -- Hover tooltip: SetSpellByID with the TBC max-rank ID for the
+    -- buff/debuff (the canonical in-game tooltip). For names without
+    -- a mapped ID, fall back to a name-only tooltip.
+    local spellID = SPELL_IDS[name]
+    row:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        if spellID and GameTooltip.SetSpellByID then
+            GameTooltip:SetSpellByID(spellID)
+        else
+            GameTooltip:SetText(name)
+        end
+        GameTooltip:Show()
+    end)
+    row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    -- Subtle row highlight on hover so the tooltip target is obvious.
+    local hl = row:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetAllPoints(); hl:SetColorTexture(1, 1, 1, 0.05)
+end
+
+-- Right-side coverage panel. Two layouts based on available width:
+--   * Narrow (< 596px): Buffs section above Debuffs section, stacked.
+--   * Wide  (>= 596px): Buffs LEFT, Debuffs RIGHT, side-by-side.
+-- The threshold (290 * 2 + 16) is just enough for two readable lists.
+-- Returns the total height consumed so the caller can size the body.
+local SIDE_BY_SIDE_THRESHOLD = 290 * 2 + 16  -- 596
+
+local function buildBuffPanel(parent, covered, x, y, panelW)
+    local f = CreateFrame("Frame", nil, parent)
+    f:SetPoint("TOPLEFT", parent, "TOPLEFT", x, -y)
+
+    -- Builds one section (Buffs or Debuffs) at offset (sx, sy) within
+    -- the panel frame with width sw. Returns the height consumed.
+    local function section(title, list, covSet, sx, sy, sw)
+        local hdr = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        hdr:SetPoint("TOPLEFT", f, "TOPLEFT", sx + 4, -sy)
+        hdr:SetText(title)
+        local box = CreateFrame("Frame", nil, f)
+        box:SetSize(sw, #list * 22 + 8)
+        box:SetPoint("TOPLEFT", f, "TOPLEFT", sx, -(sy + 22))
+        local boxBg = box:CreateTexture(nil, "BACKGROUND")
+        boxBg:SetAllPoints(); boxBg:SetColorTexture(0, 0, 0, 0.18)
+        local rowY = 4
+        for _, name in ipairs(list) do
+            buildBuffRow(box, name, covSet[name], rowY, sw)
+            rowY = rowY + 22
+        end
+        return 22 + box:GetHeight() + 12
+    end
+
+    local totalH
+    if panelW >= SIDE_BY_SIDE_THRESHOLD then
+        local halfW = math.floor((panelW - 16) / 2)
+        local hBuffs   = section("Buffs",   BUFFS_LIST,   covered.buffs,   0,          0, halfW)
+        local hDebuffs = section("Debuffs", DEBUFFS_LIST, covered.debuffs, halfW + 16, 0, halfW)
+        totalH = math.max(hBuffs, hDebuffs)
+    else
+        local hBuffs   = section("Buffs",   BUFFS_LIST,   covered.buffs,   0, 0,      panelW)
+        local hDebuffs = section("Debuffs", DEBUFFS_LIST, covered.debuffs, 0, hBuffs, panelW)
+        totalH = hBuffs + hDebuffs
+    end
+    f:SetSize(panelW, totalH)
+    return totalH
+end
+
+
+-- =============================================================
+-- 6. DISPLAY POPUP  (clean screenshot view of the active comp)
+-- =============================================================
+-- A floating window the user can position anywhere on screen,
+-- showing only the groups + non-empty benches in a 3-column grid
+-- with a role-count footer. No buffs/debuffs panel, no buttons in
+-- slots, no aura icons - just the comp roster, intended for a
+-- Discord screenshot.
+local snapshotFrame
+
+local function isBenchEmpty(bench)
+    if not bench or not bench.slots then return true end
+    for i = 1, 5 do if bench.slots[i] then return false end end
+    return true
+end
+
+local function ensureSnapshotFrame()
+    if snapshotFrame then return snapshotFrame end
+    local f = CreateFrame("Frame", "L3FComposerSnapshot", UIParent,
+        "BasicFrameTemplateWithInset")
+    f:SetSize(720, 400)
+    f:SetPoint("CENTER")
+    -- FULLSCREEN_DIALOG sits above the main L3FTools window
+    -- (DIALOG strata) so the popup is always on top and easy to
+    -- frame for a screenshot.
+    f:SetFrameStrata("FULLSCREEN_DIALOG")
+    f:SetMovable(true); f:EnableMouse(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    f:SetScript("OnDragStop",  function(self) self:StopMovingOrSizing() end)
+    f:Hide()
+
+    -- Inner host so we can wipe content without nuking the template's
+    -- own children (title text, close button, inset textures).
+    f.host = CreateFrame("Frame", nil, f)
+    f.host:SetPoint("TOPLEFT",     f, "TOPLEFT",      4, -28)
+    f.host:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -4, 4)
+
+    snapshotFrame = f
+    return f
+end
+
+local function rebuildSnapshot()
+    local f = ensureSnapshotFrame()
+    -- Clear ONLY the host (template's title + close button stay).
+    for _, c in ipairs({f.host:GetChildren()}) do c:Hide(); c:SetParent(nil) end
+    for _, r in ipairs({f.host:GetRegions()}) do
+        r:Hide(); r:ClearAllPoints()
+        if r.SetText then r:SetText("") end
+    end
+
+    local profileName = L3F.db.composer.activeProfile or "(unsaved)"
+    local profile = L3F.db.composer.profiles[profileName]
+    if not profile then return end
+
+    f.TitleText:SetText(profileName)
+
+    -- Cells: every visible group, plus benches that aren't empty.
+    local cells = {}
+    for g = 1, profile.groupCount do
+        table.insert(cells, { obj = profile.groups[g], isBench = false })
+    end
+    for b = 1, profile.benchCount do
+        if not isBenchEmpty(profile.benches[b]) then
+            table.insert(cells, { obj = profile.benches[b], isBench = true })
+        end
+    end
+
+    -- 3-column grid layout inside f.host.
+    local CELL_W, CELL_H = 224, 152
+    local COL_GAP, ROW_GAP = 12, 12
+    local MARGIN_X, TOP_Y = 8, 8
+    for i, cell in ipairs(cells) do
+        local col = (i - 1) % 3
+        local row = math.floor((i - 1) / 3)
+        local cx = MARGIN_X + col * (CELL_W + COL_GAP)
+        local cy = TOP_Y    + row * (CELL_H + ROW_GAP)
+        local cellF = CreateFrame("Frame", nil, f.host)
+        cellF:SetSize(CELL_W, CELL_H)
+        cellF:SetPoint("TOPLEFT", f.host, "TOPLEFT", cx, -cy)
+        local bg = cellF:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints(); bg:SetColorTexture(0, 0, 0, 0.30)
+
+        local hdr = cellF:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        hdr:SetPoint("TOPLEFT", cellF, "TOPLEFT", 6, -4)
+        hdr:SetText(cell.obj.name or (cell.isBench and "Bench" or "Group"))
+        if cell.isBench then hdr:SetTextColor(0.55, 0.85, 1.0) end
+
+        local yy = 22
+        for s = 1, 5 do
+            local slot = cell.obj.slots[s]
+            local sr = CreateFrame("Frame", nil, cellF)
+            sr:SetSize(CELL_W - 12, 22)
+            sr:SetPoint("TOPLEFT", cellF, "TOPLEFT", 6, -yy)
+
+            local icon = sr:CreateTexture(nil, "ARTWORK")
+            icon:SetSize(20, 20); icon:SetPoint("LEFT", sr, "LEFT", 0, 0)
+            local lbl = sr:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            lbl:SetPoint("LEFT",  icon, "RIGHT", 6, 0)
+            lbl:SetPoint("RIGHT", sr,   "RIGHT", -2, 0)
+            lbl:SetJustifyH("LEFT"); lbl:SetWordWrap(false)
+
+            if slot then
+                local spec = SPEC_LOOKUP[slot.specKey]
+                if spec then
+                    icon:SetTexture(spec.icon)
+                    icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+                    lbl:SetText(slot.label or spec.label)
+                    lbl:SetTextColor(1, 0.82, 0.30)  -- gold
+                end
+            else
+                icon:SetColorTexture(0.10, 0.10, 0.10)
+                lbl:SetText("(empty)")
+                lbl:SetTextColor(0.40, 0.40, 0.40)
+            end
+            yy = yy + 24
+        end
+    end
+
+    -- Role-count footer (group slots only - benches are inactive).
+    local tanks, healers, dps = 0, 0, 0
+    for g = 1, profile.groupCount do
+        for s = 1, 5 do
+            local slot = profile.groups[g].slots[s]
+            if slot then
+                local role = SPEC_ROLE[slot.specKey] or "dps"
+                if     role == "tank"   then tanks   = tanks   + 1
+                elseif role == "healer" then healers = healers + 1
+                else                          dps    = dps    + 1 end
+            end
+        end
+    end
+    local footer = f.host:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    footer:SetPoint("BOTTOM", f.host, "BOTTOM", 0, 8)
+    footer:SetText(("%d tank%s  ·  %d healer%s  ·  %d dps  ·  %d total"):format(
+        tanks, tanks == 1 and "" or "s",
+        healers, healers == 1 and "" or "s",
+        dps, tanks + healers + dps))
+
+    -- Resize the popup to fit the grid + footer.
+    local rows = math.max(1, math.ceil(#cells / 3))
+    local gridH = rows * CELL_H + (rows - 1) * ROW_GAP
+    local footerBand = 28
+    local hostH = TOP_Y + gridH + footerBand
+    local hostW = MARGIN_X * 2 + 3 * CELL_W + 2 * COL_GAP
+    f:SetSize(hostW + 8, hostH + 32)
+end
+
+local function showSnapshot()
+    rebuildSnapshot()
+    snapshotFrame:Show()
+    snapshotFrame:Raise()
+end
+
+
+-- =============================================================
+-- 7. TOP STRIP  (profile dropdown + New Profile / Delete / Export / Import / Display)
+-- =============================================================
+-- Buttons mirror the Automarker tab's profile strip pattern (same
+-- widths, same gaps) for cross-tab consistency. New Profile creates
+-- an empty profile; Display opens the clean screenshot popup.
+local function buildTopStrip(parent)
+    local profLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    profLabel:SetPoint("TOPLEFT", parent, "TOPLEFT", 16, -16)
+    profLabel:SetText("Profile:")
+
+    local profDD = CreateFrame("Frame", "L3FComposerProfileDD", parent, "UIDropDownMenuTemplate")
+    profDD:SetPoint("LEFT", profLabel, "RIGHT", -8, -4)
+    UIDropDownMenu_SetWidth(profDD, 160)
+
+    local function refreshProfileDD()
+        UIDropDownMenu_Initialize(profDD, function(self, level)
+            -- Sort alphabetically so the dropdown order is stable across
+            -- reloads (pairs() ordering is undefined).
+            local names = {}
+            for name in pairs(L3F.db.composer.profiles) do table.insert(names, name) end
+            table.sort(names)
+            for _, name in ipairs(names) do
+                local info = UIDropDownMenu_CreateInfo()
+                info.text = name
+                info.checked = (name == L3F.db.composer.activeProfile)
+                info.func = function()
+                    L3F.db.composer.activeProfile = name
+                    notifyComposerEdit()
+                    refresh()
+                end
+                UIDropDownMenu_AddButton(info, level)
+            end
+        end)
+        UIDropDownMenu_SetText(profDD, L3F.db.composer.activeProfile or "(unsaved)")
+    end
+    refreshProfileDD()
+
+    local function mkBtn(label, anchor, dx, width, onClick)
+        local b = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+        b:SetSize(width or 70, 22); b:SetText(label)
+        b:SetPoint("LEFT", anchor, "RIGHT", dx or 2, 0)
+        b:SetScript("OnClick", onClick)
+        return b
+    end
+
+    -- New Profile: prompts for a name and creates an EMPTY profile.
+    -- Replaced the old "Save As" button in 0.16.5 per Morphéours -
+    -- "Save As" required first returning to Default and rebuilding,
+    -- which is unintuitive when the user just wants to start a fresh
+    -- comp. Edits made to the new profile auto-persist via the live
+    -- L3F.db.composer state - no explicit save step needed.
+    local newBtn = mkBtn("New Profile", profDD, -8, 88, function()
+        StaticPopupDialogs["L3F_COMP_NEW"] = {
+            text = "New profile name:",
+            button1 = "Create", button2 = "Cancel",
+            hasEditBox = true, maxLetters = 32,
+            OnAccept = function(self)
+                local name = self.EditBox:GetText():gsub("^%s+",""):gsub("%s+$","")
+                if name == "" then return end
+                if L3F.db.composer.profiles[name] then
+                    print("|cffffd100L3FComp|r profile '" .. name .. "' already exists.")
+                    return
+                end
+                L3F.db.composer.profiles[name] = newEmptyProfile()
+                L3F.db.composer.activeProfile = name
+                refreshProfileDD()
+                notifyComposerEdit()
+                refresh()
+                print("|cffffd100L3FComp|r created profile '" .. name .. "'.")
+            end,
+            EditBoxOnEnterPressed = function(self)
+                local b = self:GetParent().button1; if b then b:Click() end
+            end,
+            OnShow = function(self)
+                self.EditBox:SetText("")
+                self.EditBox:SetFocus()
+            end,
+            timeout = 0, whileDead = true, hideOnEscape = true,
+        }
+        StaticPopup_Show("L3F_COMP_NEW")
+    end)
+
+    local delBtn = mkBtn("Delete", newBtn, 2, 60, function()
+        local active = L3F.db.composer.activeProfile
+        if not active then
+            print("|cffffd100L3FComp|r no profile selected.")
+            return
+        end
+        local count = 0
+        for _ in pairs(L3F.db.composer.profiles) do count = count + 1 end
+        if count <= 1 then
+            print("|cffffd100L3FComp|r can't delete the last profile.")
+            return
+        end
+        StaticPopupDialogs["L3F_COMP_DEL"] = {
+            text = "Delete profile '" .. active .. "'? Cannot be undone.",
+            button1 = "Delete", button2 = "Cancel",
+            OnAccept = function()
+                L3F.db.composer.profiles[active] = nil
+                L3F.db.composer.activeProfile = next(L3F.db.composer.profiles)
+                refreshProfileDD()
+                notifyComposerEdit()
+                refresh()
+                print("|cffffd100L3FComp|r deleted '" .. active .. "'.")
+            end,
+            timeout = 0, whileDead = true, hideOnEscape = true,
+        }
+        StaticPopup_Show("L3F_COMP_DEL")
+    end)
+
+    local expBtn = mkBtn("Export", delBtn, 2, 60, function()
+        local active = L3F.db.composer.activeProfile
+        local profile = active and L3F.db.composer.profiles[active]
+        if not profile then
+            print("|cffffd100L3FComp|r save the current comp as a profile first.")
+            return
+        end
+        if L3F.ShowStringDialog then
+            L3F.ShowStringDialog({
+                title = "Profile export - Ctrl+A then Ctrl+C to copy:",
+                text = serializeProfile(active, profile),
+                acceptText = "Close",
+                showCancel = false,
+                selectAll = true,
+            })
+        end
+    end)
+
+    local impBtn = mkBtn("Import", expBtn, 2, 60, function()
+        if not L3F.ShowStringDialog then return end
+        L3F.ShowStringDialog({
+            title = "Paste a profile export string, then Import:",
+            text = "",
+            acceptText = "Import",
+            showCancel = true,
+            onAccept = function(str)
+                local name, profile = deserializeProfile(str)
+                if not name then
+                    print("|cffff5555L3FComp|r import failed: " .. tostring(profile))
+                    return
+                end
+                local base, idx = name, 1
+                while L3F.db.composer.profiles[name] do
+                    idx = idx + 1; name = base .. " (" .. idx .. ")"
+                end
+                L3F.db.composer.profiles[name] = profile
+                L3F.db.composer.activeProfile = name
+                refreshProfileDD()
+                notifyComposerEdit()
+                refresh()
+                print("|cffffd100L3FComp|r imported '" .. name .. "'.")
+            end,
+        })
+    end)
+
+    -- Display: opens the clean snapshot popup for screenshotting.
+    local dispBtn = mkBtn("Display", impBtn, 2, 70, showSnapshot)
+    dispBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:SetText("Open a clean screenshot view of this comp")
+        GameTooltip:AddLine("Drag the popup anywhere, then screenshot.",
+            0.7, 0.7, 0.7, true)
+        GameTooltip:Show()
+    end)
+    dispBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    -- Co-op: toggles the floating roster + actions panel. Guild-scoped
+    -- live multi-player editing of the active profile.
+    local coopBtn = mkBtn("Co-op", dispBtn, 2, 56, function()
+        if L3F.ComposerCoOp and L3F.ComposerCoOp.ToggleRosterPanel then
+            L3F.ComposerCoOp.ToggleRosterPanel()
+        end
+    end)
+    coopBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:SetText("Toggle the co-op session panel")
+        GameTooltip:AddLine("Host a live multi-player editing session, or",
+            0.7, 0.7, 0.7, true)
+        GameTooltip:AddLine("accept an invite from a guildie.",
+            0.7, 0.7, 0.7, true)
+        GameTooltip:Show()
+    end)
+    coopBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+end
+
+
+-- =============================================================
+-- 8. MAIN BUILDER
+-- =============================================================
+local function buildComposer(parent)
+    composerRoot = parent
+    ensureComposerState()
+
+    local scroll = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT",     parent, "TOPLEFT",      4, -4)
+    scroll:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -24, 4)
+    local body = CreateFrame("Frame", nil, scroll)
+    body:SetSize(900, 1200)
+    scroll:SetScrollChild(body)
+
+    -- Body width follows the scroll viewport so the buffs/debuffs
+    -- sidebar can switch to a side-by-side layout once the user
+    -- expands the window wide enough (per Morphéours 0.16.6). A
+    -- refresh re-runs whenever the scroll resizes - cheap, the
+    -- whole composer rebuilds in a single pass.
+    scroll:HookScript("OnSizeChanged", function(self, w, h)
+        if w and w > 0 then body:SetWidth(w) end
+        if refresh then refresh() end
+    end)
+
+    refresh = function()
+        ensureComposerState()
+        -- Wipe the liveSlots registry before re-rendering. buildSlotRow
+        -- will repopulate it as each row is created.
+        wipe(liveSlots)
+        for _, c in ipairs({body:GetChildren()}) do c:Hide(); c:SetParent(nil) end
+        for _, r in ipairs({body:GetRegions()}) do r:Hide(); r:ClearAllPoints()
+            if r.SetText then r:SetText("") end
+        end
+
+        buildTopStrip(body)
+
+        local palY = 46
+        local palLabel = body:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        palLabel:SetPoint("TOPLEFT", body, "TOPLEFT", 16, -palY)
+        palLabel:SetText("Specs (Drag & Drop or Click to Add)")
+        buildPalette(body, 16, palY + 18)
+
+        -- "Clear" button parks in the empty palette real estate: same y
+        -- as row 2 (the Rogue/Shaman/Warlock/Warrior row), x aligned
+        -- with the Priest column from row 1. Wipes the active profile's
+        -- group + bench slots back to default (5 groups + 1 bench, all
+        -- empty). The profile name + dropdown selection are preserved.
+        do
+            local row2Y = palY + 18 + (PALETTE_ICON + PALETTE_GAP) + 4
+            -- 5 classes per row x (3 icons * (icon+gap) + class-gap) = 100px each
+            local classW = 3 * (PALETTE_ICON + PALETTE_GAP) + PALETTE_CLASS_GAP
+            local clearX = 16 + 4 * classW + 2  -- past 4 row-2 classes
+            local clearBtn = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
+            clearBtn:SetSize(80, 26); clearBtn:SetText("Clear")
+            clearBtn:SetPoint("TOPLEFT", body, "TOPLEFT", clearX, -row2Y)
+            clearBtn:SetScript("OnClick", function()
+                local cur = L3F.db.composer.activeProfile
+                if not cur then return end
+                L3F.db.composer.profiles[cur] = newEmptyProfile()
+                notifyComposerEdit()
+                refresh()
+            end)
+            clearBtn:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+                GameTooltip:SetText("Clear all groups and benches in the active profile")
+                GameTooltip:AddLine("Profile name + selection are kept.", 0.7, 0.7, 0.7, true)
+                GameTooltip:Show()
+            end)
+            clearBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        end
+
+        local p = currentProfile()
+        local gridY = palY + 18 + (PALETTE_ICON + PALETTE_GAP) * 2 + 16
+        local colGap = 12
+        -- rowH = frame height (176) + 5px inter-row gap. Halved from
+        -- the old 230 (frame 220 + 10 gap, leaving large visual
+        -- whitespace under each group) per Morphéours 0.16.5.
+        local rowH = 181
+        local groupColumns = 3
+
+        -- Cells = groups[1..groupCount] then benches[1..benchCount], in
+        -- a 3-column grid on the LEFT. Bench cells get a distinct cyan
+        -- header and don't contribute to raid-wide buff coverage.
+        local _, groupAurasMap, benchAurasMap = computeCoverage()
+        local cells = {}
+        for g = 1, p.groupCount do
+            cells[#cells + 1] = { kind = "group", idx = g, target = p.groups[g] }
+        end
+        for b = 1, p.benchCount do
+            cells[#cells + 1] = { kind = "bench", idx = b, target = p.benches[b] }
+        end
+        for i, cell in ipairs(cells) do
+            local row = math.floor((i - 1) / groupColumns)
+            local col = (i - 1) % groupColumns
+            local cx = 16 + col * (GROUP_W + colGap)
+            local cy = gridY + row * rowH
+            if cell.kind == "group" then
+                buildGroupFrame(body, cell.target, cx, cy, cell.idx, groupAurasMap)
+            else
+                buildBenchFrame(body, cell.target, cx, cy, cell.idx, benchAurasMap)
+            end
+        end
+
+        local rows = math.ceil(#cells / groupColumns)
+        -- Tight 2px gap to the Add Group / Add Bench buttons (halved
+        -- from 4 in 0.16.5 alongside the row-spacing tightening).
+        local afterGridY = gridY + rows * rowH + 2
+
+        -- Side-by-side "+ Add Group" and "+ Add Bench" buttons beneath the
+        -- grid. Each only appears when the corresponding count is below
+        -- its max - the buttons disappear entirely at saturation rather
+        -- than going grey.
+        local addX = 16
+        if p.groupCount < GROUP_MAX then
+            local addG = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
+            addG:SetSize(GROUP_W, 28); addG:SetText("+ Add Group")
+            addG:SetPoint("TOPLEFT", body, "TOPLEFT", addX, -afterGridY)
+            addG:SetScript("OnClick", function()
+                local pp = currentProfile()
+                pp.groupCount = math.min(GROUP_MAX, pp.groupCount + 1)
+                notifyComposerEdit()
+                refresh()
+            end)
+            addX = addX + GROUP_W + colGap
+        end
+        if p.benchCount < BENCH_MAX then
+            local addB = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
+            addB:SetSize(GROUP_W, 28); addB:SetText("+ Add Bench")
+            addB:SetPoint("TOPLEFT", body, "TOPLEFT", addX, -afterGridY)
+            addB:SetScript("OnClick", function()
+                local pp = currentProfile()
+                pp.benchCount = math.min(BENCH_MAX, pp.benchCount + 1)
+                notifyComposerEdit()
+                refresh()
+            end)
+        end
+        if p.groupCount < GROUP_MAX or p.benchCount < BENCH_MAX then
+            afterGridY = afterGridY + 34
+        end
+
+        -- Right-side coverage panel. Width is dynamic - it consumes
+        -- whatever space remains after the groups grid + a right
+        -- margin. Once panelW crosses SIDE_BY_SIDE_THRESHOLD the
+        -- buffs/debuffs sections lay out horizontally instead of
+        -- stacked. Y aligned with the "Profile:" label up top.
+        local covered = computeCoverage()
+        local sidebarX = 16 + groupColumns * (GROUP_W + colGap) + 4
+        local sidebarY = 16
+        local rightMargin = 16
+        local sidebarW = math.max(290, (body:GetWidth() or 900) - sidebarX - rightMargin)
+        local sidebarH = buildBuffPanel(body, covered, sidebarX, sidebarY, sidebarW)
+
+        local groupsBottom = afterGridY
+        local sidebarBottom = sidebarY + sidebarH
+        body:SetHeight(math.max(groupsBottom, sidebarBottom) + 24)
+    end
+
+    -- Co-op: attach the roster panel (hidden by default) parented to
+    -- the composer tab area; the top-strip "Co-op" button toggles it.
+    if L3F.ComposerCoOp and L3F.ComposerCoOp.AttachRosterPanel then
+        local panel = L3F.ComposerCoOp.AttachRosterPanel(parent,
+            "TOPRIGHT", parent, "TOPRIGHT", -28, -8)
+        if panel then panel:Hide() end
+    end
+
+    refresh()
+end
+
+
+-- =============================================================
+-- 9. CO-OP INTEGRATION (exports for ComposerCoOp.lua)
+-- =============================================================
+L3F._CompSerializeProfile = serializeProfile
+
+function L3F._CompApplySnapshot(activeName, payload)
+    if not payload or payload == "" then return end
+    local name, profile = deserializeProfile(payload)
+    if not name or not profile then return end
+    -- Use the activeName the host sent us (the snapshot's embedded
+    -- name carries the host's profile slot label, which may collide
+    -- with an existing local profile). Fall back to the embedded name.
+    local slotName = (activeName and activeName ~= "") and activeName or name
+    L3F.db.composer = L3F.db.composer or {}
+    L3F.db.composer.profiles = L3F.db.composer.profiles or {}
+    L3F.db.composer.profiles[slotName] = profile
+    L3F.db.composer.activeProfile = slotName
+    if refresh then refresh() end
+end
+
+
+L3F.RegisterTab("guild.composer", "Composer", nil, buildComposer, {
+    parent = "guild",
+    -- Default 5 groups + 1 bench in a 3-col grid (2 rows) + the
+    -- buffs/debuffs sidebar drives the natural width and a fairly
+    -- generous height. The scroll view inside still handles anything
+    -- taller than the auto-resized window.
+    preferredWidth = 1000, preferredHeight = 720,
+})
