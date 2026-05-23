@@ -64,11 +64,62 @@ L3F.RegisterDrops(17535, {
 - **toc file** — `L3FTools.toc` lists load order. New files must be added there or they won't load. Verify with `verify.sh`.
 
 ## Git
-- `main` = stable; `dev` = WIP. All work lands on `dev`; squash `dev` → `main` only after Morphéours verifies the change in-game.
+
+### Branch model
+- `main` = stable; `dev` = WIP shared between Willem (Claude) and Kerweek (Codex).
+- Squash `dev` → `main` only after Morphéours verifies the change in-game.
 - `.github/workflows/package.yml` repackages a correctly-named release zip on every push — the `beta` release asset tracks `dev`, the `live` asset tracks `main`.
 - Morphéours downloads the `beta` release **asset**: `github.com/WillemDLT/L3FTools/releases/download/beta/L3FTools.zip`. Never hand him a raw `/archive/refs/heads/*.zip` — its wrapper folder won't match the `.toc` and WoW won't load it.
+
+### Feature-branch workflow (use this for any non-trivial change)
+Because Willem+Claude and Kerweek+Codex both push to this repo, all real work goes through feature branches off `dev` to avoid overwriting each other. Never edit `dev` directly except for the rare trivial typo/single-line tweak where you're sure nobody else is touching the same file.
+
+**Branch naming convention** — prefix with the owning human so attribution and collisions are obvious:
+- Willem+Claude: `willem/<short-description>` (e.g. `willem/raid-planner-fix`)
+- Kerweek+Codex: `kerweek/<short-description>` (e.g. `kerweek/auction-icon-bug`)
+
+**Standard flow (do this every time):**
+```bash
+# 1. Sync dev first
+git checkout dev
+git pull origin dev
+
+# 2. Branch off dev
+git checkout -b willem/short-description   # or kerweek/...
+
+# 3. Do the work — multiple commits OK
+# (edit files, run verify.sh, commit, repeat)
+
+# 4. Push your branch
+git push -u origin willem/short-description
+
+# 5. Open a PR against dev
+gh pr create --base dev --head willem/short-description --title "..." --body "..."
+
+# 6. (optional) Cross-AI review on the PR. The other side's AI can comment
+# via its GitHub integration if installed. Otherwise the receiving human reviews.
+
+# 7. Merge via the PR (squash-merge to dev for clean history)
+gh pr merge --squash --delete-branch
+
+# 8. Sync your local dev
+git checkout dev && git pull origin dev
+```
+
+**If push fails because someone else updated `dev`:** rebase your branch onto the latest dev, resolve any conflicts, push again:
+```bash
+git fetch origin
+git rebase origin/dev
+# resolve conflicts if any, then:
+git push --force-with-lease
+```
+
+**If a PR shows merge conflicts on GitHub:** pull `dev` into your feature branch, resolve, push the resolution.
+
+### Other Git notes
 - GitHub ops use the `gh` CLI at `C:\Program Files\GitHub CLI\gh.exe` (not on Bash PATH; call by full path). No GitHub MCP.
 - Author: Willem (willem-YT@hotmail.com). GitHub display name: WillemDLT.
+- Kerweek (GitHub handle TBC) is a collaborator on this repo with push access.
 
 ## Project status
 - Version 0.19.1 (`.toc`). All work lands on `dev`; Morphéours pulls the beta zip and reports back.
