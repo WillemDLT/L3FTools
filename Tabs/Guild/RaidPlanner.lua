@@ -287,11 +287,25 @@ local function openColorPicker(initialHex, onAccept)
         ColorPickerFrame.hasOpacity = false
         ColorPickerFrame.opacity = 1
         ColorPickerFrame.previousValues = { r = r, g = g, b = b }
-        ColorPickerFrame.func = info.swatchFunc
-        ColorPickerFrame.opacityFunc = info.swatchFunc
-        ColorPickerFrame.cancelFunc = info.cancelFunc
         ColorPickerFrame:SetColorRGB(r, g, b)
         ColorPickerFrame:Show()
+    end
+
+    -- TBC 2.5.x Anniversary ships an XML OK button OnClick that calls
+    -- ColorPickerFrame.swatchFunc(), but the OpenColorPicker(info)
+    -- helper on this build only writes ColorPickerFrame.func. That
+    -- naming-mismatch leaves .swatchFunc nil and the OK click errors
+    -- with "attempt to call field 'swatchFunc' (a nil value)" -- which
+    -- shows up RANDOMLY while the user drags icons because the drop
+    -- click sometimes lands on the still-visible OK button after they
+    -- opened a color picker and never closed it. Set BOTH names
+    -- explicitly so the XML handler can find a callable function under
+    -- whichever field name it's coded to read.
+    if ColorPickerFrame then
+        ColorPickerFrame.func        = info.swatchFunc
+        ColorPickerFrame.swatchFunc  = info.swatchFunc
+        ColorPickerFrame.opacityFunc = info.swatchFunc
+        ColorPickerFrame.cancelFunc  = info.cancelFunc
     end
 
     -- Live poller fallback. The TBC 2.5.x ColorPickerFrame slider
