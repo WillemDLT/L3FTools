@@ -544,11 +544,22 @@ local function buildPlacedIcon(plan, iconData, idx)
         if not moved then
             -- Treated as a click - select instead of move (the frame
             -- snaps back to its original anchored position on the
-            -- next scheduleRefresh tick).
+            -- next scheduleRefresh tick). scheduleRefresh also rebuilds
+            -- the props panel for the new selection, which is needed.
             currentSelection = idx
+            scheduleRefresh()
         elseif newX and l and cx >= l and cx <= r and cy >= b and cy <= t then
+            -- Pure position update: re-anchor the frame in-place without
+            -- a full refresh(). This prevents the repeated teardown-and-
+            -- rebuild cycle that orphans Textures and causes the render
+            -- breakdown on fast drag-spam.
             iconData.x = newX
             iconData.y = newY
+            -- Re-anchor the live frame to the new fractional position.
+            -- Formula mirrors buildPlacedIcon: TOPLEFT + (x*w, -(y*h)).
+            local w, h = canvasSizePx()
+            f:ClearAllPoints()
+            f:SetPoint("CENTER", placedHost, "TOPLEFT", newX * w, -(newY * h))
             -- Co-op: broadcast MOVE with iconIdx + final position.
             notifyEdit("MOVE", {
                 tostring(idx),
@@ -557,6 +568,7 @@ local function buildPlacedIcon(plan, iconData, idx)
             })
         else
             -- Released outside canvas after a meaningful drag = yeet.
+            -- Full refresh needed because the icon is removed from the list.
             for i, ic in ipairs(plan.icons) do
                 if ic == iconData then
                     table.remove(plan.icons, i)
@@ -564,10 +576,8 @@ local function buildPlacedIcon(plan, iconData, idx)
                     break
                 end
             end
+            scheduleRefresh()
         end
-        -- Defer the rebuild - never recurse from inside the
-        -- OnDragStop callback.
-        scheduleRefresh()
     end)
 
     return f
