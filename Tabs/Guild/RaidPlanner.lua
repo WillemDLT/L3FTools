@@ -217,6 +217,27 @@ local function scheduleRefresh()
     end
 end
 
+-- Accepts rrggbb, #rrggbb, or rrggbbaa; strips any non-hex prefix,
+-- truncates to 6 chars, and guarantees a valid lowercase rrggbb.
+-- Falls back to "ffffff" if the result is not exactly 6 valid hex chars.
+local function normalizeHexColor(hex)
+    if type(hex) ~= "string" then return "ffffff" end
+    hex = hex:lower():gsub("[^0-9a-f]", "")
+    if #hex >= 8 then hex = hex:sub(1, 6) end  -- strip alpha
+    if #hex == 6 and hex:find("^[0-9a-f]+$") then return hex end
+    return "ffffff"
+end
+
+-- Converts a hex color (any shape normalizeHexColor accepts) to
+-- three 0..1 floats. Safe: tonumber on a validated 2-char hex substring
+-- is always non-nil, so the / 255 never NaN-divides.
+local function hexToRgb01(hex)
+    hex = normalizeHexColor(hex)
+    return tonumber(hex:sub(1, 2), 16) / 255,
+           tonumber(hex:sub(3, 4), 16) / 255,
+           tonumber(hex:sub(5, 6), 16) / 255
+end
+
 -- Module-level frame for the live picker poller. ONE per addon;
 -- re-wired each openColorPicker call. Lives outside the function
 -- because Lua 5.1 functions can't carry indexable fields (`f.x = y`
@@ -232,10 +253,8 @@ local colorPickerPoller
 -- previous values). The helper writes `previousValues = {r=r,
 -- g=g, b=b, opacity=op}` for us, so cancelFunc can read by key.
 local function openColorPicker(initialHex, onAccept)
-    initialHex = (initialHex and #initialHex == 6) and initialHex or "ffffff"
-    local r = tonumber(initialHex:sub(1, 2), 16) / 255
-    local g = tonumber(initialHex:sub(3, 4), 16) / 255
-    local b = tonumber(initialHex:sub(5, 6), 16) / 255
+    initialHex = normalizeHexColor(initialHex)
+    local r, g, b = hexToRgb01(initialHex)
 
     local function rgbToHex(nr, ng, nb)
         return string.format("%02x%02x%02x",
@@ -581,10 +600,7 @@ refreshDrawings = function()
     local w, h = canvasSizePx()
     if w == 0 then return end
     for _, stroke in ipairs(plan.drawings) do
-        local hex = stroke.color or "ffffff"
-        local r = tonumber(hex:sub(1, 2), 16) / 255
-        local g = tonumber(hex:sub(3, 4), 16) / 255
-        local b = tonumber(hex:sub(5, 6), 16) / 255
+        local r, g, b = hexToRgb01(stroke.color)
         local size = stroke.size or 4
         local pts = stroke.points or {}
         for i = 2, #pts do
@@ -606,10 +622,7 @@ local function appendStrokeSegment(stroke, prevPt, newPt)
     if not drawingHost then return end
     local w, h = canvasSizePx()
     if w == 0 then return end
-    local hex = stroke.color or "ffffff"
-    local r = tonumber(hex:sub(1, 2), 16) / 255
-    local g = tonumber(hex:sub(3, 4), 16) / 255
-    local b = tonumber(hex:sub(5, 6), 16) / 255
+    local r, g, b = hexToRgb01(stroke.color)
     local size = stroke.size or 4
     drawSegment(drawingHost,
         prevPt.x * w, prevPt.y * h, newPt.x * w, newPt.y * h,
@@ -750,7 +763,7 @@ local function canvasMouseDown(self, button)
         local plan = currentPlan()
         plan.drawings = plan.drawings or {}
         currentStroke = {
-            color  = penMode.color,
+            color  = normalizeHexColor(penMode.color),
             size   = penMode.size,
             fade   = penMode.fadeOut,
             points = {},
@@ -1056,10 +1069,9 @@ refreshPalette = function()
         penColorBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
         penColorBtn:SetScript("OnClick", function()
             openColorPicker(penMode.color, function(newHex)
+                newHex = normalizeHexColor(newHex)
                 penMode.color = newHex
-                local r = tonumber(newHex:sub(1, 2), 16) / 255
-                local g = tonumber(newHex:sub(3, 4), 16) / 255
-                local b = tonumber(newHex:sub(5, 6), 16) / 255
+                local r, g, b = hexToRgb01(newHex)
                 penColorSwatch:SetVertexColor(r, g, b, 1)
                 if prevDot then prevDot:SetVertexColor(r, g, b, 1) end
             end)
