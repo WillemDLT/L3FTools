@@ -3,7 +3,7 @@
 set -e
 cd "$(dirname "$0")"
 
-python << 'PYEOF'
+"${PYTHON:-python}" << 'PYEOF'
 import os, sys, subprocess, re
 
 def check(t):
