@@ -15,5 +15,19 @@ That zip already contains a correctly-named `L3FTools` folder, so extracting it 
 ## Usage
 
 - The **minimap button** or **`/l3f`** opens the main window.
-- `/l3f automarker`, `/l3f atlas`, `/l3f settings` open a specific tab.
+- `/l3f automarker`, `/l3f atlas`, `/l3f map`, `/l3f guild`, `/l3f settings` open a specific tab.
 - `/l3f toggle` flips the Automarker on or off; `/l3f switcher` shows/hides the wing switcher; `/l3f minimap` hides/shows the minimap button; `/l3f help` lists every command.
+
+## Development
+
+On Windows, run:
+
+```powershell
+./verify.ps1
+```
+
+In Git Bash or Linux, run:
+
+```bash
+./verify.sh
+```
