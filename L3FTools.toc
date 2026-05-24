@@ -78,6 +78,7 @@ Data/Collections.lua
 Data/Professions.lua
 Data/ProfessionsRecipeMap.lua
 Data/RaidPlannerCatalog.lua
+Data/RaidPlannerEncounterIcons.lua
 UI/ModelViewer.lua
 UI/HoverPreview.lua
 UI/PlayerMarksDialog.lua

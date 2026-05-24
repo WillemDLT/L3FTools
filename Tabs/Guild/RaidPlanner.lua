@@ -15,7 +15,7 @@ local addonName, L3F = ...
 -- =============================================================
 -- 1. ICON PALETTES
 -- =============================================================
--- The three palette groups Willem itemised. Each entry carries an
+-- The palette groups. Each entry carries an
 -- internal `key` (also stored in savedvars), the display texture, an
 -- optional `tooltip`, and per-group flags. Variants are sibling
 -- entries that share the parent's `key` family (`feralbear` is the
@@ -34,56 +34,86 @@ local MARKS = {
     { key = "mark8", label = "Skull",    tex = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_8" },
 }
 
--- Role icons (tank / healer / melee dps / ranged dps). Chosen for
--- visual distinguishability rather than the LFG sprite sheet (its
--- texcoords are fiddly and the LFG sheet has no "ranged" role).
+-- Role icons (tank / healer / melee dps / ranged dps).
+-- Uses the Blizzard LFG role-sheet so the palette matches the
+-- rounded icons style from the Raid Planner mockups.
+local ROLE_SHEET = "Interface\\AddOns\\L3FTools\\Media\\RaidPlanner\\role-icons-agent.png"
 local ROLES = {
-    { key = "tank",   label = "Tank",       tex = "Interface\\Icons\\Spell_Holy_DevotionAura" },
-    { key = "heal",   label = "Healer",     tex = "Interface\\Icons\\Spell_Nature_Healingtouch" },
-    { key = "melee",  label = "Melee DPS",  tex = "Interface\\Icons\\Ability_Warrior_SavageBlow" },
-    { key = "ranged", label = "Ranged DPS", tex = "Interface\\Icons\\Ability_Hunter_AimedShot" },
+    -- Inset each quadrant so role circles render larger (closer to raid mark "Circle" visual size).
+    { key = "tank",   label = "Tank",       tex = ROLE_SHEET, tc = { 0.065, 0.435, 0.065, 0.435 } },
+    { key = "heal",   label = "Healer",     tex = ROLE_SHEET, tc = { 0.565, 0.935, 0.065, 0.435 } },
+    { key = "melee",  label = "Melee DPS",  tex = ROLE_SHEET, tc = { 0.065, 0.435, 0.565, 0.935 } },
+    { key = "ranged", label = "Ranged DPS", tex = ROLE_SHEET, tc = { 0.565, 0.935, 0.565, 0.935 } },
 }
 
 -- TBC classes. The Properties panel surfaces alternative form icons
 -- via `variants` for classes that have a clear secondary identity in
 -- TBC (Druid's 4 forms). All other classes have a single texture.
+local CLASS_ICON_SHEET = "Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES"
 local CLASSES = {
-    { key = "druid",   label = "Druid",   tex = "Interface\\Icons\\Ability_Druid_CatForm",
+    { key = "druid",   label = "Druid",   tex = CLASS_ICON_SHEET, tc = "DRUID",
       variants = {
         { key = "cat",     label = "Cat",     tex = "Interface\\Icons\\Ability_Druid_CatForm" },
         { key = "bear",    label = "Bear",    tex = "Interface\\Icons\\Ability_Racial_BearForm" },
         { key = "tree",    label = "Tree",    tex = "Interface\\Icons\\Ability_Druid_TreeofLife" },
         { key = "moonkin", label = "Moonkin", tex = "Interface\\Icons\\Spell_Nature_ForceOfNature" },
       } },
-    { key = "hunter",  label = "Hunter",  tex = "Interface\\Icons\\Ability_Hunter_BeastTaming" },
-    { key = "mage",    label = "Mage",    tex = "Interface\\Icons\\Spell_Holy_MagicalSentry" },
-    { key = "paladin", label = "Paladin", tex = "Interface\\Icons\\Spell_Holy_HolyBolt" },
-    { key = "priest",  label = "Priest",  tex = "Interface\\Icons\\Spell_Holy_PowerWordShield" },
-    { key = "rogue",   label = "Rogue",   tex = "Interface\\Icons\\Ability_Stealth" },
-    { key = "shaman",  label = "Shaman",  tex = "Interface\\Icons\\Spell_Nature_Lightning" },
-    { key = "warlock", label = "Warlock", tex = "Interface\\Icons\\Spell_Shadow_DeathCoil" },
-    { key = "warrior", label = "Warrior", tex = "Interface\\Icons\\Ability_Warrior_SavageBlow" },
+    { key = "hunter",  label = "Hunter",  tex = CLASS_ICON_SHEET, tc = "HUNTER" },
+    { key = "mage",    label = "Mage",    tex = CLASS_ICON_SHEET, tc = "MAGE" },
+    { key = "paladin", label = "Paladin", tex = CLASS_ICON_SHEET, tc = "PALADIN" },
+    { key = "priest",  label = "Priest",  tex = CLASS_ICON_SHEET, tc = "PRIEST" },
+    { key = "rogue",   label = "Rogue",   tex = CLASS_ICON_SHEET, tc = "ROGUE" },
+    { key = "shaman",  label = "Shaman",  tex = CLASS_ICON_SHEET, tc = "SHAMAN" },
+    { key = "warlock", label = "Warlock", tex = CLASS_ICON_SHEET, tc = "WARLOCK" },
+    { key = "warrior", label = "Warrior", tex = CLASS_ICON_SHEET, tc = "WARRIOR" },
 }
 
--- Reverse lookup: any palette key (mark / role / class / class-variant)
+-- Reverse lookup: any palette key (mark / role / class / encounter / class-variant)
 -- -> the texture. Populated lazily because variant sub-tables nest
--- and we want all three palette families in one map for the canvas
+-- and we want all palette families in one map for the canvas
 -- renderer.
 local KEY_TO_TEX = {}
 local KEY_TO_LABEL = {}
+local KEY_TO_TEXCOORD = {}
+local DEFAULT_ICON_TC = { 0.07, 0.93, 0.07, 0.93 }
+local function applyIconTexCoord(tex, tc)
+    if type(tc) == "string" and CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[tc] then
+        tc = CLASS_ICON_TCOORDS[tc]
+    end
+    if tc and tc[1] and tc[2] and tc[3] and tc[4] then
+        tex:SetTexCoord(tc[1], tc[2], tc[3], tc[4])
+    else
+        tex:SetTexCoord(DEFAULT_ICON_TC[1], DEFAULT_ICON_TC[2], DEFAULT_ICON_TC[3], DEFAULT_ICON_TC[4])
+    end
+end
 local function buildPaletteIndex()
     if next(KEY_TO_TEX) then return end
-    for _, m in ipairs(MARKS)   do KEY_TO_TEX[m.key], KEY_TO_LABEL[m.key] = m.tex, m.label end
-    for _, r in ipairs(ROLES)   do KEY_TO_TEX[r.key], KEY_TO_LABEL[r.key] = r.tex, r.label end
+    for _, m in ipairs(MARKS) do
+        KEY_TO_TEX[m.key], KEY_TO_LABEL[m.key], KEY_TO_TEXCOORD[m.key] = m.tex, m.label, m.tc
+    end
+    for _, r in ipairs(ROLES) do
+        KEY_TO_TEX[r.key], KEY_TO_LABEL[r.key], KEY_TO_TEXCOORD[r.key] = r.tex, r.label, r.tc
+    end
     for _, c in ipairs(CLASSES) do
-        KEY_TO_TEX[c.key], KEY_TO_LABEL[c.key] = c.tex, c.label
+        KEY_TO_TEX[c.key], KEY_TO_LABEL[c.key], KEY_TO_TEXCOORD[c.key] = c.tex, c.label, c.tc
         for _, v in ipairs(c.variants or {}) do
             -- Variant keys are namespaced "<class>:<variant>" so two
             -- classes can share a variant name without collision.
             local vk = c.key .. ":" .. v.key
-            KEY_TO_TEX[vk], KEY_TO_LABEL[vk] = v.tex, c.label .. " (" .. v.label .. ")"
+            KEY_TO_TEX[vk], KEY_TO_LABEL[vk], KEY_TO_TEXCOORD[vk] =
+                v.tex, c.label .. " (" .. v.label .. ")", v.tc
         end
     end
+    for _, entries in pairs(L3F.RPEncounterIcons or {}) do
+        for _, e in ipairs(entries) do
+            KEY_TO_TEX[e.key], KEY_TO_LABEL[e.key], KEY_TO_TEXCOORD[e.key] = e.tex, e.label, e.tc
+        end
+    end
+end
+
+local function isEncounterPaletteIcon(entry)
+    local key = entry and entry.key
+    return key == "rpenc_gateway" or (key and string.find(key, "_npc_", 1, true))
 end
 
 -- Class -> variants[] lookup (Properties panel uses this to show the
@@ -129,12 +159,105 @@ local function ensureState()
     rp.activePlanIdx = rp.activePlanIdx or 1
 end
 
+local function activePlannerState()
+    if L3F.RPCoOp and L3F.RPCoOp.GetPlannerState then
+        local coOpState = L3F.RPCoOp.GetPlannerState()
+        if coOpState then
+            ensureState()
+            coOpState.plansByEncounter = coOpState.plansByEncounter or {}
+            coOpState.activeEncounter = coOpState.activeEncounter
+                or L3F.db.raidPlanner.activeEncounter
+            coOpState.activePlanIdx = coOpState.activePlanIdx or 1
+            return coOpState
+        end
+    end
+    ensureState()
+    return L3F.db.raidPlanner
+end
+
+local function usingCoOpPlannerState()
+    return L3F.RPCoOp
+        and L3F.RPCoOp.GetPlannerState
+        and L3F.RPCoOp.GetPlannerState() ~= nil
+end
+
+local function isCoOpGuest()
+    return usingCoOpPlannerState()
+end
+
 local function findCatalogEncounter(name)
     for _, raid in ipairs(L3F.raidPlannerCatalog or {}) do
         for _, enc in ipairs(raid.encounters) do
             if enc.name == name then return enc, raid end
         end
     end
+end
+
+local function normalizeRaidName(name)
+    return tostring(name or ""):lower():gsub("[%s%p]", "")
+end
+local function normalizeKey(name)
+    return tostring(name or ""):lower():gsub("[%s%p]", "")
+end
+
+local raidCatalogByNormName
+local function raidCatalogIndexByName()
+    if raidCatalogByNormName then return raidCatalogByNormName end
+    local idx = {}
+    for _, raid in ipairs(L3F.raidPlannerCatalog or {}) do
+        idx[normalizeRaidName(raid.raid)] = raid
+    end
+    local function alias(aliasName, canonicalName)
+        local canonical = idx[normalizeRaidName(canonicalName)]
+        if canonical then
+            idx[normalizeRaidName(aliasName)] = canonical
+        end
+    end
+    alias("Tempest Keep", "The Eye: Tempest Keep")
+    alias("The Eye", "The Eye: Tempest Keep")
+    alias("Hyjal Summit", "Battle for Mount Hyjal")
+    alias("Mount Hyjal", "Battle for Mount Hyjal")
+    raidCatalogByNormName = idx
+    return raidCatalogByNormName
+end
+
+local function currentInstanceRaidCatalog()
+    local inInstance, instanceType = IsInInstance()
+    if not inInstance or instanceType ~= "raid" then return nil end
+    local idx = raidCatalogIndexByName()
+    local names = {
+        GetInstanceInfo(),
+        (GetRealZoneText and GetRealZoneText()) or "",
+        (GetSubZoneText and GetSubZoneText()) or "",
+    }
+    for _, rawName in ipairs(names) do
+        local key = normalizeRaidName(rawName)
+        if key ~= "" then
+            local direct = idx[key]
+            if direct then return direct end
+            for raidKey, raid in pairs(idx) do
+                if raidKey and raid
+                   and (string.find(key, raidKey, 1, true)
+                        or string.find(raidKey, key, 1, true)) then
+                    return raid
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function syncEncounterToInstanceRaid()
+    if usingCoOpPlannerState() then return false end
+    local rp = L3F.db and L3F.db.raidPlanner
+    if not rp then return false end
+    local raid = currentInstanceRaidCatalog()
+    if not raid or not raid.encounters or not raid.encounters[1] then return false end
+    local _, activeRaid = findCatalogEncounter(rp.activeEncounter)
+    if activeRaid == raid then return false end
+    rp.activeEncounter = raid.encounters[1].name
+    rp.activePlanIdx = 1
+    return true
 end
 
 local function newEmptyPlan(encounterName)
@@ -150,8 +273,7 @@ local function newEmptyPlan(encounterName)
 end
 
 local function ensurePlansFor(encounterName)
-    ensureState()
-    local rp = L3F.db.raidPlanner
+    local rp = activePlannerState()
     rp.plansByEncounter[encounterName] = rp.plansByEncounter[encounterName] or {}
     if #rp.plansByEncounter[encounterName] == 0 then
         table.insert(rp.plansByEncounter[encounterName], newEmptyPlan(encounterName))
@@ -160,8 +282,7 @@ local function ensurePlansFor(encounterName)
 end
 
 local function currentPlan()
-    ensureState()
-    local rp = L3F.db.raidPlanner
+    local rp = activePlannerState()
     local plans = ensurePlansFor(rp.activeEncounter)
     rp.activePlanIdx = math.max(1, math.min(#plans, rp.activePlanIdx or 1))
     return plans[rp.activePlanIdx], plans
@@ -346,9 +467,8 @@ end
 -- `refresh` is forward-declared at the top of the file (right above
 -- scheduleRefresh) so scheduleRefresh's closure captures it. Re-
 -- declaring `local refresh` here would SHADOW that upvalue and the
--- deferred refresh would never fire. Only declare the other three
--- forwards here.
-local selectIcon, deselect, openContextMenu
+-- deferred refresh would never fire. Only declare the other forwards here.
+local selectIcon, deselect, openContextMenu, openDrawingContextMenu, broadcastIconProps
 
 local dragState = { active = false }
 
@@ -359,7 +479,7 @@ follower:EnableMouse(false)
 follower:Hide()
 local followerTex = follower:CreateTexture(nil, "OVERLAY")
 followerTex:SetAllPoints()
-followerTex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+applyIconTexCoord(followerTex)
 
 local dragDriver = CreateFrame("Frame")
 dragDriver:SetScript("OnUpdate", function()
@@ -380,6 +500,457 @@ local refreshPalette, refreshPropsPanel, refreshEncounterPanel
 local refreshSearchPanel, refreshNotesPanel
 local drawingSegments = {}
 local currentSelection
+local leftClearPlanBtn, undoBtn, redoBtn
+
+local plannerHistory = (function()
+    local H = {}
+    local undoStack, redoStack = {}, {}
+    local HISTORY_LIMIT = 50
+
+    local function copyIconData(icon)
+        if not icon then return nil end
+        local out = {}
+        for k, v in pairs(icon) do
+            out[k] = v
+        end
+        return out
+    end
+
+    local function copyStrokeData(stroke)
+        if not stroke then return nil end
+        local out = {
+            color  = stroke.color,
+            size   = stroke.size,
+            fade   = stroke.fade,
+            points = {},
+        }
+        for i, p in ipairs(stroke.points or {}) do
+            out.points[i] = { x = p.x, y = p.y }
+        end
+        return out
+    end
+
+    local function copyIconList(icons)
+        local out = {}
+        for i, icon in ipairs(icons or {}) do
+            out[i] = copyIconData(icon)
+        end
+        return out
+    end
+
+    local function copyDrawingList(drawings)
+        local out = {}
+        for i, stroke in ipairs(drawings or {}) do
+            out[i] = copyStrokeData(stroke)
+        end
+        return out
+    end
+
+    local function copyPlanVisualState(plan)
+        return {
+            icons = copyIconList(plan and plan.icons),
+            drawings = copyDrawingList(plan and plan.drawings),
+        }
+    end
+
+    local function restoreDrawingList(plan, drawings)
+        if not plan then return end
+        plan.drawings = copyDrawingList(drawings)
+    end
+
+    local function restorePlanVisualState(plan, state)
+        if not plan then return end
+        state = state or {}
+        plan.icons = copyIconList(state.icons)
+        restoreDrawingList(plan, state.drawings)
+    end
+
+    local function visualStateHasContent(state)
+        return state
+            and ((state.icons and #state.icons > 0)
+                or (state.drawings and #state.drawings > 0))
+    end
+
+    local function planHasVisualContent(plan)
+        return plan
+            and ((plan.icons and #plan.icons > 0)
+                or (plan.drawings and #plan.drawings > 0))
+    end
+
+    local function clearRedo()
+        for i = #redoStack, 1, -1 do
+            redoStack[i] = nil
+        end
+    end
+
+    local function findIconRefIndex(plan, iconRef)
+        if not plan or not iconRef then return nil end
+        for i, icon in ipairs(plan.icons or {}) do
+            if icon == iconRef then return i end
+        end
+        return nil
+    end
+
+    local function findStrokeRefIndex(plan, strokeRef)
+        if not plan or not strokeRef then return nil end
+        for i, stroke in ipairs(plan.drawings or {}) do
+            if stroke == strokeRef then return i end
+        end
+        return nil
+    end
+
+    local function broadcastIconPlacement(icon)
+        if not icon then return end
+        notifyEdit("PLACE", {
+            icon.kind or "", icon.key or "",
+            string.format("%.4f", icon.x or 0.5),
+            string.format("%.4f", icon.y or 0.5),
+            icon.color or "ffffff", icon.text or "",
+            icon.variant or "", icon.locked and "1" or "0",
+            tostring(icon.direction or ""),
+        })
+    end
+
+    local function broadcastStrokePlacement(stroke)
+        if not stroke or not stroke.points or #stroke.points < 2 then return end
+        local pts = {}
+        for _, p in ipairs(stroke.points) do
+            table.insert(pts, string.format("%.3f,%.3f", p.x, p.y))
+        end
+        notifyEdit("DRAW", {
+            stroke.color or "ffffff",
+            tostring(stroke.size or 4),
+            tostring(stroke.fade or 0),
+            table.concat(pts, "/"),
+        })
+    end
+
+    local function broadcastDrawingState(drawings)
+        notifyEdit("PEN_CLEAR", {})
+        for _, stroke in ipairs(drawings or {}) do
+            broadcastStrokePlacement(stroke)
+        end
+    end
+
+    local function broadcastPlanVisualState(state)
+        notifyEdit("CLEAR", {})
+        for _, icon in ipairs((state and state.icons) or {}) do
+            broadcastIconPlacement(icon)
+        end
+        for _, stroke in ipairs((state and state.drawings) or {}) do
+            broadcastStrokePlacement(stroke)
+        end
+    end
+
+    local function currentPlanMatches(planRef)
+        local plan = currentPlan()
+        return plan and plan == planRef
+    end
+
+    local function canUndoRecordedAction(action, plan)
+        if not (action and plan and plan == action.planRef) then return false end
+        if action.type == "place" then
+            return findIconRefIndex(plan, action.iconRef) ~= nil
+        elseif action.type == "draw" then
+            return findStrokeRefIndex(plan, action.strokeRef) ~= nil
+        elseif action.type == "removeDraw" then
+            return action.stroke ~= nil
+        elseif action.type == "clear" then
+            return visualStateHasContent(action.before)
+        elseif action.type == "penClear" then
+            return action.before and #action.before > 0
+        end
+        return false
+    end
+
+    local function fallbackUndoTarget(plan)
+        if not plan then return nil end
+        if currentSelection and plan.icons and plan.icons[currentSelection] then
+            return { type = "place", idx = currentSelection }
+        end
+        if plan.drawings and #plan.drawings > 0 then
+            return { type = "draw", idx = #plan.drawings }
+        end
+        if plan.icons and #plan.icons > 0 then
+            return { type = "place", idx = #plan.icons }
+        end
+        return nil
+    end
+
+    local function canUndoPlannerAction()
+        local plan = currentPlan()
+        if not plan then return false end
+        if canUndoRecordedAction(undoStack[#undoStack], plan) then
+            return true
+        end
+        return fallbackUndoTarget(plan) ~= nil
+    end
+
+    local function canRedoPlannerAction()
+        local action = redoStack[#redoStack]
+        return action and currentPlanMatches(action.planRef)
+    end
+
+    function H.refreshButtons()
+        if undoBtn then
+            local enabled = canUndoPlannerAction()
+            if enabled then undoBtn:Enable() else undoBtn:Disable() end
+            undoBtn:SetAlpha(enabled and 1 or 0.35)
+        end
+        if redoBtn then
+            local enabled = canRedoPlannerAction()
+            if enabled then redoBtn:Enable() else redoBtn:Disable() end
+            redoBtn:SetAlpha(enabled and 1 or 0.35)
+        end
+    end
+
+    local function trimUndo()
+        while #undoStack > HISTORY_LIMIT do
+            table.remove(undoStack, 1)
+        end
+    end
+
+    local function pushRedo(action)
+        if not action then return end
+        table.insert(redoStack, action)
+        while #redoStack > HISTORY_LIMIT do
+            table.remove(redoStack, 1)
+        end
+        H.refreshButtons()
+    end
+
+    local function pushUndo(action, preserveRedo)
+        if not action then return end
+        table.insert(undoStack, action)
+        trimUndo()
+        if not preserveRedo then clearRedo() end
+        H.refreshButtons()
+    end
+
+    function H.clear()
+        for i = #undoStack, 1, -1 do
+            undoStack[i] = nil
+        end
+        clearRedo()
+        H.refreshButtons()
+    end
+
+    function H.currentPlanMatches(planRef)
+        return currentPlanMatches(planRef)
+    end
+
+    function H.findStrokeRefIndex(plan, strokeRef)
+        return findStrokeRefIndex(plan, strokeRef)
+    end
+
+    function H.broadcastStrokePlacement(stroke)
+        broadcastStrokePlacement(stroke)
+    end
+
+    function H.broadcastIconPlacement(icon)
+        broadcastIconPlacement(icon)
+    end
+
+    function H.recordIconPlacement(plan, iconRef)
+        if not (plan and iconRef) then return end
+        pushUndo({ type = "place", planRef = plan, iconRef = iconRef })
+    end
+
+    function H.recordStrokePlacement(plan, strokeRef)
+        if not (plan and strokeRef and strokeRef.points and #strokeRef.points >= 2) then return end
+        pushUndo({ type = "draw", planRef = plan, strokeRef = strokeRef })
+    end
+
+    function H.recordDrawingRemoval(plan, stroke, idx)
+        local strokeCopy = copyStrokeData(stroke)
+        if not (plan and strokeCopy) then return end
+        pushUndo({ type = "removeDraw", planRef = plan, stroke = strokeCopy, index = idx })
+    end
+
+    function H.recordClearPlan(plan)
+        if not planHasVisualContent(plan) then return end
+        pushUndo({
+            type = "clear",
+            planRef = plan,
+            before = copyPlanVisualState(plan),
+            after = { icons = {}, drawings = {} },
+        })
+    end
+
+    function H.recordPenClear(plan)
+        if not (plan and plan.drawings and #plan.drawings > 0) then return end
+        pushUndo({
+            type = "penClear",
+            planRef = plan,
+            before = copyDrawingList(plan.drawings),
+            after = {},
+        })
+    end
+
+    function H.undo()
+        local action = undoStack[#undoStack]
+        local plan = currentPlan()
+        if not plan then return end
+
+        if canUndoRecordedAction(action, plan) then
+            if action.type == "place" then
+                local idx = findIconRefIndex(plan, action.iconRef)
+                local removed = copyIconData(plan.icons[idx])
+                table.remove(undoStack)
+                table.remove(plan.icons, idx)
+                pushRedo({ type = "place", planRef = plan, icon = removed })
+                currentSelection = nil
+                notifyEdit("RM", { tostring(idx) })
+                scheduleRefresh()
+                return
+            elseif action.type == "draw" then
+                local idx = findStrokeRefIndex(plan, action.strokeRef)
+                local removed = copyStrokeData(plan.drawings[idx])
+                table.remove(undoStack)
+                table.remove(plan.drawings, idx)
+                pushRedo({ type = "draw", planRef = plan, stroke = removed })
+                notifyEdit("RMDRAW", { tostring(idx) })
+                scheduleRefresh()
+                return
+            elseif action.type == "removeDraw" then
+                local restored = copyStrokeData(action.stroke)
+                if not restored then return end
+                plan.drawings = plan.drawings or {}
+                local idx = action.index or (#plan.drawings + 1)
+                if idx < 1 then idx = 1 end
+                if idx > #plan.drawings + 1 then idx = #plan.drawings + 1 end
+                table.remove(undoStack)
+                table.insert(plan.drawings, idx, restored)
+                pushRedo({
+                    type = "removeDraw",
+                    planRef = plan,
+                    stroke = copyStrokeData(restored),
+                    strokeRef = restored,
+                    index = idx,
+                })
+                broadcastDrawingState(plan.drawings)
+                scheduleRefresh()
+                return
+            elseif action.type == "clear" then
+                local before = copyPlanVisualState(action.before)
+                local after = copyPlanVisualState(plan)
+                table.remove(undoStack)
+                restorePlanVisualState(plan, before)
+                pushRedo({ type = "clear", planRef = plan, before = before, after = after })
+                currentSelection = nil
+                broadcastPlanVisualState(before)
+                scheduleRefresh()
+                return
+            elseif action.type == "penClear" then
+                local before = copyDrawingList(action.before)
+                local after = copyDrawingList(plan.drawings)
+                table.remove(undoStack)
+                restoreDrawingList(plan, before)
+                pushRedo({ type = "penClear", planRef = plan, before = before, after = after })
+                broadcastDrawingState(before)
+                scheduleRefresh()
+                return
+            end
+        end
+
+        local fallback = fallbackUndoTarget(plan)
+        if not fallback then return end
+        if fallback.type == "place" then
+            local idx = fallback.idx
+            local removed = copyIconData(plan.icons[idx])
+            table.remove(plan.icons, idx)
+            pushRedo({ type = "place", planRef = plan, icon = removed })
+            currentSelection = nil
+            notifyEdit("RM", { tostring(idx) })
+            scheduleRefresh()
+        elseif fallback.type == "draw" then
+            local idx = fallback.idx
+            local removed = copyStrokeData(plan.drawings[idx])
+            table.remove(plan.drawings, idx)
+            pushRedo({ type = "draw", planRef = plan, stroke = removed })
+            notifyEdit("RMDRAW", { tostring(idx) })
+            scheduleRefresh()
+        end
+    end
+
+    function H.redo()
+        local action = redoStack[#redoStack]
+        if not action then return end
+        local plan = currentPlan()
+        if not plan or plan ~= action.planRef then return end
+
+        if action.type == "place" then
+            local icon = copyIconData(action.icon)
+            if not icon then return end
+            table.insert(plan.icons, icon)
+            table.remove(redoStack)
+            pushUndo({ type = "place", planRef = plan, iconRef = icon }, true)
+            currentSelection = #plan.icons
+            broadcastIconPlacement(icon)
+        elseif action.type == "draw" then
+            local stroke = copyStrokeData(action.stroke)
+            if not stroke then return end
+            plan.drawings = plan.drawings or {}
+            table.insert(plan.drawings, stroke)
+            table.remove(redoStack)
+            pushUndo({ type = "draw", planRef = plan, strokeRef = stroke }, true)
+            broadcastStrokePlacement(stroke)
+        elseif action.type == "removeDraw" then
+            local idx = findStrokeRefIndex(plan, action.strokeRef) or action.index
+            if not (idx and plan.drawings and plan.drawings[idx]) then return end
+            local removed = copyStrokeData(plan.drawings[idx])
+            table.remove(plan.drawings, idx)
+            table.remove(redoStack)
+            pushUndo({ type = "removeDraw", planRef = plan, stroke = removed, index = idx }, true)
+            notifyEdit("RMDRAW", { tostring(idx) })
+        elseif action.type == "clear" then
+            local before = copyPlanVisualState(action.before)
+            local after = copyPlanVisualState(action.after)
+            table.remove(redoStack)
+            restorePlanVisualState(plan, after)
+            pushUndo({ type = "clear", planRef = plan, before = before, after = after }, true)
+            currentSelection = nil
+            broadcastPlanVisualState(after)
+        elseif action.type == "penClear" then
+            local before = copyDrawingList(action.before)
+            local after = copyDrawingList(action.after)
+            table.remove(redoStack)
+            restoreDrawingList(plan, after)
+            pushUndo({ type = "penClear", planRef = plan, before = before, after = after }, true)
+            broadcastDrawingState(after)
+        end
+
+        scheduleRefresh()
+    end
+
+    return H
+end)()
+local function showClearPlanConfirm()
+    if isCoOpGuest() then return end
+    if not StaticPopupDialogs["L3F_RP_CONFIRM_CLEAR_PLAN"] then
+        StaticPopupDialogs["L3F_RP_CONFIRM_CLEAR_PLAN"] = {
+            text = "Are you sure you want to clear this plan?",
+            button1 = "Yes",
+            button2 = "No",
+            OnAccept = function()
+                local p = currentPlan()
+                if p then
+                    plannerHistory.recordClearPlan(p)
+                    p.icons = {}
+                    p.drawings = {}
+                    currentSelection = nil
+                    notifyEdit("CLEAR", {})
+                    scheduleRefresh()
+                end
+            end,
+            timeout = 0,
+            whileDead = 1,
+            hideOnEscape = 1,
+            preferredIndex = 3,
+        }
+    end
+    StaticPopup_Show("L3F_RP_CONFIRM_CLEAR_PLAN")
+end
 
 local penMode = {
     enabled  = false,
@@ -388,7 +959,7 @@ local penMode = {
     fadeOut  = 0,
 }
 
-local rightTab = "encounter"
+local rightTab = "notes"
 local leftMode = "icons"
 
 
@@ -403,6 +974,132 @@ end
 local function relToAbs(x, y)
     local w, h = canvasSizePx()
     return x * w, y * h
+end
+
+local function hasDirectionIndicator(iconData)
+    return iconData
+        and iconData.kind == "encounter"
+        and iconData.key ~= "rpenc_gateway"
+end
+
+local DIRECTION_ARC_RADIUS = 21
+local DIRECTION_ARC_SPAN = 105
+local DIRECTION_ARC_STEPS = 24
+local DIRECTION_ARC_WIDTH = 4
+local DIRECTION_ARC_OVERLAP = 2
+local DIRECTION_MARKER_LENGTH = 7
+local DIRECTION_MARKER_HALF_WIDTH = 4
+local DIRECTION_MARKER_WIDTH = 3
+local ROTATION_HANDLE_RADIUS = 44
+
+local function directionPoint(angle, radius)
+    local rad = math.rad(angle)
+    return math.cos(rad) * radius, math.sin(rad) * radius
+end
+
+local function setLineTexture(tex, parent, x1, y1, x2, y2, width, overlap)
+    if not tex then return end
+    local dx, dy = x2 - x1, y2 - y1
+    local len = math.sqrt(dx * dx + dy * dy)
+    if len < 0.1 then
+        tex:Hide()
+        return
+    end
+    overlap = overlap or 0
+    if overlap > 0 then
+        local ux, uy = dx / len, dy / len
+        x1, y1 = x1 - (ux * overlap), y1 - (uy * overlap)
+        x2, y2 = x2 + (ux * overlap), y2 + (uy * overlap)
+        dx, dy = x2 - x1, y2 - y1
+        len = math.sqrt(dx * dx + dy * dy)
+    end
+    tex:Show()
+    tex:ClearAllPoints()
+    tex:SetSize(len, width or 2)
+    tex:SetPoint("CENTER", parent, "CENTER", (x1 + x2) / 2, (y1 + y2) / 2)
+    if tex.SetRotation then
+        tex:SetRotation(math.atan2(dy, dx))
+    end
+end
+
+local function updateDirectionIndicator(arc, iconData)
+    if not arc or not arc.parent then return end
+    local angle = tonumber(iconData.direction) or 45
+    local halfSpan = DIRECTION_ARC_SPAN / 2
+    local step = DIRECTION_ARC_SPAN / DIRECTION_ARC_STEPS
+
+    for i, seg in ipairs(arc.segments or {}) do
+        local a1 = angle + halfSpan - ((i - 1) * step)
+        local a2 = angle + halfSpan - (i * step)
+        local x1, y1 = directionPoint(a1, DIRECTION_ARC_RADIUS)
+        local x2, y2 = directionPoint(a2, DIRECTION_ARC_RADIUS)
+        setLineTexture(seg, arc.parent, x1, y1, x2, y2,
+            DIRECTION_ARC_WIDTH, DIRECTION_ARC_OVERLAP)
+    end
+
+    local h = arc.head or {}
+    local outerRadius = DIRECTION_ARC_RADIUS + (DIRECTION_ARC_WIDTH / 2)
+    local tipX, tipY = directionPoint(angle, outerRadius + DIRECTION_MARKER_LENGTH)
+    local baseX, baseY = directionPoint(angle, outerRadius)
+    local sideX, sideY = directionPoint(angle + 90, 1)
+    local b1x = baseX + (sideX * DIRECTION_MARKER_HALF_WIDTH)
+    local b1y = baseY + (sideY * DIRECTION_MARKER_HALF_WIDTH)
+    local b2x = baseX - (sideX * DIRECTION_MARKER_HALF_WIDTH)
+    local b2y = baseY - (sideY * DIRECTION_MARKER_HALF_WIDTH)
+    setLineTexture(h[1], arc.parent, tipX, tipY, b1x, b1y, DIRECTION_MARKER_WIDTH, 0.5)
+    setLineTexture(h[2], arc.parent, tipX, tipY, b2x, b2y, DIRECTION_MARKER_WIDTH, 0.5)
+    setLineTexture(h[3], arc.parent, b1x, b1y, b2x, b2y, DIRECTION_MARKER_WIDTH, 0.5)
+    for i = 4, #h do
+        h[i]:Hide()
+    end
+end
+
+local function drawDirectionIndicator(parent, iconData)
+    if not hasDirectionIndicator(iconData) then return end
+    local arc = { parent = parent, segments = {}, head = {} }
+    for i = 1, DIRECTION_ARC_STEPS do
+        local seg = parent:CreateTexture(nil, "OVERLAY")
+        seg:SetTexture("Interface\\Buttons\\WHITE8X8")
+        seg:SetVertexColor(1, 0.02, 0.02, 0.95)
+        arc.segments[i] = seg
+    end
+    for i = 1, 3 do
+        local head = parent:CreateTexture(nil, "OVERLAY")
+        head:SetTexture("Interface\\Buttons\\WHITE8X8")
+        head:SetVertexColor(1, 0.02, 0.02, 0.95)
+        arc.head[i] = head
+    end
+    updateDirectionIndicator(arc, iconData)
+    return arc
+end
+
+local function updateRotationHandle(line, handle, parent, iconData)
+    if not line or not handle then return end
+    local angle = tonumber(iconData.direction) or 45
+    local x, y = directionPoint(angle, ROTATION_HANDLE_RADIUS)
+    setLineTexture(line, parent, 0, 0, x, y, 2)
+    handle:ClearAllPoints()
+    handle:SetPoint("CENTER", parent, "CENTER", x, y)
+end
+
+local function cursorPositionUI()
+    if not GetCursorPosition then return nil, nil end
+    local cx, cy = GetCursorPosition()
+    if not cx or not cy then return nil, nil end
+    local scale = (UIParent and UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
+    return cx / scale, cy / scale
+end
+
+local function cursorDirectionDegrees(frame)
+    if not frame then return nil end
+    local cx, cy = cursorPositionUI()
+    if not cx or not cy then return nil end
+    local fx, fy = frame:GetCenter()
+    if not fx or not fy then return nil end
+
+    local deg = math.deg(math.atan2(cy - fy, cx - fx))
+    if deg < 0 then deg = deg + 360 end
+    return deg
 end
 
 
@@ -423,6 +1120,7 @@ local function buildPlacedIcon(plan, iconData, idx)
     f:SetSize(PLACED_DEFAULT_SIZE, PLACED_DEFAULT_SIZE)
     local ax, ay = relToAbs(iconData.x or 0.5, iconData.y or 0.5)
     f:SetPoint("CENTER", placedHost, "TOPLEFT", ax, -ay)
+    local directionArc = drawDirectionIndicator(f, iconData)
 
     local path  -- texture path; nil for boss-kind (uses model instead)
     if iconData.kind == "boss" and iconData.npcID then
@@ -437,14 +1135,18 @@ local function buildPlacedIcon(plan, iconData, idx)
     else
         local tex = f:CreateTexture(nil, "ARTWORK")
         tex:SetAllPoints()
-        tex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        local tc
         if iconData.iconTex then
             path = iconData.iconTex
         elseif iconData.variant then
-            path = KEY_TO_TEX[iconData.key .. ":" .. iconData.variant]
+            local vk = iconData.key .. ":" .. iconData.variant
+            path = KEY_TO_TEX[vk]
+            tc = KEY_TO_TEXCOORD[vk]
         end
         path = path or KEY_TO_TEX[iconData.key]
+        tc = tc or KEY_TO_TEXCOORD[iconData.key]
         if path then tex:SetTexture(path) end
+        applyIconTexCoord(tex, tc)
         if iconData.color and iconData.color ~= "ffffff" then
             local r = tonumber(iconData.color:sub(1, 2), 16)
             local g = tonumber(iconData.color:sub(3, 4), 16)
@@ -453,6 +1155,7 @@ local function buildPlacedIcon(plan, iconData, idx)
         end
     end
 
+    local rotationLine, rotationHandle
     if currentSelection == idx then
         local ring = f:CreateTexture(nil, "OVERLAY")
         ring:SetPoint("TOPLEFT", f, "TOPLEFT", -3, 3)
@@ -460,6 +1163,27 @@ local function buildPlacedIcon(plan, iconData, idx)
         ring:SetTexture("Interface\\Buttons\\WHITE8X8")
         ring:SetVertexColor(0.3, 0.7, 1.0, 0.35)
         ring:SetDrawLayer("OVERLAY", -2)
+
+        if hasDirectionIndicator(iconData) and not iconData.locked then
+            rotationLine = f:CreateTexture(nil, "OVERLAY")
+            rotationLine:SetTexture("Interface\\Buttons\\WHITE8X8")
+            rotationLine:SetVertexColor(0.55, 0.58, 1.0, 0.9)
+
+            rotationHandle = CreateFrame("Button", nil, placedHost)
+            rotationHandle:SetSize(10, 10)
+            rotationHandle:EnableMouse(true)
+            rotationHandle:SetFrameLevel((f:GetFrameLevel() or 1) + 8)
+            local handleBorder = rotationHandle:CreateTexture(nil, "BACKGROUND")
+            handleBorder:SetAllPoints()
+            handleBorder:SetTexture("Interface\\Buttons\\WHITE8X8")
+            handleBorder:SetVertexColor(0.12, 0.12, 0.35, 0.95)
+            local handleTex = rotationHandle:CreateTexture(nil, "ARTWORK")
+            handleTex:SetPoint("TOPLEFT", rotationHandle, "TOPLEFT", 2, -2)
+            handleTex:SetPoint("BOTTOMRIGHT", rotationHandle, "BOTTOMRIGHT", -2, 2)
+            handleTex:SetTexture("Interface\\Buttons\\WHITE8X8")
+            handleTex:SetVertexColor(0.62, 0.62, 1.0, 1)
+            updateRotationHandle(rotationLine, rotationHandle, f, iconData)
+        end
     end
 
     if iconData.locked then
@@ -481,13 +1205,87 @@ local function buildPlacedIcon(plan, iconData, idx)
     f:SetClampedToScreen(false)
     f:RegisterForDrag("LeftButton")
 
-    -- OnMouseUp only fires when WoW didn't escalate the gesture into
-    -- a drag. Pure click -> select / context menu. (RegisterForDrag
-    -- only watches LeftButton, so right-clicks always come here.)
-    f:SetScript("OnMouseUp", function(self, button)
-        if button == "RightButton" then
+    if hasDirectionIndicator(iconData) then
+        f:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(iconData.text or KEY_TO_LABEL[iconData.key] or "Encounter icon")
+            GameTooltip:AddLine("Select it, then drag the square handle to rotate.", 0.6, 0.6, 0.6, true)
+            GameTooltip:Show()
+        end)
+        f:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+
+    local openedMenuOnRightDown = false
+    local rotatingDirection = false
+
+    local function setDirectionFromCursor()
+        local deg = cursorDirectionDegrees(f)
+        if not deg then return end
+        iconData.direction = deg
+        updateDirectionIndicator(directionArc, iconData)
+        updateRotationHandle(rotationLine, rotationHandle, f, iconData)
+    end
+
+    local function finishDirectionRotation()
+        if not rotatingDirection then return end
+        rotatingDirection = false
+        if rotationHandle then
+            rotationHandle:SetScript("OnUpdate", nil)
+        end
+        currentSelection = idx
+        if broadcastIconProps then
+            broadcastIconProps(idx, iconData)
+        end
+        refreshPropsPanel()
+        scheduleRefresh()
+    end
+
+    if rotationHandle then
+        rotationHandle:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText("Rotate direction")
+            GameTooltip:AddLine("Drag this handle around the icon.", 0.6, 0.6, 0.6, true)
+            GameTooltip:Show()
+        end)
+        rotationHandle:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        rotationHandle:SetScript("OnMouseDown", function(self, button)
+            if button ~= "LeftButton" and button ~= "Button1" then return end
+            rotatingDirection = true
+            currentSelection = idx
+            setDirectionFromCursor()
+            self:SetScript("OnUpdate", function()
+                if IsMouseButtonDown and not IsMouseButtonDown("LeftButton") then
+                    finishDirectionRotation()
+                else
+                    setDirectionFromCursor()
+                end
+            end)
+        end)
+        rotationHandle:SetScript("OnMouseUp", function(self, button)
+            if button == "LeftButton" or button == "Button1" then
+                finishDirectionRotation()
+            end
+        end)
+    end
+
+    f:SetScript("OnMouseDown", function(self, button)
+        if button == "RightButton" or button == "Button2" then
+            openedMenuOnRightDown = true
             openContextMenu(self, idx)
-        elseif button == "LeftButton" then
+        end
+    end)
+
+    -- Route left/right clicks from OnMouseUp. This is the most
+    -- reliable path on this planner's draggable icon frames.
+    f:SetScript("OnMouseUp", function(self, button)
+        if openedMenuOnRightDown and (button == "RightButton" or button == "Button2") then
+            openedMenuOnRightDown = false
+            return
+        end
+        openedMenuOnRightDown = false
+        if button == "RightButton" or button == "Button2" then
+            openContextMenu(self, idx)
+        elseif button == "LeftButton" or button == "Button1" then
             selectIcon(idx)
         end
     end)
@@ -558,13 +1356,19 @@ local function drawSegment(parent, x1, y1, x2, y2, size, r, g, b, a)
     local dx, dy = x2 - x1, y2 - y1
     local len = math.sqrt(dx * dx + dy * dy)
     if len < 0.5 then return end
+    -- Extend a little past each endpoint so adjacent rotated quads
+    -- overlap; this removes hairline seams between pen segments.
+    local pad = math.max(1, (size or 4) * 0.35)
+    local ux, uy = dx / len, dy / len
+    local sx, sy = x1 - ux * pad, y1 - uy * pad
+    local ex, ey = x2 + ux * pad, y2 + uy * pad
     local tex = parent:CreateTexture(nil, "ARTWORK")
     tex:SetTexture("Interface\\Buttons\\WHITE8X8")
     tex:SetVertexColor(r, g, b, a)
-    tex:SetWidth(len)
+    tex:SetWidth(len + (2 * pad))
     tex:SetHeight(size)
     tex:ClearAllPoints()
-    tex:SetPoint("CENTER", parent, "TOPLEFT", (x1 + x2) / 2, -(y1 + y2) / 2)
+    tex:SetPoint("CENTER", parent, "TOPLEFT", (sx + ex) / 2, -(sy + ey) / 2)
     tex:SetRotation(math.atan2(-dy, dx))
     drawingSegments[#drawingSegments + 1] = tex
 end
@@ -619,6 +1423,67 @@ local function appendStrokeSegment(stroke, prevPt, newPt)
         size, r, g, b, 1)
 end
 
+local function cursorCanvasPointPx()
+    if not (canvasFrame and GetCursorPosition) then return nil end
+    local scale = UIParent and UIParent.GetEffectiveScale and UIParent:GetEffectiveScale() or 1
+    local cx, cy = GetCursorPosition()
+    if not (cx and cy) then return nil end
+    cx, cy = cx / scale, cy / scale
+
+    local l, r = canvasFrame:GetLeft(), canvasFrame:GetRight()
+    local t, b = canvasFrame:GetTop(), canvasFrame:GetBottom()
+    if not (l and r and t and b) then return nil end
+    if cx < l or cx > r or cy < b or cy > t then return nil end
+
+    return cx - l, t - cy
+end
+
+local function distanceToSegmentSq(px, py, x1, y1, x2, y2)
+    local dx, dy = x2 - x1, y2 - y1
+    local lenSq = dx * dx + dy * dy
+    if lenSq <= 0.0001 then
+        local ox, oy = px - x1, py - y1
+        return ox * ox + oy * oy
+    end
+
+    local t = ((px - x1) * dx + (py - y1) * dy) / lenSq
+    if t < 0 then t = 0 elseif t > 1 then t = 1 end
+    local qx, qy = x1 + t * dx, y1 + t * dy
+    local ox, oy = px - qx, py - qy
+    return ox * ox + oy * oy
+end
+
+local function hitTestDrawingStroke()
+    local plan = currentPlan()
+    if not (plan and plan.drawings) then return nil end
+
+    local px, py = cursorCanvasPointPx()
+    if not px then return nil end
+
+    local w, h = canvasSizePx()
+    if w == 0 or h == 0 then return nil end
+
+    local bestIdx, bestDistSq
+    for strokeIdx, stroke in ipairs(plan.drawings) do
+        local pts = stroke.points or {}
+        local threshold = math.max(8, (stroke.size or 4) + 6)
+        local thresholdSq = threshold * threshold
+        for i = 2, #pts do
+            local p1, p2 = pts[i - 1], pts[i]
+            local distSq = distanceToSegmentSq(
+                px, py,
+                p1.x * w, p1.y * h,
+                p2.x * w, p2.y * h)
+            if distSq <= thresholdSq and (not bestDistSq or distSq < bestDistSq) then
+                bestIdx = strokeIdx
+                bestDistSq = distSq
+            end
+        end
+    end
+
+    return bestIdx
+end
+
 
 -- =============================================================
 -- 8. LEFT PANEL (mode toggle + palette / pen controls)
@@ -629,7 +1494,7 @@ local leftPanel, iconControls, penControls
 -- handler only acts on its own drop. Without this, a stale state
 -- from a previous drag could cause palette's OnDragStop to fire
 -- against an encounter-kind drag and produce a malformed icon.
-local function startDragFromPalette(kind, key)
+local function startDragFromPalette(kind, key, opts)
     dragState.active     = true
     dragState.dragSource = "palette"
     dragState.kind       = kind
@@ -638,9 +1503,11 @@ local function startDragFromPalette(kind, key)
     dragState.color      = "ffffff"
     dragState.text       = nil
     dragState.fromIcon   = nil
-    dragState.npcID      = nil
-    dragState.npcName    = nil
-    followerTex:SetTexture(KEY_TO_TEX[key] or QUILL)
+    dragState.npcID      = opts and opts.npcID or nil
+    dragState.npcName    = opts and opts.npcName or nil
+    dragState.iconTex    = opts and opts.iconTex or nil
+    followerTex:SetTexture((opts and opts.previewTex) or KEY_TO_TEX[key] or QUILL)
+    applyIconTexCoord(followerTex, KEY_TO_TEXCOORD[key])
     follower:Show()
 end
 
@@ -655,40 +1522,46 @@ local function resetDragState()
     dragState.fromIcon   = nil
     dragState.npcID      = nil
     dragState.npcName    = nil
+    dragState.iconTex    = nil
 end
 
 local function placeIconAt(kind, key, relX, relY, options)
     local plan = currentPlan()
     if not plan then return end
+    local defaultText = options and options.text
+    if (not defaultText or defaultText == "") and key == "rpenc_gateway" then
+        defaultText = "Entrance"
+    end
     local entry = {
         kind    = kind,
         key     = key,
         x       = relX or 0.5,
         y       = relY or 0.5,
         color   = (options and options.color) or "ffffff",
-        text    = (options and options.text) or nil,
+        text    = defaultText or nil,
         variant = (options and options.variant) or nil,
         locked  = false,
     }
     if options and options.spellID then
         entry.spellID = options.spellID
+    end
+    if options and options.iconTex then
         entry.iconTex = options.iconTex
     end
     if options and options.npcID then
         entry.npcID = options.npcID
     end
+    if hasDirectionIndicator(entry) then
+        entry.direction = tonumber(options and options.direction) or 45
+    end
     table.insert(plan.icons, entry)
+    plannerHistory.recordIconPlacement(plan, entry)
     currentSelection = #plan.icons
     -- Co-op: broadcast PLACE. Position-by-iconIdx isn't sent; each
     -- member appends to their own icons array. Out-of-order PLACE from
     -- two members causes the local indexes to diverge briefly until
     -- the next host snapshot resyncs. Acceptable for v1.
-    notifyEdit("PLACE", {
-        entry.kind or "", entry.key or "",
-        string.format("%.4f", entry.x), string.format("%.4f", entry.y),
-        entry.color or "ffffff", entry.text or "",
-        entry.variant or "", entry.locked and "1" or "0",
-    })
+    plannerHistory.broadcastIconPlacement(entry)
     -- Deferred: we're often called from an event-handler closure
     -- whose own frame is about to be destroyed by refreshPalette.
     scheduleRefresh()
@@ -702,7 +1575,7 @@ local function buildPaletteButton(parent, kind, entry, x, y, sz)
     local tex = btn:CreateTexture(nil, "ARTWORK")
     tex:SetAllPoints()
     tex:SetTexture(entry.tex)
-    tex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    applyIconTexCoord(tex, entry.tc)
     btn:SetNormalTexture(tex)
     local hl = btn:CreateTexture(nil, "HIGHLIGHT")
     hl:SetAllPoints(); hl:SetTexture("Interface\\Buttons\\ButtonHilight-Square"); hl:SetBlendMode("ADD")
@@ -719,7 +1592,14 @@ local function buildPaletteButton(parent, kind, entry, x, y, sz)
     end)
     btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    btn:SetScript("OnDragStart", function() startDragFromPalette(kind, entry.key) end)
+    btn:SetScript("OnDragStart", function()
+        startDragFromPalette(kind, entry.key, {
+            npcID = entry.npcID,
+            npcName = entry.npcName,
+            previewTex = entry.tex,
+            iconTex = entry.iconTex or entry.tex,
+        })
+    end)
     btn:SetScript("OnDragStop", function()
         -- Only act if THIS palette drag is the active one. dragSource
         -- guard prevents firing against an encounter-kind drag state;
@@ -736,12 +1616,24 @@ local function buildPaletteButton(parent, kind, entry, x, y, sz)
         if l and cx >= l and cx <= r and cy >= b and cy <= t then
             placeIconAt(dragState.kind, dragState.key,
                 (cx - l) / (r - l), 1 - (cy - b) / (t - b),
-                { color = dragState.color, variant = dragState.variant })
+                {
+                    color = dragState.color,
+                    variant = dragState.variant,
+                    npcID = dragState.npcID,
+                    text = dragState.npcName,
+                    iconTex = dragState.iconTex,
+                })
         end
         resetDragState()
         follower:Hide()
     end)
-    btn:SetScript("OnClick", function() placeIconAt(kind, entry.key, 0.5, 0.5) end)
+    btn:SetScript("OnClick", function()
+        placeIconAt(kind, entry.key, 0.5, 0.5, {
+            npcID = entry.npcID,
+            text = entry.npcName,
+            iconTex = entry.iconTex or entry.tex,
+        })
+    end)
 end
 
 
@@ -765,24 +1657,32 @@ local function canvasMouseDown(self, button)
 end
 
 local function broadcastStroke(stroke)
-    if not stroke or not stroke.points or #stroke.points < 2 then return end
-    local pts = {}
-    for _, p in ipairs(stroke.points) do
-        table.insert(pts, string.format("%.3f,%.3f", p.x, p.y))
+    plannerHistory.broadcastStrokePlacement(stroke)
+end
+
+local function finishCurrentStroke()
+    if not currentStroke then return end
+    local stroke = currentStroke
+    currentStroke = nil
+
+    local plan = currentPlan()
+    if not (stroke.points and #stroke.points >= 2) then
+        local idx = plannerHistory.findStrokeRefIndex(plan, stroke)
+        if idx and plan and plan.drawings then
+            table.remove(plan.drawings, idx)
+            refreshDrawings()
+        end
+        return
     end
-    notifyEdit("DRAW", {
-        stroke.color or "ffffff",
-        tostring(stroke.size or 4),
-        tostring(stroke.fade or 0),
-        table.concat(pts, "/"),
-    })
+
+    plannerHistory.recordStrokePlacement(plan, stroke)
+    broadcastStroke(stroke)
 end
 
 local function canvasUpdate(self)
     if not currentStroke then return end
     if not (IsMouseButtonDown and IsMouseButtonDown("LeftButton")) then
-        broadcastStroke(currentStroke)
-        currentStroke = nil
+        finishCurrentStroke()
         return
     end
     local cx, cy = GetCursorPosition()
@@ -811,8 +1711,14 @@ end
 
 local function canvasMouseUp(self, button)
     if button == "LeftButton" then
-        broadcastStroke(currentStroke)
-        currentStroke = nil
+        finishCurrentStroke()
+    elseif button == "RightButton" or button == "Button2" then
+        if currentStroke then return end
+        local strokeIdx = hitTestDrawingStroke()
+        if strokeIdx then
+            deselect()
+            openDrawingContextMenu(self, strokeIdx)
+        end
     end
 end
 
@@ -831,13 +1737,113 @@ deselect = function()
     end
 end
 
-local clipboard = nil
-
 local contextMenuFrame
+local drawingContextMenuFrame
+local textPromptFrame
+
+local function findIconIndex(plan, iconRef)
+    if not plan or not iconRef then return nil end
+    for i, ic in ipairs(plan.icons or {}) do
+        if ic == iconRef then return i end
+    end
+    return nil
+end
+
+local function findDrawingIndex(plan, strokeRef)
+    if not plan or not strokeRef then return nil end
+    for i, stroke in ipairs(plan.drawings or {}) do
+        if stroke == strokeRef then return i end
+    end
+    return nil
+end
+
+broadcastIconProps = function(iconIdx, icon)
+    notifyEdit("PROPS", {
+        tostring(iconIdx or 0),
+        icon.color or "ffffff",
+        icon.text or "",
+        icon.variant or "",
+        icon.locked and "1" or "0",
+        tostring(icon.direction or ""),
+    })
+end
+
+local function ensureTextPromptFrame()
+    if textPromptFrame then return textPromptFrame end
+    local f = CreateFrame("Frame", "L3FRPIconTextPrompt", UIParent,
+        BackdropTemplateMixin and "BackdropTemplate" or nil)
+    f:SetSize(230, 96)
+    f:SetPoint("CENTER")
+    f:SetFrameStrata("FULLSCREEN_DIALOG")
+    f:SetToplevel(true)
+    f:SetClampedToScreen(true)
+    f:EnableMouse(true)
+    local bg = f:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints(); bg:SetColorTexture(0, 0, 0, 0.9)
+    local bd = f:CreateTexture(nil, "BORDER")
+    bd:SetPoint("TOPLEFT", -1, 1); bd:SetPoint("BOTTOMRIGHT", 1, -1)
+    bd:SetColorTexture(0.35, 0.35, 0.35, 0.9)
+
+    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOP", f, "TOP", 0, -8)
+    title:SetText("Icon text")
+
+    local edit = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
+    edit:SetSize(194, 22)
+    edit:SetPoint("TOP", title, "BOTTOM", 0, -8)
+    edit:SetAutoFocus(false)
+    edit:SetMaxLetters(24)
+    f.edit = edit
+
+    local saveBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    saveBtn:SetSize(86, 22)
+    saveBtn:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 14, 10)
+    saveBtn:SetText(ACCEPT or "Save")
+    saveBtn:SetScript("OnClick", function()
+        local plan, icon = f.plan, f.icon
+        if not (plan and icon) then f:Hide(); return end
+        local idx = findIconIndex(plan, icon)
+        if not idx then f:Hide(); return end
+        local text = (f.edit and f.edit:GetText()) or ""
+        text = text:gsub("^%s*(.-)%s*$", "%1")
+        icon.text = (text ~= "") and text or nil
+        broadcastIconProps(idx, icon)
+        refreshIcons()
+        refreshPropsPanel()
+        f:Hide()
+    end)
+
+    local cancelBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    cancelBtn:SetSize(86, 22)
+    cancelBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 10)
+    cancelBtn:SetText(CANCEL or "Cancel")
+    cancelBtn:SetScript("OnClick", function() f:Hide() end)
+
+    edit:SetScript("OnEnterPressed", function() saveBtn:Click() end)
+    edit:SetScript("OnEscapePressed", function() f:Hide() end)
+    f:Hide()
+    textPromptFrame = f
+    return f
+end
+
+local function showTextPrompt(plan, icon)
+    if not (plan and icon) then return end
+    local f = ensureTextPromptFrame()
+    f.plan, f.icon = plan, icon
+    f.edit:SetText(icon.text or "")
+    f:Show()
+    f.edit:SetFocus()
+    f.edit:HighlightText()
+end
+
 openContextMenu = function(anchorBtn, iconIdx)
     if not contextMenuFrame then
         contextMenuFrame = CreateFrame("Frame", "L3FRPContextMenu", UIParent)
-        contextMenuFrame:SetFrameStrata("DIALOG")
+        contextMenuFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+        contextMenuFrame:SetFrameLevel(200)
+        contextMenuFrame:SetToplevel(true)
+        contextMenuFrame:SetClampedToScreen(true)
+        contextMenuFrame:EnableMouse(true)
         contextMenuFrame:SetSize(140, 6 + 22 * 4)
         local bg = contextMenuFrame:CreateTexture(nil, "BACKGROUND")
         bg:SetAllPoints(); bg:SetColorTexture(0.05, 0.05, 0.05, 0.95)
@@ -845,51 +1851,60 @@ openContextMenu = function(anchorBtn, iconIdx)
         contextMenuFrame.buttons = {}
     end
     local f = contextMenuFrame
+    if drawingContextMenuFrame then drawingContextMenuFrame:Hide() end
+    local cursorX, cursorY
+    if GetCursorPosition and UIParent and UIParent.GetEffectiveScale then
+        local s = UIParent:GetEffectiveScale() or 1
+        local x, y = GetCursorPosition()
+        if x and y then
+            cursorX = x / s
+            cursorY = y / s
+        end
+    end
     f:ClearAllPoints()
-    f:SetPoint("TOPLEFT", anchorBtn, "BOTTOMRIGHT", 0, 0)
+    if cursorX and cursorY then
+        f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", cursorX + 8, cursorY - 8)
+    else
+        f:SetPoint("TOPLEFT", anchorBtn, "BOTTOMRIGHT", 0, 0)
+    end
     f:Show()
 
     local plan = currentPlan()
     local icon = plan and plan.icons[iconIdx]
 
     local items = {
-        { label = "Copy",   action = function() if icon then clipboard = CopyTable(icon) end; f:Hide() end },
-        { label = "Paste",  action = function()
-            if clipboard then
-                local c = CopyTable(clipboard)
-                c.x = (icon and icon.x or 0.5) + 0.03
-                c.y = (icon and icon.y or 0.5) + 0.03
-                table.insert(plan.icons, c)
-                currentSelection = #plan.icons
-                notifyEdit("PLACE", {
-                    c.kind or "", c.key or "",
-                    string.format("%.4f", c.x), string.format("%.4f", c.y),
-                    c.color or "ffffff", c.text or "",
-                    c.variant or "", c.locked and "1" or "0",
-                })
-                scheduleRefresh()
+        { label = "Text",   action = function()
+            if icon and plan then
+                showTextPrompt(plan, icon)
             end
             f:Hide()
         end },
-        { label = "Delete", action = function()
-            if icon then
-                table.remove(plan.icons, iconIdx)
-                notifyEdit("RM", { tostring(iconIdx) })
-                currentSelection = nil
-                scheduleRefresh()
+        { label = "Color", action = function()
+            if icon and plan then
+                openColorPicker(icon.color or "ffffff", function(newHex)
+                    local idx = findIconIndex(plan, icon)
+                    if not idx then return end
+                    icon.color = newHex
+                    broadcastIconProps(idx, icon)
+                    refreshIcons()
+                    refreshPropsPanel()
+                end)
             end
             f:Hide()
         end },
-        { label = "Lock",   action = function()
+        { label = "Remove", action = function()
             if icon then
-                icon.locked = not icon.locked
-                notifyEdit("PROPS", {
-                    tostring(iconIdx),
-                    icon.color or "ffffff", icon.text or "",
-                    icon.variant or "", icon.locked and "1" or "0",
-                })
+                local idx = findIconIndex(plan, icon)
+                if idx then
+                    table.remove(plan.icons, idx)
+                    notifyEdit("RM", { tostring(idx) })
+                    currentSelection = nil
+                    scheduleRefresh()
+                end
             end
-            refreshIcons()
+            f:Hide()
+        end },
+        { label = "Cancel", action = function()
             f:Hide()
         end },
     }
@@ -905,9 +1920,91 @@ openContextMenu = function(anchorBtn, iconIdx)
             b.text = b:CreateFontString(nil, "OVERLAY", "GameFontNormal")
             b.text:SetPoint("LEFT", b, "LEFT", 6, 0)
         end
-        local label = item.label
-        if label == "Lock" and icon and icon.locked then label = "Unlock" end
-        b.text:SetText(label)
+        b.text:SetText(item.label)
+        b:SetScript("OnClick", item.action)
+        local bg = b.bg or b:CreateTexture(nil, "BACKGROUND")
+        b.bg = bg
+        bg:SetAllPoints(); bg:SetColorTexture(0, 0, 0, 0)
+        b:SetScript("OnEnter", function() bg:SetColorTexture(1, 1, 1, 0.12) end)
+        b:SetScript("OnLeave", function() bg:SetColorTexture(0, 0, 0, 0) end)
+    end
+    f:SetScript("OnUpdate", function(self)
+        if not self:IsMouseOver() and IsMouseButtonDown
+           and IsMouseButtonDown("LeftButton") then
+            self:Hide(); self:SetScript("OnUpdate", nil)
+        end
+    end)
+end
+
+openDrawingContextMenu = function(anchorFrame, strokeIdx)
+    local plan = currentPlan()
+    local stroke = plan and plan.drawings and plan.drawings[strokeIdx]
+    if not stroke then return end
+
+    if not drawingContextMenuFrame then
+        drawingContextMenuFrame = CreateFrame("Frame", "L3FRPDrawingContextMenu", UIParent)
+        drawingContextMenuFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+        drawingContextMenuFrame:SetFrameLevel(200)
+        drawingContextMenuFrame:SetToplevel(true)
+        drawingContextMenuFrame:SetClampedToScreen(true)
+        drawingContextMenuFrame:EnableMouse(true)
+        drawingContextMenuFrame:SetSize(140, 6 + 22 * 2)
+        local bg = drawingContextMenuFrame:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints(); bg:SetColorTexture(0.05, 0.05, 0.05, 0.95)
+        drawingContextMenuFrame:Hide()
+        drawingContextMenuFrame.buttons = {}
+    end
+
+    local f = drawingContextMenuFrame
+    if contextMenuFrame then contextMenuFrame:Hide() end
+
+    local cursorX, cursorY
+    if GetCursorPosition and UIParent and UIParent.GetEffectiveScale then
+        local s = UIParent:GetEffectiveScale() or 1
+        local x, y = GetCursorPosition()
+        if x and y then
+            cursorX = x / s
+            cursorY = y / s
+        end
+    end
+    f:ClearAllPoints()
+    if cursorX and cursorY then
+        f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", cursorX + 8, cursorY - 8)
+    else
+        f:SetPoint("TOPLEFT", anchorFrame, "BOTTOMRIGHT", 0, 0)
+    end
+    f:Show()
+
+    local items = {
+        { label = "Remove", action = function()
+            local p = currentPlan()
+            local idx = findDrawingIndex(p, stroke) or strokeIdx
+            if p and p.drawings and idx and p.drawings[idx] then
+                plannerHistory.recordDrawingRemoval(p, p.drawings[idx], idx)
+                table.remove(p.drawings, idx)
+                notifyEdit("RMDRAW", { tostring(idx) })
+                refreshDrawings()
+            end
+            f:Hide()
+        end },
+        { label = "Cancel", action = function()
+            f:Hide()
+        end },
+    }
+    f:SetSize(140, 6 + 22 * #items)
+    for _, btn in ipairs(f.buttons) do btn:Hide() end
+    for i, item in ipairs(items) do
+        local b = f.buttons[i] or CreateFrame("Button", nil, f)
+        f.buttons[i] = b
+        b:SetSize(130, 20)
+        b:ClearAllPoints()
+        b:SetPoint("TOPLEFT", f, "TOPLEFT", 5, -3 - (i - 1) * 22)
+        b:Show()
+        if not b.text then
+            b.text = b:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            b.text:SetPoint("LEFT", b, "LEFT", 6, 0)
+        end
+        b.text:SetText(item.label)
         b:SetScript("OnClick", item.action)
         local bg = b.bg or b:CreateTexture(nil, "BACKGROUND")
         b.bg = bg
@@ -932,9 +2029,46 @@ local function buildLeftPanel(parent)
     local bg = leftPanel:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints(); bg:SetColorTexture(0, 0, 0, 0.25)
 
+    leftClearPlanBtn = CreateFrame("Button", nil, leftPanel, "UIPanelButtonTemplate")
+    leftClearPlanBtn:SetSize(58, 22)
+    leftClearPlanBtn:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 2, -4)
+    leftClearPlanBtn:SetText("Clear plan")
+    leftClearPlanBtn:SetScript("OnClick", showClearPlanConfirm)
+    leftClearPlanBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Clear plan")
+        GameTooltip:AddLine("Clear all icons and drawings in the current plan.", 0.6, 0.6, 0.6, true)
+        GameTooltip:Show()
+    end)
+    leftClearPlanBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    undoBtn = CreateFrame("Button", nil, leftPanel, "UIPanelButtonTemplate")
+    undoBtn:SetSize(28, 24); undoBtn:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 2, -32)
+    undoBtn:SetText("<")
+    undoBtn:SetScript("OnClick", plannerHistory.undo)
+    undoBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Undo")
+        GameTooltip:AddLine("Undo the last icon, drawing, or clear action.", 0.6, 0.6, 0.6, true)
+        GameTooltip:Show()
+    end)
+    undoBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    redoBtn = CreateFrame("Button", nil, leftPanel, "UIPanelButtonTemplate")
+    redoBtn:SetSize(28, 24); redoBtn:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 32, -32)
+    redoBtn:SetText(">")
+    redoBtn:SetScript("OnClick", plannerHistory.redo)
+    redoBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Redo")
+        GameTooltip:AddLine("Redo the last undone planner action.", 0.6, 0.6, 0.6, true)
+        GameTooltip:Show()
+    end)
+    redoBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
     local arrowBtn = CreateFrame("Button", nil, leftPanel)
-    arrowBtn:SetSize(28, 28); arrowBtn:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 2, -4)
-    arrowBtn:SetNormalTexture("Interface\\Buttons\\UI-MicroButton-Friends-Up")
+    arrowBtn:SetSize(28, 28); arrowBtn:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 2, -62)
+    arrowBtn:SetNormalTexture("Interface\\AddOns\\L3FTools\\Media\\RaidPlanner\\icons-mode.png")
     arrowBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
     arrowBtn:SetScript("OnClick", function() leftMode = "icons"; penMode.enabled = false; refreshPalette() end)
     arrowBtn:SetScript("OnEnter", function(self)
@@ -943,7 +2077,7 @@ local function buildLeftPanel(parent)
     arrowBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     local penBtn = CreateFrame("Button", nil, leftPanel)
-    penBtn:SetSize(28, 28); penBtn:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 32, -4)
+    penBtn:SetSize(28, 28); penBtn:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 32, -62)
     penBtn:SetNormalTexture(QUILL)
     penBtn:GetNormalTexture():SetTexCoord(0.07, 0.93, 0.07, 0.93)
     penBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
@@ -954,13 +2088,14 @@ local function buildLeftPanel(parent)
     penBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     iconControls = CreateFrame("Frame", nil, leftPanel)
-    iconControls:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 2, -36)
+    iconControls:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 2, -94)
     iconControls:SetPoint("BOTTOMRIGHT", leftPanel, "BOTTOMRIGHT", -2, 4)
 
     penControls = CreateFrame("Frame", nil, leftPanel)
-    penControls:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 2, -36)
+    penControls:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 2, -94)
     penControls:SetPoint("BOTTOMRIGHT", leftPanel, "BOTTOMRIGHT", -2, 4)
     penControls:Hide()
+    plannerHistory.refreshButtons()
 end
 
 refreshPalette = function()
@@ -980,6 +2115,169 @@ refreshPalette = function()
         local groupGap = 10
         local y = 0
         local col, maxCol = 0, 2
+        local function encounterPaletteEntries()
+            local rp = activePlannerState()
+            if not rp or not rp.activeEncounter then return {} end
+            local configured = L3F.RPEncounterIcons and L3F.RPEncounterIcons[rp.activeEncounter]
+            if configured and #configured > 0 then
+                local filtered = {}
+                for _, entry in ipairs(configured) do
+                    if isEncounterPaletteIcon(entry) then
+                        table.insert(filtered, entry)
+                    end
+                end
+                return filtered
+            end
+            local _, raidCat = findCatalogEncounter(rp.activeEncounter)
+            local activeEncounter = rp.activeEncounter
+            local target = normalizeKey(activeEncounter)
+            local targetRaid = normalizeKey(raidCat and raidCat.raid)
+            local out, seen = {}, {}
+            local function sameRaidName(name)
+                local k = normalizeKey(name)
+                if k == "" or targetRaid == "" then return false end
+                if k == targetRaid then return true end
+                if (k == "tempestkeep" and targetRaid == "theeyetempestkeep")
+                   or (k == "theeyetempestkeep" and targetRaid == "tempestkeep") then
+                    return true
+                end
+                if (k == "hyjalsummit" and targetRaid == "battleformounthyjal")
+                   or (k == "battleformounthyjal" and targetRaid == "hyjalsummit") then
+                    return true
+                end
+                return false
+            end
+            local function npcTexture(npc)
+                local tex = "Interface\\Icons\\INV_Misc_QuestionMark"
+                if npc and npc.spells and npc.spells[1] then
+                    tex = (GetSpellTexture and GetSpellTexture(npc.spells[1])) or tex
+                end
+                return tex
+            end
+            local function pushNpc(npcOrID, fallbackName)
+                local npcID = type(npcOrID) == "table" and npcOrID.id or npcOrID
+                if not npcID or seen[npcID] then return end
+                seen[npcID] = true
+                local npc = type(npcOrID) == "table" and npcOrID or (L3F.npcLookup and L3F.npcLookup[npcID])
+                local label = (npc and npc.name) or fallbackName or ("NPC " .. tostring(npcID))
+                local tex = npcTexture(npc)
+                table.insert(out, {
+                    key = "boss:" .. tostring(npcID),
+                    label = label,
+                    tex = tex,
+                    iconTex = tex,
+                    npcID = npcID,
+                    npcName = label,
+                })
+            end
+            local function pushSectionBosses(section)
+                if not section or not section.npcs then return end
+                for _, npc in ipairs(section.npcs) do
+                    if npc and npc.kind == "boss" then
+                        pushNpc(npc)
+                    end
+                end
+            end
+            local function sectionMatches(sectionName)
+                local s = normalizeKey(sectionName)
+                if s == "" then return false end
+                if string.find(s, target, 1, true) or string.find(target, s, 1, true) then
+                    return true
+                end
+                for raw in tostring(activeEncounter):gmatch("%w+") do
+                    local token = normalizeKey(raw)
+                    if #token >= 4 and string.find(s, token, 1, true) then
+                        return true
+                    end
+                end
+                return false
+            end
+
+            local tree
+            if raidCat and L3F.bossTrees then
+                tree = L3F.bossTrees[raidCat.raid]
+                if not tree then
+                    local aliases = {
+                        ["theeyetempestkeep"] = "Tempest Keep",
+                        ["battleformounthyjal"] = "Hyjal Summit",
+                    }
+                    tree = L3F.bossTrees[aliases[targetRaid] or ""]
+                end
+            end
+            if tree then
+                for _, parent in ipairs(tree) do
+                    local pname = normalizeKey(parent and parent.name)
+                    if parent and (pname == target or
+                       (pname ~= "" and (string.find(target, pname, 1, true) or string.find(pname, target, 1, true)))) then
+                        pushNpc(parent.npcID, parent.name)
+                        for _, sub in ipairs(parent.subs or {}) do
+                            pushNpc(sub.npcID, sub.name)
+                        end
+                        break
+                    end
+                end
+            end
+
+            if #out == 0 then
+                for _, raid in ipairs(L3F.raids or {}) do
+                    if sameRaidName(raid.name) then
+                        for _, section in ipairs(raid.sections or {}) do
+                            for _, npc in ipairs(section.npcs or {}) do
+                                local n = normalizeKey(npc and npc.name)
+                                if npc and n ~= "" and (n == target
+                                   or string.find(n, target, 1, true)
+                                   or string.find(target, n, 1, true)) then
+                                    pushNpc(npc)
+                                    pushSectionBosses(section)
+                                    break
+                                end
+                            end
+                            if #out > 0 then break end
+                        end
+                        break
+                    end
+                end
+            end
+
+            if #out == 0 then
+                for _, raid in ipairs(L3F.raids or {}) do
+                    if sameRaidName(raid.name) then
+                        for _, section in ipairs(raid.sections or {}) do
+                            if sectionMatches(section.name) then
+                                pushSectionBosses(section)
+                                break
+                            end
+                        end
+                        break
+                    end
+                end
+            end
+
+            if #out == 0 then
+                for _, raid in ipairs(L3F.raids or {}) do
+                    if sameRaidName(raid.name) then
+                        L3F.iterNPCs(raid, function(npc)
+                            if #out < 12 and npc and npc.kind == "boss" then
+                                pushNpc(npc)
+                            end
+                        end)
+                        break
+                    end
+                end
+            end
+
+            if #out == 0 then
+                local tex = "Interface\\Icons\\INV_Misc_QuestionMark"
+                table.insert(out, {
+                    key = "encounter:" .. target,
+                    label = activeEncounter,
+                    tex = tex,
+                    iconTex = tex,
+                    npcName = activeEncounter,
+                })
+            end
+            return out
+        end
         local function placeRow(entries, kind, sz)
             sz = sz or PALETTE_ICON
             col = 0
@@ -996,6 +2294,11 @@ refreshPalette = function()
         placeRow(ROLES, "role", 26)
         y = y + groupGap - gap
         placeRow(CLASSES, "class", 26)
+        local encounterEntries = encounterPaletteEntries()
+        if #encounterEntries > 0 then
+            y = y + groupGap - gap
+            placeRow(encounterEntries, "encounter", 26)
+        end
     else
         iconControls:Hide(); penControls:Show()
         local cy = 0
@@ -1025,17 +2328,30 @@ refreshPalette = function()
         cy = cy + 36
 
         label("Size", 0, cy); cy = cy + 14
-        local sizeStr = CreateFrame("EditBox", nil, penControls, "InputBoxTemplate")
-        sizeStr:SetSize(50, 22)
-        sizeStr:SetPoint("TOPLEFT", penControls, "TOPLEFT", 6, -cy)
-        sizeStr:SetAutoFocus(false); sizeStr:SetNumeric(true); sizeStr:SetMaxLetters(2)
-        sizeStr:SetText(tostring(penMode.size))
-        sizeStr:SetScript("OnEnterPressed", function(self)
-            local n = tonumber(self:GetText()) or 4
-            penMode.size = math.max(1, math.min(20, n))
-            self:ClearFocus(); refreshPalette()
+        local sizeSlider = CreateFrame("Slider", nil, penControls, "OptionsSliderTemplate")
+        sizeSlider:SetWidth(52)
+        sizeSlider:SetHeight(18)
+        sizeSlider:SetPoint("TOPLEFT", penControls, "TOPLEFT", 2, -cy)
+        sizeSlider:SetMinMaxValues(1, 20)
+        sizeSlider:SetValueStep(1)
+        sizeSlider:SetObeyStepOnDrag(true)
+        sizeSlider:SetValue(penMode.size or 4)
+        if sizeSlider.Low then sizeSlider.Low:SetText("1") end
+        if sizeSlider.High then sizeSlider.High:SetText("20") end
+        if sizeSlider.Text then sizeSlider.Text:SetText("") end
+        local sizeValue = penControls:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        sizeValue:SetPoint("TOPLEFT", penControls, "TOPLEFT", 8, -(cy + 16))
+        local function syncPenSize(n)
+            n = math.max(1, math.min(20, math.floor((tonumber(n) or 4) + 0.5)))
+            penMode.size = n
+            sizeValue:SetText(tostring(n))
+            if prevDot then prevDot:SetSize(n, n) end
+        end
+        syncPenSize(penMode.size)
+        sizeSlider:SetScript("OnValueChanged", function(self, value)
+            syncPenSize(value)
         end)
-        cy = cy + 30
+        cy = cy + 42
 
         label("Color", 0, cy); cy = cy + 14
         local penColorBtn = CreateFrame("Button", nil, penControls)
@@ -1075,25 +2391,13 @@ refreshPalette = function()
         penColorBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
         cy = cy + 30
 
-        label("Fade (sec, 0=off)", 0, cy); cy = cy + 14
-        local fadeStr = CreateFrame("EditBox", nil, penControls, "InputBoxTemplate")
-        fadeStr:SetSize(50, 22)
-        fadeStr:SetPoint("TOPLEFT", penControls, "TOPLEFT", 6, -cy)
-        fadeStr:SetAutoFocus(false); fadeStr:SetNumeric(true); fadeStr:SetMaxLetters(3)
-        fadeStr:SetText(tostring(penMode.fadeOut))
-        fadeStr:SetScript("OnEnterPressed", function(self)
-            local n = tonumber(self:GetText()) or 0
-            penMode.fadeOut = math.max(0, math.min(120, n))
-            self:ClearFocus()
-        end)
-        cy = cy + 30
-
         local clearBtn = CreateFrame("Button", nil, penControls, "UIPanelButtonTemplate")
         clearBtn:SetSize(56, 22); clearBtn:SetText("Clear")
         clearBtn:SetPoint("TOPLEFT", penControls, "TOPLEFT", 0, -cy)
         clearBtn:SetScript("OnClick", function()
             local plan = currentPlan()
             if plan then
+                plannerHistory.recordPenClear(plan)
                 plan.drawings = {}
                 notifyEdit("PEN_CLEAR", {})
                 refreshDrawings()
@@ -1104,7 +2408,7 @@ end
 
 
 -- =============================================================
--- 9. RIGHT PANEL (Properties + tabs: Encounter / Search / Notes)
+-- 9. RIGHT PANEL (Notes)
 -- =============================================================
 local rightPanel, propsHost, encHost, searchHost, notesHost
 local rightTabButtons = {}
@@ -1117,36 +2421,16 @@ local function buildRightPanel(parent)
     local bg = rightPanel:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints(); bg:SetColorTexture(0, 0, 0, 0.25)
 
-    local propsTitle = rightPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    propsTitle:SetPoint("TOPLEFT", rightPanel, "TOPLEFT", 8, -6)
-    propsTitle:SetText("Properties")
-
-    propsHost = CreateFrame("Frame", nil, rightPanel)
-    propsHost:SetPoint("TOPLEFT", rightPanel, "TOPLEFT", 4, -24)
-    propsHost:SetPoint("TOPRIGHT", rightPanel, "TOPRIGHT", -4, -24)
-    propsHost:SetHeight(180)
-    local propsBg = propsHost:CreateTexture(nil, "BACKGROUND")
-    propsBg:SetAllPoints(); propsBg:SetColorTexture(0, 0, 0, 0.15)
-
     local tabsStrip = CreateFrame("Frame", nil, rightPanel)
-    tabsStrip:SetPoint("TOPLEFT", propsHost, "BOTTOMLEFT", 0, -6)
-    tabsStrip:SetPoint("TOPRIGHT", propsHost, "BOTTOMRIGHT", 0, -6)
+    -- Keep the notes area below the co-op panel (220x240) that opens
+    -- from the top-right of the planner.
+    tabsStrip:SetPoint("TOPLEFT", rightPanel, "TOPLEFT", 4, -264)
+    tabsStrip:SetPoint("TOPRIGHT", rightPanel, "TOPRIGHT", -4, -264)
     tabsStrip:SetHeight(22)
 
-    local function makeTab(label, key, dx)
-        local b = CreateFrame("Button", nil, tabsStrip, "UIPanelButtonTemplate")
-        b:SetSize(70, 22); b:SetText(label)
-        b:SetPoint("TOPLEFT", tabsStrip, "TOPLEFT", dx, 0)
-        b:SetScript("OnClick", function()
-            rightTab = key
-            refreshEncounterPanel(); refreshSearchPanel(); refreshNotesPanel()
-        end)
-        rightTabButtons[key] = b
-        return b
-    end
-    makeTab("Encounter", "encounter", 4)
-    makeTab("Search", "search", 78)
-    makeTab("Notes", "notes", 152)
+    local notesLabel = tabsStrip:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    notesLabel:SetPoint("TOPLEFT", tabsStrip, "TOPLEFT", 8, -3)
+    notesLabel:SetText("Notes")
 
     local hostParent = CreateFrame("Frame", nil, rightPanel)
     hostParent:SetPoint("TOPLEFT", tabsStrip, "BOTTOMLEFT", 0, -4)
@@ -1208,6 +2492,7 @@ refreshPropsPanel = function()
             tostring(currentSelection or 0),
             icon.color or "ffffff", icon.text or "",
             icon.variant or "", icon.locked and "1" or "0",
+            tostring(icon.direction or ""),
         })
     end
     textEdit:SetScript("OnEnterPressed", function(self)
@@ -1277,6 +2562,15 @@ refreshPropsPanel = function()
     end)
     row = row + 28
 
+    if hasDirectionIndicator(icon) then
+        local dirHint = propsHost:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        dirHint:SetPoint("TOPLEFT", propsHost, "TOPLEFT", 8, -row)
+        dirHint:SetWidth(RIGHT_W - 24)
+        dirHint:SetJustifyH("LEFT")
+        dirHint:SetText("Drag the square handle to rotate the direction.")
+        row = row + 24
+    end
+
     local variants = (icon.kind == "class") and CLASS_VARIANTS[icon.key] or nil
     if variants then
         local varLabel = propsHost:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -1324,7 +2618,7 @@ refreshEncounterPanel = function()
         if r.SetText then r:SetText("") end
     end
 
-    local rp = L3F.db.raidPlanner
+    local rp = activePlannerState()
     local _, raidCat = findCatalogEncounter(rp.activeEncounter)
     if not raidCat then return end
 
@@ -1522,21 +2816,37 @@ refreshNotesPanel = function()
     for _, c in ipairs({notesHost:GetChildren()}) do c:Hide(); c:SetParent(nil) end
     for _, r in ipairs({notesHost:GetRegions()}) do r:Hide(); r:ClearAllPoints() end
 
+    local hint = notesHost:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    hint:SetPoint("TOPLEFT", notesHost, "TOPLEFT", 6, -4)
+    hint:SetWidth(RIGHT_W - 42)
+    hint:SetJustifyH("LEFT")
+    hint:SetText("Notes for the selected plan. They are included when sending visuals to raid.")
+
     local scroll = CreateFrame("ScrollFrame", nil, notesHost, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", notesHost, "TOPLEFT", 4, -4)
+    scroll:SetPoint("TOPLEFT", notesHost, "TOPLEFT", 4, -30)
     scroll:SetPoint("BOTTOMRIGHT", notesHost, "BOTTOMRIGHT", -20, 4)
+    local bg = scroll:CreateTexture(nil, "BACKGROUND")
+    bg:SetPoint("TOPLEFT", scroll, "TOPLEFT", -2, 2)
+    bg:SetPoint("BOTTOMRIGHT", scroll, "BOTTOMRIGHT", 2, -2)
+    bg:SetColorTexture(0, 0, 0, 0.35)
     local edit = CreateFrame("EditBox", nil, scroll)
     edit:SetMultiLine(true); edit:SetAutoFocus(false)
     edit:SetFontObject(ChatFontNormal); edit:SetMaxLetters(2000)
-    edit:SetWidth(RIGHT_W - 40); edit:SetHeight(300)
-    edit:SetText((currentPlan() and currentPlan().notes) or "")
-    edit:SetScript("OnEditFocusLost", function(self)
+    edit:SetWidth(RIGHT_W - 44)
+    edit:SetHeight(math.max(260, (notesHost:GetHeight() or 320) - 42))
+    local p = currentPlan()
+    edit:SetText((p and p.notes) or "")
+    edit:SetCursorPosition(0)
+    edit:SetScript("OnTextChanged", function(self, userInput)
+        if not userInput then return end
         local p = currentPlan()
         if p then
             p.notes = self:GetText() or ""
             notifyEdit("NOTES", { p.notes })
         end
     end)
+    edit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    scroll:SetScript("OnMouseDown", function() edit:SetFocus() end)
     scroll:SetScrollChild(edit)
 end
 
@@ -1545,8 +2855,10 @@ end
 -- 10. TOP STRIP
 -- =============================================================
 local topStripFrame
-local nameEdit, encDD, bgDD, planTabsHost, prevBtn, nextBtn, addBtn, deleteBtn
-local utilDD, shareBtn, saveBtn
+local encDD, bgDD, planTabsHost, addBtn
+local planTabMenuFrame
+local shareBtn, shareAllBtn, importBtn, sendRaidBtn
+local planRenamePromptFrame
 
 local function makeGroupedDropdown(parent, name, width, getValue, groupsFn, callback)
     local dd = CreateFrame("Frame", name, parent, "UIDropDownMenuTemplate")
@@ -1578,25 +2890,25 @@ local function buildTopStrip(parent)
     topStripFrame:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -4, -4)
     topStripFrame:SetHeight(TOP_H - 6)
 
-    local thumb = topStripFrame:CreateTexture(nil, "ARTWORK")
-    thumb:SetSize(36, 36); thumb:SetPoint("TOPLEFT", topStripFrame, "TOPLEFT", 4, -2)
-    thumb:SetTexture("Interface\\Icons\\INV_Misc_Head_Dragon_01")
-    thumb:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-    topStripFrame.thumb = thumb
-
-    nameEdit = CreateFrame("EditBox", nil, topStripFrame, "InputBoxTemplate")
-    nameEdit:SetSize(160, 22)
-    nameEdit:SetPoint("LEFT", thumb, "RIGHT", 14, 0)
-    nameEdit:SetAutoFocus(false); nameEdit:SetMaxLetters(32)
-    nameEdit:SetScript("OnEditFocusLost", function(self)
-        local p = currentPlan(); if p then p.name = self:GetText() or "" end
-    end)
+    local topLeftAnchor = CreateFrame("Frame", nil, topStripFrame)
+    topLeftAnchor:SetSize(1, 1)
+    topLeftAnchor:SetPoint("TOPLEFT", topStripFrame, "TOPLEFT", 4, -2)
 
     encDD = makeGroupedDropdown(topStripFrame, "L3FRPEncounterDD", 180,
-        function() return L3F.db.raidPlanner and L3F.db.raidPlanner.activeEncounter end,
+        function()
+            local rp = activePlannerState()
+            return rp and rp.activeEncounter
+        end,
         function()
             local groups = {}
-            for _, raid in ipairs(L3F.raidPlannerCatalog or {}) do
+            local raidList
+            local raidInInstance = currentInstanceRaidCatalog()
+            if raidInInstance then
+                raidList = { raidInInstance }
+            else
+                raidList = L3F.raidPlannerCatalog or {}
+            end
+            for _, raid in ipairs(raidList) do
                 local entries = {}
                 for _, enc in ipairs(raid.encounters) do
                     table.insert(entries, { value = enc.name, label = enc.name })
@@ -1606,8 +2918,10 @@ local function buildTopStrip(parent)
             return groups
         end,
         function(value)
-            L3F.db.raidPlanner.activeEncounter = value
-            L3F.db.raidPlanner.activePlanIdx = 1
+            if isCoOpGuest() then return end
+            local rp = activePlannerState()
+            rp.activeEncounter = value
+            rp.activePlanIdx = 1
             ensurePlansFor(value)
             -- Co-op: host-only navigation broadcast. The receiver's
             -- BroadcastDelta NAV handler ignores planIdx/background
@@ -1615,14 +2929,15 @@ local function buildTopStrip(parent)
             notifyEdit("NAV", { value, "1", "" })
             scheduleRefresh()
         end)
-    encDD:SetPoint("LEFT", nameEdit, "RIGHT", 8, -2)
+    encDD:SetPoint("TOPLEFT", topLeftAnchor, "TOPLEFT", -12, 0)
 
     bgDD = makeGroupedDropdown(topStripFrame, "L3FRPBackgroundDD", 110,
         function()
             local p = currentPlan(); return p and p.background
         end,
         function()
-            local enc = findCatalogEncounter(L3F.db.raidPlanner.activeEncounter)
+            local rp = activePlannerState()
+            local enc = findCatalogEncounter(rp and rp.activeEncounter)
             local entries = {}
             for _, bg in ipairs(enc and enc.backgrounds or {}) do
                 table.insert(entries, { value = bg.slug, label = bg.label })
@@ -1630,10 +2945,11 @@ local function buildTopStrip(parent)
             return { { entries = entries } }
         end,
         function(value)
+            if isCoOpGuest() then return end
             local p = currentPlan()
             if p then
                 p.background = value
-                local rp = L3F.db.raidPlanner
+                local rp = activePlannerState()
                 notifyEdit("NAV", {
                     rp.activeEncounter or "",
                     tostring(rp.activePlanIdx or 1),
@@ -1644,42 +2960,9 @@ local function buildTopStrip(parent)
         end)
     bgDD:SetPoint("LEFT", encDD, "RIGHT", 2, 0)
 
-    utilDD = CreateFrame("Frame", "L3FRPUtilDD", topStripFrame, "UIDropDownMenuTemplate")
-    UIDropDownMenu_Initialize(utilDD, function(self, level)
-        local opts = {
-            { text = "Clear plan", func = function()
-                local p = currentPlan()
-                if p then
-                    p.icons = {}; p.drawings = {}
-                    notifyEdit("CLEAR", {})
-                    scheduleRefresh()
-                end
-            end },
-            { text = "Clone plan", func = function()
-                local plans = ensurePlansFor(L3F.db.raidPlanner.activeEncounter)
-                local cur = plans[L3F.db.raidPlanner.activePlanIdx]
-                if cur then
-                    local copy = CopyTable(cur)
-                    copy.name = (cur.name or "Plan") .. " copy"
-                    table.insert(plans, copy)
-                    L3F.db.raidPlanner.activePlanIdx = #plans
-                    scheduleRefresh()
-                end
-            end },
-        }
-        for _, o in ipairs(opts) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = o.text; info.func = o.func; info.notCheckable = true
-            UIDropDownMenu_AddButton(info, level)
-        end
-    end)
-    UIDropDownMenu_SetText(utilDD, "...")
-    UIDropDownMenu_SetWidth(utilDD, 50)
-    utilDD:SetPoint("LEFT", bgDD, "RIGHT", 2, 0)
-
     shareBtn = CreateFrame("Button", nil, topStripFrame, "UIPanelButtonTemplate")
     shareBtn:SetSize(60, 22); shareBtn:SetText("Share")
-    shareBtn:SetPoint("LEFT", utilDD, "RIGHT", 8, 2)
+    shareBtn:SetPoint("LEFT", bgDD, "RIGHT", 6, 2)
     shareBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
         GameTooltip:SetText("Export current plan as a share string")
@@ -1691,119 +2974,364 @@ local function buildTopStrip(parent)
     end)
     shareBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    saveBtn = CreateFrame("Button", nil, topStripFrame, "UIPanelButtonTemplate")
-    saveBtn:SetSize(110, 22); saveBtn:SetText("Save changes")
-    saveBtn:SetPoint("LEFT", shareBtn, "RIGHT", 4, 0)
-    saveBtn:SetScript("OnClick", function()
-        print("|cffffd100L3FTools:|r plan saved (auto-saves apply continuously)")
-    end)
-
-    -- Co-op toggle button. Opens the floating roster + actions panel.
-    local coopBtn = CreateFrame("Button", nil, topStripFrame, "UIPanelButtonTemplate")
-    coopBtn:SetSize(56, 22); coopBtn:SetText("Co-op")
-    coopBtn:SetPoint("LEFT", saveBtn, "RIGHT", 4, 0)
-    coopBtn:SetScript("OnEnter", function(self)
+    shareAllBtn = CreateFrame("Button", nil, topStripFrame, "UIPanelButtonTemplate")
+    shareAllBtn:SetSize(72, 22); shareAllBtn:SetText("Share-all")
+    shareAllBtn:SetPoint("LEFT", shareBtn, "RIGHT", 4, 0)
+    shareAllBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-        GameTooltip:SetText("Toggle the co-op session panel")
-        GameTooltip:AddLine("Host a live multi-player editing session, or",
-            0.7, 0.7, 0.7, true)
-        GameTooltip:AddLine("accept an invite to join one.",
+        GameTooltip:SetText("Export all plans for the selected encounter")
+        GameTooltip:AddLine("Creates one string containing every saved plan tab.",
             0.7, 0.7, 0.7, true)
         GameTooltip:Show()
     end)
-    coopBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    coopBtn:SetScript("OnClick", function()
-        if L3F.RPCoOp and L3F.RPCoOp.ToggleRosterPanel then
-            L3F.RPCoOp.ToggleRosterPanel()
+    shareAllBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    importBtn = CreateFrame("Button", nil, topStripFrame, "UIPanelButtonTemplate")
+    importBtn:SetSize(60, 22); importBtn:SetText("Import")
+    importBtn:SetPoint("LEFT", shareAllBtn, "RIGHT", 4, 0)
+    importBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:SetText("Import a Raid Planner export")
+        GameTooltip:AddLine("Supports both Share and Share-all strings.",
+            0.7, 0.7, 0.7, true)
+        GameTooltip:Show()
+    end)
+    importBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    sendRaidBtn = CreateFrame("Button", nil, topStripFrame, "UIPanelButtonTemplate")
+    sendRaidBtn:SetSize(140, 22); sendRaidBtn:SetText("Send visuals to raid")
+    sendRaidBtn:SetPoint("LEFT", importBtn, "RIGHT", 4, 0)
+    sendRaidBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:SetText("Send saved visual plans to your party/raid")
+        GameTooltip:AddLine("Receiver gets a closable visual preview popup with plan tabs.",
+            0.7, 0.7, 0.7, true)
+        GameTooltip:AddLine("Raid: only leader or assistants can send.",
+            1.0, 0.82, 0.0, true)
+        GameTooltip:Show()
+    end)
+    sendRaidBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    sendRaidBtn:SetScript("OnClick", function()
+        if L3F.RPCoOp and L3F.RPCoOp.ShareToRaid then
+            L3F.RPCoOp.ShareToRaid()
         end
     end)
-    topStripFrame.coopBtn = coopBtn
 
     planTabsHost = CreateFrame("Frame", nil, topStripFrame)
-    planTabsHost:SetPoint("TOPLEFT", thumb, "BOTTOMLEFT", 0, -6)
+    planTabsHost:SetPoint("TOPLEFT", topStripFrame, "TOPLEFT", 4, -44)
     planTabsHost:SetSize(400, 24)
 
     addBtn = CreateFrame("Button", nil, topStripFrame, "UIPanelButtonTemplate")
     addBtn:SetSize(28, 24); addBtn:SetText("+")
     addBtn:SetScript("OnClick", function()
-        local plans = ensurePlansFor(L3F.db.raidPlanner.activeEncounter)
-        table.insert(plans, newEmptyPlan(L3F.db.raidPlanner.activeEncounter))
-        L3F.db.raidPlanner.activePlanIdx = #plans
+        if isCoOpGuest() then return end
+        local rp = activePlannerState()
+        local plans = ensurePlansFor(rp.activeEncounter)
+        table.insert(plans, newEmptyPlan(rp.activeEncounter))
+        rp.activePlanIdx = #plans
         notifyEdit("NEWPL", { tostring(#plans) })
         scheduleRefresh()
     end)
+end
 
-    prevBtn = CreateFrame("Button", nil, topStripFrame)
-    prevBtn:SetSize(20, 20)
-    prevBtn:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Up")
-    prevBtn:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Down")
-    prevBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
-    prevBtn:SetScript("OnClick", function()
-        local rp = L3F.db.raidPlanner
-        rp.activePlanIdx = math.max(1, (rp.activePlanIdx or 1) - 1)
-        notifyEdit("NAV", { rp.activeEncounter or "", tostring(rp.activePlanIdx), "" })
+local function ensurePlanRenamePrompt()
+    if planRenamePromptFrame then return planRenamePromptFrame end
+    local f = CreateFrame("Frame", "L3FRPPlanRenamePrompt", UIParent)
+    f:SetSize(230, 96)
+    f:SetPoint("CENTER")
+    f:SetFrameStrata("FULLSCREEN_DIALOG")
+    f:SetToplevel(true)
+    f:SetClampedToScreen(true)
+    f:EnableMouse(true)
+    local bg = f:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints(); bg:SetColorTexture(0.05, 0.05, 0.05, 0.96)
+    local bd = f:CreateTexture(nil, "BORDER")
+    bd:SetPoint("TOPLEFT", -1, 1); bd:SetPoint("BOTTOMRIGHT", 1, -1)
+    bd:SetColorTexture(0.35, 0.35, 0.35, 0.85)
+
+    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOP", f, "TOP", 0, -8)
+    title:SetText("Rename plan")
+
+    local edit = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
+    edit:SetSize(194, 22)
+    edit:SetPoint("TOP", title, "BOTTOM", 0, -8)
+    edit:SetAutoFocus(false)
+    edit:SetMaxLetters(32)
+    f.edit = edit
+
+    local saveBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    saveBtn:SetSize(86, 22)
+    saveBtn:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 14, 10)
+    saveBtn:SetText(SAVE or "Save")
+    saveBtn:SetScript("OnClick", function()
+        if not f.plan then f:Hide(); return end
+        local newName = (f.edit:GetText() or ""):gsub("^%s*(.-)%s*$", "%1")
+        if newName == "" then newName = "Plan" end
+        f.plan.name = newName
         scheduleRefresh()
-    end)
-    nextBtn = CreateFrame("Button", nil, topStripFrame)
-    nextBtn:SetSize(20, 20)
-    nextBtn:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Up")
-    nextBtn:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Down")
-    nextBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
-    nextBtn:SetScript("OnClick", function()
-        local rp = L3F.db.raidPlanner
-        local plans = ensurePlansFor(rp.activeEncounter)
-        rp.activePlanIdx = math.min(#plans, (rp.activePlanIdx or 1) + 1)
-        notifyEdit("NAV", { rp.activeEncounter or "", tostring(rp.activePlanIdx), "" })
-        scheduleRefresh()
+        f:Hide()
     end)
 
-    deleteBtn = CreateFrame("Button", nil, topStripFrame)
-    deleteBtn:SetSize(20, 20)
-    deleteBtn:SetNormalTexture("Interface\\Buttons\\UI-MinusButton-Up")
-    deleteBtn:SetPushedTexture("Interface\\Buttons\\UI-MinusButton-Down")
-    deleteBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
-    deleteBtn:SetScript("OnClick", function()
-        local rp = L3F.db.raidPlanner
-        local plans = ensurePlansFor(rp.activeEncounter)
-        if #plans > 1 then
-            local idx = rp.activePlanIdx or 1
-            table.remove(plans, idx)
-            rp.activePlanIdx = math.max(1, math.min(#plans, rp.activePlanIdx))
-            notifyEdit("DELPL", { tostring(idx) })
+    local cancelBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    cancelBtn:SetSize(86, 22)
+    cancelBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 10)
+    cancelBtn:SetText(CANCEL or "Cancel")
+    cancelBtn:SetScript("OnClick", function() f:Hide() end)
+
+    edit:SetScript("OnEnterPressed", function() saveBtn:Click() end)
+    edit:SetScript("OnEscapePressed", function() f:Hide() end)
+    f:Hide()
+    planRenamePromptFrame = f
+    return f
+end
+
+local function showPlanRenamePrompt(plan)
+    if not plan then return end
+    local f = ensurePlanRenamePrompt()
+    f.plan = plan
+    f.edit:SetText(plan.name or "")
+    f:Show()
+    f.edit:SetFocus()
+    f.edit:HighlightText()
+end
+
+local function deletePlanAt(planIdx, planRef)
+    if isCoOpGuest() then return end
+    local rp = activePlannerState()
+    if not rp then return end
+    local plans = ensurePlansFor(rp.activeEncounter)
+    if #plans <= 1 then return end
+
+    local idx = planIdx
+    if planRef and plans[idx] ~= planRef then
+        idx = nil
+        for i, plan in ipairs(plans) do
+            if plan == planRef then
+                idx = i
+                break
+            end
+        end
+    end
+    if not (idx and plans[idx]) then return end
+
+    table.remove(plans, idx)
+    rp.activePlanIdx = math.max(1, math.min(#plans, rp.activePlanIdx or 1))
+    notifyEdit("DELPL", { tostring(idx) })
+    scheduleRefresh()
+end
+
+local function showDeletePlanConfirm(planIdx, planRef)
+    if not planRef then return end
+    if not StaticPopupDialogs["L3F_RP_CONFIRM_DELETE_PLAN"] then
+        StaticPopupDialogs["L3F_RP_CONFIRM_DELETE_PLAN"] = {
+            text = "Are you sure you want to delete \"%s\"?",
+            button1 = "Yes",
+            button2 = "No",
+            OnAccept = function(_, data)
+                if data then
+                    deletePlanAt(data.planIdx, data.planRef)
+                end
+            end,
+            timeout = 0,
+            whileDead = 1,
+            hideOnEscape = 1,
+            preferredIndex = 3,
+        }
+    end
+
+    local planName = (planRef.name and planRef.name ~= "") and planRef.name or ("Plan " .. tostring(planIdx or ""))
+    StaticPopup_Show("L3F_RP_CONFIRM_DELETE_PLAN", planName, nil, {
+        planIdx = planIdx,
+        planRef = planRef,
+    })
+end
+
+local function openPlanTabMenu(anchorBtn, planIdx)
+    if isCoOpGuest() then return end
+    if not planTabMenuFrame then
+        planTabMenuFrame = CreateFrame("Frame", "L3FRPPlanTabMenu", UIParent)
+        planTabMenuFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+        planTabMenuFrame:SetFrameLevel(200)
+        planTabMenuFrame:SetToplevel(true)
+        planTabMenuFrame:SetClampedToScreen(true)
+        planTabMenuFrame:EnableMouse(true)
+        planTabMenuFrame:SetSize(150, 6 + 22 * 3)
+        local bg = planTabMenuFrame:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints(); bg:SetColorTexture(0.05, 0.05, 0.05, 0.95)
+        planTabMenuFrame:Hide()
+        planTabMenuFrame.buttons = {}
+    end
+
+    local menu = planTabMenuFrame
+    local rp = activePlannerState()
+    local plans = ensurePlansFor(rp.activeEncounter)
+    local targetPlan = plans[planIdx]
+    if not targetPlan then return end
+
+    local cursorX, cursorY
+    if GetCursorPosition and UIParent and UIParent.GetEffectiveScale then
+        local s = UIParent:GetEffectiveScale() or 1
+        local x, y = GetCursorPosition()
+        if x and y then
+            cursorX = x / s
+            cursorY = y / s
+        end
+    end
+    menu:ClearAllPoints()
+    if cursorX and cursorY then
+        menu:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", cursorX + 8, cursorY - 8)
+    else
+        menu:SetPoint("TOPLEFT", anchorBtn, "BOTTOMRIGHT", 0, 0)
+    end
+    menu:Show()
+
+    local items = {
+        { label = "Rename", action = function()
+            rp.activePlanIdx = planIdx
+            notifyEdit("NAV", { rp.activeEncounter or "", tostring(planIdx), "" })
             scheduleRefresh()
+            showPlanRenamePrompt(targetPlan)
+            menu:Hide()
+        end },
+        { label = "Delete", action = function()
+            if #plans > 1 and plans[planIdx] then
+                showDeletePlanConfirm(planIdx, targetPlan)
+            end
+            menu:Hide()
+        end },
+        { label = "Cancel", action = function()
+            menu:Hide()
+        end },
+    }
+    for _, btn in ipairs(menu.buttons) do btn:Hide() end
+    for i, item in ipairs(items) do
+        local b = menu.buttons[i] or CreateFrame("Button", nil, menu)
+        menu.buttons[i] = b
+        b:SetSize(140, 20)
+        b:ClearAllPoints()
+        b:SetPoint("TOPLEFT", menu, "TOPLEFT", 5, -3 - (i - 1) * 22)
+        b:Show()
+        if not b.text then
+            b.text = b:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            b.text:SetPoint("LEFT", b, "LEFT", 6, 0)
+        end
+        b.text:SetText(item.label)
+        b:SetScript("OnClick", item.action)
+        local bg = b.bg or b:CreateTexture(nil, "BACKGROUND")
+        b.bg = bg
+        bg:SetAllPoints(); bg:SetColorTexture(0, 0, 0, 0)
+        b:SetScript("OnEnter", function() bg:SetColorTexture(1, 1, 1, 0.12) end)
+        b:SetScript("OnLeave", function() bg:SetColorTexture(0, 0, 0, 0) end)
+    end
+    menu:SetScript("OnUpdate", function(self)
+        if not self:IsMouseOver() and IsMouseButtonDown
+           and IsMouseButtonDown("LeftButton") then
+            self:Hide(); self:SetScript("OnUpdate", nil)
         end
     end)
 end
 
 refreshTopStrip = function()
     if not topStripFrame then return end
-    local rp = L3F.db.raidPlanner
+    local rp = activePlannerState()
+    local guestLocked = isCoOpGuest()
+    syncEncounterToInstanceRaid()
     UIDropDownMenu_SetText(encDD, rp.activeEncounter or "(no encounter)")
     local plan = currentPlan()
     UIDropDownMenu_SetText(bgDD, plan and plan.background or "(no background)")
-    nameEdit:SetText(plan and plan.name or "")
+    if encDD then encDD:SetShown(not guestLocked) end
+    if bgDD then bgDD:SetShown(not guestLocked) end
+    if shareBtn then shareBtn:SetShown(not guestLocked) end
+    if shareAllBtn then shareAllBtn:SetShown(not guestLocked) end
+    if importBtn then importBtn:SetShown(not guestLocked) end
+    if sendRaidBtn then sendRaidBtn:SetShown(not guestLocked) end
+    if sendRaidBtn then
+        local canSend = false
+        if guestLocked then
+            canSend = false
+        elseif IsInRaid() then
+            canSend = UnitIsGroupLeader("player") or UnitIsGroupAssistant("player")
+        elseif IsInGroup() then
+            canSend = UnitIsGroupLeader("player")
+        end
+        if canSend then
+            sendRaidBtn:Enable()
+        else
+            sendRaidBtn:Disable()
+        end
+    end
 
     for _, c in ipairs({planTabsHost:GetChildren()}) do c:Hide(); c:SetParent(nil) end
     local plans = ensurePlansFor(rp.activeEncounter)
     local cx = 0
     for i = 1, #plans do
+        local tabPlan = plans[i]
+        local tabLabel = ((tabPlan and tabPlan.name) or ""):gsub("^%s*(.-)%s*$", "%1")
+        if tabLabel == "" then tabLabel = tostring(i) end
         local b = CreateFrame("Button", nil, planTabsHost, "UIPanelButtonTemplate")
-        b:SetSize(28, 22); b:SetText(tostring(i))
+        b:SetText(tabLabel)
+        local textW = b.GetTextWidth and b:GetTextWidth() or 24
+        local tabW = math.max(28, math.min(96, math.floor(textW + 16)))
+        b:SetSize(tabW, 22)
         b:SetPoint("LEFT", planTabsHost, "LEFT", cx, 0)
-        if i == rp.activePlanIdx then b:SetButtonState("PUSHED", true) end
-        b:SetScript("OnClick", function()
+        b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        if i == rp.activePlanIdx then
+            b:SetButtonState("PUSHED", true)
+            local function edgeTexture()
+                local t = b:CreateTexture(nil, "OVERLAY")
+                t:SetTexture("Interface\\Buttons\\WHITE8X8")
+                t:SetVertexColor(1.0, 0.9, 0.1, 0.95)
+                t:SetDrawLayer("OVERLAY", -3)
+                return t
+            end
+            local topEdge = edgeTexture()
+            topEdge:SetPoint("TOPLEFT", b, "TOPLEFT", 2, -2)
+            topEdge:SetPoint("TOPRIGHT", b, "TOPRIGHT", -2, -2)
+            topEdge:SetHeight(1)
+
+            local bottomEdge = edgeTexture()
+            bottomEdge:SetPoint("BOTTOMLEFT", b, "BOTTOMLEFT", 2, 2)
+            bottomEdge:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", -2, 2)
+            bottomEdge:SetHeight(1)
+
+            local leftEdge = edgeTexture()
+            leftEdge:SetPoint("TOPLEFT", b, "TOPLEFT", 2, -2)
+            leftEdge:SetPoint("BOTTOMLEFT", b, "BOTTOMLEFT", 2, 2)
+            leftEdge:SetWidth(1)
+
+            local rightEdge = edgeTexture()
+            rightEdge:SetPoint("TOPRIGHT", b, "TOPRIGHT", -2, -2)
+            rightEdge:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", -2, 2)
+            rightEdge:SetWidth(1)
+        end
+        b:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:SetText(tabLabel)
+            if guestLocked then
+                GameTooltip:AddLine("The host controls plan selection in co-op.", 0.7, 0.7, 0.7, true)
+            else
+                GameTooltip:AddLine("Left click: select", 0.7, 0.7, 0.7, true)
+                GameTooltip:AddLine("Right click: rename / delete", 0.7, 0.7, 0.7, true)
+            end
+            GameTooltip:Show()
+        end)
+        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        b:SetScript("OnClick", function(self, button)
+            if guestLocked then return end
+            if button == "RightButton" or button == "Button2" then
+                openPlanTabMenu(self, i)
+                return
+            end
             rp.activePlanIdx = i
             notifyEdit("NAV", { rp.activeEncounter or "", tostring(i), "" })
             scheduleRefresh()
         end)
-        cx = cx + 30
+        cx = cx + tabW + 4
     end
     addBtn:ClearAllPoints()
     addBtn:SetPoint("LEFT", planTabsHost, "LEFT", cx + 4, 0)
-
-    prevBtn:ClearAllPoints(); prevBtn:SetPoint("LEFT", addBtn, "RIGHT", 30, 0)
-    nextBtn:ClearAllPoints(); nextBtn:SetPoint("LEFT", prevBtn, "RIGHT", 4, 0)
-    deleteBtn:ClearAllPoints(); deleteBtn:SetPoint("LEFT", nextBtn, "RIGHT", 12, 0)
+    addBtn:SetShown(not guestLocked)
 end
 
 
@@ -1811,62 +3339,125 @@ end
 -- 11. SHARE / EXPORT (L3F2 string)
 -- =============================================================
 local LibDeflate = LibStub and LibStub("LibDeflate", true)
+local RP_MAX_COMPRESS = { level = 9, strategy = "dynamic" }
 
-local function serializePlan(plan, encounterName)
-    local function encIcon(ic)
-        local parts = {
-            ic.kind or "",
-            ic.key or "",
-            string.format("%.4f", ic.x or 0.5),
-            string.format("%.4f", ic.y or 0.5),
-            ic.color or "ffffff",
-            ic.variant or "",
-            ic.locked and "1" or "0",
-            (ic.text or ""):gsub(";", " "):gsub("|", "/"),
-        }
-        return table.concat(parts, ":")
+local function encodePlanIcon(ic)
+    local parts = {
+        ic.kind or "",
+        ic.key or "",
+        string.format("%.4f", ic.x or 0.5),
+        string.format("%.4f", ic.y or 0.5),
+        ic.color or "ffffff",
+        ic.variant or "",
+        ic.locked and "1" or "0",
+        (ic.text or ""):gsub(";", " "):gsub("|", "/"),
+        tostring(ic.direction or ""),
+    }
+    return table.concat(parts, ":")
+end
+
+local function encodePlanStroke(s)
+    local pts = {}
+    for _, p in ipairs(s.points or {}) do
+        table.insert(pts, string.format("%.3f,%.3f", p.x, p.y))
     end
+    return table.concat({
+        s.color or "ffffff",
+        tostring(s.size or 4),
+        tostring(s.fade or 0),
+        table.concat(pts, "/"),
+    }, ":")
+end
+
+local function encodePlanBody(plan, encounterName)
     local iconsCSV = {}
-    for _, ic in ipairs(plan.icons or {}) do
-        table.insert(iconsCSV, encIcon(ic))
-    end
-    local function encStroke(s)
-        local pts = {}
-        for _, p in ipairs(s.points or {}) do
-            table.insert(pts, string.format("%.3f,%.3f", p.x, p.y))
-        end
-        return table.concat({
-            s.color or "ffffff",
-            tostring(s.size or 4),
-            tostring(s.fade or 0),
-            table.concat(pts, "/"),
-        }, ":")
+    for _, ic in ipairs((plan and plan.icons) or {}) do
+        table.insert(iconsCSV, encodePlanIcon(ic))
     end
     local drawCSV = {}
-    for _, s in ipairs(plan.drawings or {}) do
-        table.insert(drawCSV, encStroke(s))
+    for _, s in ipairs((plan and plan.drawings) or {}) do
+        table.insert(drawCSV, encodePlanStroke(s))
     end
-    local inner = "RPLAN1|"
+    return "RPLAN1|"
         .. (encounterName or ""):gsub("|", "/") .. "|"
-        .. ((plan.name or ""):gsub("|", "/")) .. "|"
-        .. (plan.background or "") .. "|"
+        .. (((plan and plan.name) or ""):gsub("|", "/")) .. "|"
+        .. ((plan and plan.background) or "") .. "|"
         .. table.concat(iconsCSV, ";") .. "|"
         .. table.concat(drawCSV, ";") .. "|"
-        .. ((plan.notes or ""):gsub("|", "/"))
+        .. (((plan and plan.notes) or ""):gsub("|", "/"))
+end
+
+local function encodeWireBody(inner, opts, compressedPrefix, rawPrefix)
+    opts = opts or {}
+    compressedPrefix = compressedPrefix
+        or ((opts.wire == "addon") and "L3FRA:" or "L3FRP:")
+    rawPrefix = rawPrefix
+        or ((opts.wire == "addon") and "L3FRA1:" or "L3FRP1:")
     if LibDeflate then
-        local compressed = LibDeflate:CompressDeflate(inner)
-        return "L3FRP:" .. LibDeflate:EncodeForPrint(compressed)
+        local compressed = LibDeflate:CompressDeflate(
+            inner, opts.maxCompress and RP_MAX_COMPRESS or nil)
+        if opts.wire == "addon" then
+            return compressedPrefix .. LibDeflate:EncodeForWoWAddonChannel(compressed)
+        end
+        return compressedPrefix .. LibDeflate:EncodeForPrint(compressed)
     end
-    return "L3FRP1:" .. inner
+    return rawPrefix .. inner
+end
+
+local function serializePlan(plan, encounterName, opts)
+    return encodeWireBody(encodePlanBody(plan, encounterName), opts)
+end
+
+local function serializePlanBundle(plans, encounterName, activePlanIdx, opts)
+    opts = opts or {}
+    local chunks = {}
+    local count = 0
+    for _, plan in ipairs(plans or {}) do
+        local body = encodePlanBody(plan, encounterName)
+        count = count + 1
+        chunks[#chunks + 1] = tostring(#body) .. ":" .. body
+    end
+    if count == 0 then return nil end
+
+    local inner = "RPLANS1|"
+        .. (encounterName or ""):gsub("|", "/") .. "|"
+        .. tostring(activePlanIdx or 1) .. "|"
+        .. tostring(count) .. "|"
+        .. table.concat(chunks)
+
+    local compressedPrefix = (opts.wire == "addon") and "L3FRBA:" or "L3FRBP:"
+    local rawPrefix = (opts.wire == "addon") and "L3FRBA1:" or "L3FRBP1:"
+    return encodeWireBody(inner, opts, compressedPrefix, rawPrefix)
 end
 
 local function openShareDialog()
     local plan = currentPlan()
     if not plan then return end
-    local str = serializePlan(plan, L3F.db.raidPlanner.activeEncounter)
+    local rp = activePlannerState()
+    local str = serializePlan(plan, rp and rp.activeEncounter)
     if L3F.ShowStringDialog then
         L3F.ShowStringDialog({
             title = "Raid plan export - Ctrl+A then Ctrl+C to copy:",
+            text = str,
+            acceptText = "Close",
+            showCancel = false,
+            selectAll = true,
+        })
+    else
+        print("|cffffd100L3FTools:|r " .. str)
+    end
+end
+
+local function openShareAllDialog()
+    local rp = activePlannerState()
+    if not (rp and rp.activeEncounter) then return end
+    local plans = ensurePlansFor(rp.activeEncounter)
+    local str = serializePlanBundle(plans, rp.activeEncounter, rp.activePlanIdx)
+    if not str then return end
+
+    if L3F.ShowStringDialog then
+        L3F.ShowStringDialog({
+            title = "Raid plans export - Ctrl+A then Ctrl+C to copy:",
             text = str,
             acceptText = "Close",
             showCancel = false,
@@ -1881,20 +3472,46 @@ end
 -- =============================================================
 -- 11b. CO-OP INTEGRATION (exports for RaidPlannerCoOp.lua)
 -- =============================================================
--- Decode an L3FRP / L3FRP1 share string back to a plan table.
-local function deserializePlan(str)
+-- Decode an L3FRP/L3FRP1 (print wire) or L3FRA/L3FRA1 (addon wire)
+-- share string back to a plan table.
+local function decodeWireBody(str)
     if not str or str == "" then return nil end
     local body
-    if str:sub(1, 7) == "L3FRP1:" then
+    if str:sub(1, 8) == "L3FRBP1:" then
+        body = str:sub(9)
+    elseif str:sub(1, 8) == "L3FRBA1:" then
+        body = str:sub(9)
+    elseif str:sub(1, 7) == "L3FRBP:" then
+        if not LibDeflate then return nil end
+        local raw = LibDeflate:DecodeForPrint(str:sub(8))
+        if not raw then return nil end
+        body = LibDeflate:DecompressDeflate(raw)
+    elseif str:sub(1, 7) == "L3FRBA:" then
+        if not LibDeflate then return nil end
+        local raw = LibDeflate:DecodeForWoWAddonChannel(str:sub(8))
+        if not raw then return nil end
+        body = LibDeflate:DecompressDeflate(raw)
+    elseif str:sub(1, 7) == "L3FRP1:" then
+        body = str:sub(8)
+    elseif str:sub(1, 7) == "L3FRA1:" then
         body = str:sub(8)
     elseif str:sub(1, 6) == "L3FRP:" then
         if not LibDeflate then return nil end
         local raw = LibDeflate:DecodeForPrint(str:sub(7))
         if not raw then return nil end
         body = LibDeflate:DecompressDeflate(raw)
+    elseif str:sub(1, 6) == "L3FRA:" then
+        if not LibDeflate then return nil end
+        local raw = LibDeflate:DecodeForWoWAddonChannel(str:sub(7))
+        if not raw then return nil end
+        body = LibDeflate:DecompressDeflate(raw)
     else
         return nil
     end
+    return body
+end
+
+local function decodePlanBody(body)
     if not body or body:sub(1, 7) ~= "RPLAN1|" then return nil end
     local _, encName, planName, bgSlug, iconsCSV, drawCSV, notes =
         strsplit("|", body)
@@ -1907,7 +3524,7 @@ local function deserializePlan(str)
     }
     if iconsCSV and iconsCSV ~= "" then
         for entry in string.gmatch(iconsCSV, "[^;]+") do
-            local kind, key, xs, ys, color, variant, locked, text =
+            local kind, key, xs, ys, color, variant, locked, text, direction =
                 strsplit(":", entry)
             table.insert(plan.icons, {
                 kind    = kind or "",
@@ -1918,6 +3535,7 @@ local function deserializePlan(str)
                 variant = (variant ~= "" and variant) or nil,
                 locked  = locked == "1",
                 text    = (text and text ~= "") and text or nil,
+                direction = tonumber(direction),
             })
         end
     end
@@ -1945,24 +3563,141 @@ local function deserializePlan(str)
     return plan, encName
 end
 
+local function deserializePlan(str)
+    return decodePlanBody(decodeWireBody(str))
+end
+
+local function deserializePlanBundle(str, fallbackPlanIdx)
+    local body = decodeWireBody(str)
+    if not body then return nil end
+
+    if body:sub(1, 8) == "RPLANS1|" then
+        local _, encName, activeIdxStr, countStr, chunks =
+            strsplit("|", body, 5)
+        local count = tonumber(countStr) or 0
+        local plans = {}
+        local pos = 1
+        chunks = chunks or ""
+
+        for _ = 1, count do
+            local colon = string.find(chunks, ":", pos, true)
+            if not colon then return nil end
+            local len = tonumber(string.sub(chunks, pos, colon - 1))
+            if not len then return nil end
+            local startPos = colon + 1
+            local planBody = string.sub(chunks, startPos, startPos + len - 1)
+            if #planBody < len then return nil end
+            local plan = decodePlanBody(planBody)
+            if plan then
+                plans[#plans + 1] = plan
+            end
+            pos = startPos + len
+        end
+
+        if #plans == 0 then return nil end
+        return {
+            encounterName = encName,
+            activePlanIdx = tonumber(activeIdxStr) or fallbackPlanIdx or 1,
+            plans = plans,
+        }
+    end
+
+    local plan, encName = decodePlanBody(body)
+    if not plan then return nil end
+    return {
+        encounterName = encName,
+        activePlanIdx = fallbackPlanIdx or 1,
+        plans = { plan },
+    }
+end
+
+local function openImportDialog()
+    if isCoOpGuest() then return end
+    if not L3F.ShowStringDialog then
+        print("|cffff5555L3FTools:|r Import dialog is not available.")
+        return
+    end
+
+    L3F.ShowStringDialog({
+        title = "Paste a Raid Planner export string, then Import:",
+        text = "",
+        acceptText = "Import",
+        showCancel = true,
+        onAccept = function(str)
+            str = (str or ""):gsub("^%s+", ""):gsub("%s+$", "")
+            local bundle = deserializePlanBundle(str)
+            if not (bundle and bundle.plans and bundle.plans[1]) then
+                print("|cffff5555L3FTools:|r Import failed: invalid Raid Planner export.")
+                return
+            end
+
+            local rp = activePlannerState()
+            local encName = (bundle.encounterName and bundle.encounterName ~= "")
+                and bundle.encounterName or rp.activeEncounter
+            if not encName or encName == "" then
+                print("|cffff5555L3FTools:|r Import failed: missing encounter name.")
+                return
+            end
+
+            rp.plansByEncounter = rp.plansByEncounter or {}
+            rp.plansByEncounter[encName] = rp.plansByEncounter[encName] or {}
+            local targetPlans = rp.plansByEncounter[encName]
+            local firstImportedIdx = #targetPlans + 1
+
+            local function nameExists(name)
+                for _, plan in ipairs(targetPlans) do
+                    if plan.name == name then return true end
+                end
+                return false
+            end
+
+            local function uniquePlanName(base)
+                base = (base and base ~= "") and base or "Imported plan"
+                local name = base
+                local n = 2
+                while nameExists(name) do
+                    name = base .. " (" .. tostring(n) .. ")"
+                    n = n + 1
+                end
+                return name
+            end
+
+            for _, plan in ipairs(bundle.plans or {}) do
+                plan.name = uniquePlanName(plan.name)
+                table.insert(targetPlans, plan)
+            end
+
+            rp.activeEncounter = encName
+            rp.activePlanIdx = firstImportedIdx
+            plannerHistory.clear()
+            scheduleRefresh()
+            print(string.format("|cffffd100L3FTools:|r Imported %d raid plan%s for %s.",
+                #bundle.plans, (#bundle.plans == 1 and "" or "s"), encName))
+        end,
+    })
+end
+
 L3F._RPSerializePlan = serializePlan
+L3F._RPSerializePlanBundle = serializePlanBundle
 
 function L3F._RPApplySnapshot(encName, planIdx, payload)
-    local plan = deserializePlan(payload)
-    if not plan then return end
-    L3F.db.raidPlanner = L3F.db.raidPlanner or {}
-    L3F.db.raidPlanner.plansByEncounter =
-        L3F.db.raidPlanner.plansByEncounter or {}
-    L3F.db.raidPlanner.plansByEncounter[encName] =
-        L3F.db.raidPlanner.plansByEncounter[encName] or {}
-    L3F.db.raidPlanner.plansByEncounter[encName][planIdx or 1] = plan
-    L3F.db.raidPlanner.activeEncounter = encName
-    L3F.db.raidPlanner.activePlanIdx = planIdx or 1
+    local bundle = deserializePlanBundle(payload, planIdx)
+    if not (bundle and bundle.plans and bundle.plans[1]) then return end
+    local targetEnc = (encName and encName ~= "") and encName
+        or bundle.encounterName
+    if not targetEnc or targetEnc == "" then return end
+
+    local rp = activePlannerState()
+    rp.plansByEncounter = rp.plansByEncounter or {}
+    rp.plansByEncounter[targetEnc] = bundle.plans
+    rp.activeEncounter = targetEnc
+    rp.activePlanIdx = math.max(1, math.min(#bundle.plans,
+        bundle.activePlanIdx or planIdx or 1))
     scheduleRefresh()
 end
 
 function L3F._RPApplyDelta(deltaType, encName, planIdx, ...)
-    local rp = L3F.db.raidPlanner
+    local rp = activePlannerState()
     if not rp then return end
     rp.plansByEncounter = rp.plansByEncounter or {}
     rp.plansByEncounter[encName] = rp.plansByEncounter[encName] or {}
@@ -1973,7 +3708,7 @@ function L3F._RPApplyDelta(deltaType, encName, planIdx, ...)
     local plan = plans[planIdx] or plans[1]
 
     if deltaType == "PLACE" then
-        local kind, key, xs, ys, color, text, variant, locked = ...
+        local kind, key, xs, ys, color, text, variant, locked, direction = ...
         table.insert(plan.icons, {
             kind    = kind or "",
             key     = key or "",
@@ -1983,6 +3718,7 @@ function L3F._RPApplyDelta(deltaType, encName, planIdx, ...)
             text    = (text and text ~= "") and text or nil,
             variant = (variant and variant ~= "") and variant or nil,
             locked  = locked == "1",
+            direction = tonumber(direction),
         })
     elseif deltaType == "MOVE" then
         local idxStr, xs, ys = ...
@@ -1999,7 +3735,7 @@ function L3F._RPApplyDelta(deltaType, encName, planIdx, ...)
             table.remove(plan.icons, idx)
         end
     elseif deltaType == "PROPS" then
-        local idxStr, color, text, variant, locked = ...
+        local idxStr, color, text, variant, locked, direction = ...
         local idx = tonumber(idxStr)
         local ic = idx and plan.icons[idx]
         if ic then
@@ -2007,6 +3743,7 @@ function L3F._RPApplyDelta(deltaType, encName, planIdx, ...)
             ic.text    = (text and text ~= "") and text or nil
             ic.variant = (variant and variant ~= "") and variant or nil
             ic.locked  = locked == "1"
+            ic.direction = tonumber(direction) or ic.direction
         end
     elseif deltaType == "DRAW" then
         local color, sizeStr, fadeStr, ptsCSV = ...
@@ -2029,8 +3766,18 @@ function L3F._RPApplyDelta(deltaType, encName, planIdx, ...)
         })
     elseif deltaType == "PEN_CLEAR" then
         plan.drawings = {}
+    elseif deltaType == "RMDRAW" then
+        local idxStr = ...
+        local idx = tonumber(idxStr)
+        if idx and plan.drawings and plan.drawings[idx] then
+            table.remove(plan.drawings, idx)
+        end
     elseif deltaType == "CLEAR" then
         plan.icons = {}; plan.drawings = {}
+        if plannerHistory.currentPlanMatches(plan) then
+            currentSelection = nil
+            plannerHistory.clear()
+        end
     elseif deltaType == "NAV" then
         local newEnc, newPlanIdxStr, bgSlug = ...
         if newEnc and newEnc ~= "" then
@@ -2069,14 +3816,14 @@ end
 
 
 -- =============================================================
--- 11c. SHARE-BUTTON 2-CHOICE POPUP (Copy string / Share to raid)
+-- 11c. SHARE-BUTTON POPUP (Copy string)
 -- =============================================================
 local sharePopup
 local function openSharePopup()
     if not sharePopup then
         local f = CreateFrame("Frame", "L3FRPSharePopup", UIParent,
             "BasicFrameTemplateWithInset")
-        f:SetSize(300, 150)
+        f:SetSize(300, 100)
         f:SetPoint("CENTER")
         f:SetFrameStrata("FULLSCREEN_DIALOG")
         f:SetToplevel(true); f:SetClampedToScreen(true)
@@ -2093,68 +3840,285 @@ local function openSharePopup()
             f:Hide()
             openShareDialog()
         end)
-        local raidBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-        raidBtn:SetSize(260, 24); raidBtn:SetText("Share to raid")
-        raidBtn:SetPoint("TOP", copyBtn, "BOTTOM", 0, -6)
-        raidBtn:SetScript("OnClick", function()
-            f:Hide()
-            if L3F.RPCoOp and L3F.RPCoOp.ShareToRaid then
-                L3F.RPCoOp.ShareToRaid()
-            end
-        end)
-        f.raidBtn = raidBtn
         sharePopup = f
-    end
-    -- Disable Share-to-raid when not in a party/raid.
-    if sharePopup.raidBtn then
-        if IsInRaid() or IsInGroup() then
-            sharePopup.raidBtn:Enable()
-        else
-            sharePopup.raidBtn:Disable()
-        end
     end
     sharePopup:Show()
 end
 
 
 -- =============================================================
--- 11d. INCOMING SHARE POPUP (receiver of a "Share to raid")
+-- 11d. INCOMING SHARE POPUP (visual-only preview, no auto-import)
 -- =============================================================
 local incomingSharePopup
-local function showIncomingShare(senderShort, encName, planIdx, payload)
-    if not incomingSharePopup then
-        local f = CreateFrame("Frame", "L3FRPIncomingShare", UIParent,
-            "BasicFrameTemplateWithInset")
-        f:SetSize(360, 130)
-        f:SetPoint("TOP", UIParent, "TOP", 0, -120)
-        f:SetFrameStrata("FULLSCREEN_DIALOG")
-        f:SetToplevel(true); f:SetClampedToScreen(true)
-        f:EnableMouse(true)
-        if f.TitleText then f.TitleText:SetText("Shared raid plan") end
-        f.msg = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-        f.msg:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -32)
-        f.msg:SetPoint("TOPRIGHT", f, "TOPRIGHT", -14, -32)
-        f.msg:SetJustifyH("LEFT")
-        f.acc = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-        f.acc:SetSize(100, 22); f.acc:SetText("View")
-        f.acc:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -16, 12)
-        f.dec = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-        f.dec:SetSize(100, 22); f.dec:SetText("Discard")
-        f.dec:SetPoint("RIGHT", f.acc, "LEFT", -8, 0)
-        f.dec:SetScript("OnClick", function() f:Hide() end)
-        incomingSharePopup = f
+local incomingShareDrawSegments = {}
+local renderIncomingSharePreview
+
+local function cleanedPlanNote(plan)
+    local note = plan and plan.notes or ""
+    note = tostring(note):gsub("^%s*(.-)%s*$", "%1")
+    if note == "" then return nil end
+    return note
+end
+
+local function clearIncomingShareDrawSegments()
+    for i = 1, #incomingShareDrawSegments do
+        local tex = incomingShareDrawSegments[i]
+        if tex then
+            tex:Hide()
+            tex:SetParent(nil)
+        end
     end
-    incomingSharePopup.msg:SetText(string.format(
-        "|cffffd100%s|r shared a raid plan for |cffaaccff%s|r.\nView replaces your current plan for that encounter.",
-        senderShort or "?", encName or "?"))
-    incomingSharePopup.acc:SetScript("OnClick", function()
-        L3F._RPApplySnapshot(encName, planIdx, payload)
-        incomingSharePopup:Hide()
-        -- Open the Raid Planner tab so the user lands on the shared
-        -- plan immediately. The tab opener is exposed by Frame.lua.
-        if L3F.ShowTab then pcall(L3F.ShowTab, "guild.raidplanner") end
-    end)
-    incomingSharePopup:Show()
+    wipe(incomingShareDrawSegments)
+end
+
+local function drawIncomingShareSegment(parent, x1, y1, x2, y2, size, r, g, b, a)
+    local dx, dy = x2 - x1, y2 - y1
+    local len = math.sqrt(dx * dx + dy * dy)
+    if len < 0.5 then return end
+    local pad = math.max(1, (size or 4) * 0.35)
+    local ux, uy = dx / len, dy / len
+    local sx, sy = x1 - ux * pad, y1 - uy * pad
+    local ex, ey = x2 + ux * pad, y2 + uy * pad
+    local tex = parent:CreateTexture(nil, "ARTWORK")
+    tex:SetTexture("Interface\\Buttons\\WHITE8X8")
+    tex:SetVertexColor(r, g, b, a)
+    tex:SetWidth(len + (2 * pad))
+    tex:SetHeight(size)
+    tex:ClearAllPoints()
+    tex:SetPoint("CENTER", parent, "TOPLEFT", (sx + ex) / 2, -(sy + ey) / 2)
+    tex:SetRotation(math.atan2(-dy, dx))
+    incomingShareDrawSegments[#incomingShareDrawSegments + 1] = tex
+end
+
+local function ensureIncomingSharePopup()
+    if incomingSharePopup then return incomingSharePopup end
+    local f = CreateFrame("Frame", "L3FRPIncomingSharePreview", UIParent,
+        "BasicFrameTemplateWithInset")
+    f:SetSize(860, 620)
+    f:SetPoint("CENTER")
+    f:SetFrameStrata("FULLSCREEN_DIALOG")
+    f:SetToplevel(true); f:SetClampedToScreen(true)
+    f:EnableMouse(true); f:SetMovable(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", f.StartMoving)
+    f:SetScript("OnDragStop", f.StopMovingOrSizing)
+    tinsert(UISpecialFrames, "L3FRPIncomingSharePreview")
+    if f.TitleText then f.TitleText:SetText("Shared visual") end
+
+    f.meta = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    f.meta:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -34)
+    f.meta:SetPoint("TOPRIGHT", f, "TOPRIGHT", -14, -34)
+    f.meta:SetJustifyH("LEFT")
+
+    f.planTabsHost = CreateFrame("Frame", nil, f)
+    f.planTabsHost:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -56)
+    f.planTabsHost:SetPoint("TOPRIGHT", f, "TOPRIGHT", -14, -56)
+    f.planTabsHost:SetHeight(24)
+    f.planTabsHost:Hide()
+    f.planTabButtons = {}
+
+    f.canvas = CreateFrame("Frame", nil, f)
+    f.canvas:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -56)
+    f.canvas:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 14)
+    f.canvasBg = f.canvas:CreateTexture(nil, "BACKGROUND")
+    f.canvasBg:SetAllPoints()
+    f.canvasBg:SetColorTexture(0.05, 0.05, 0.05, 1)
+
+    f.drawHost = CreateFrame("Frame", nil, f.canvas)
+    f.drawHost:SetAllPoints(); f.drawHost:EnableMouse(false)
+    f.iconsHost = CreateFrame("Frame", nil, f.canvas)
+    f.iconsHost:SetAllPoints(); f.iconsHost:EnableMouse(false)
+
+    f.notesHost = CreateFrame("Frame", nil, f)
+    f.notesHost:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 14, 14)
+    f.notesHost:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 14)
+    f.notesHost:SetHeight(74)
+    local notesBg = f.notesHost:CreateTexture(nil, "BACKGROUND")
+    notesBg:SetAllPoints()
+    notesBg:SetColorTexture(0, 0, 0, 0.55)
+    local notesTitle = f.notesHost:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    notesTitle:SetPoint("TOPLEFT", f.notesHost, "TOPLEFT", 8, -6)
+    notesTitle:SetText("Notes")
+    f.notesText = f.notesHost:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    f.notesText:SetPoint("TOPLEFT", notesTitle, "BOTTOMLEFT", 0, -4)
+    f.notesText:SetPoint("BOTTOMRIGHT", f.notesHost, "BOTTOMRIGHT", -8, 6)
+    f.notesText:SetJustifyH("LEFT")
+    f.notesText:SetJustifyV("TOP")
+    f.notesHost:Hide()
+
+    incomingSharePopup = f
+    return f
+end
+
+local function layoutIncomingSharePopup(f, hasPlanTabs, hasNotes)
+    if not f then return end
+    if f.planTabsHost then
+        if hasPlanTabs then f.planTabsHost:Show() else f.planTabsHost:Hide() end
+    end
+    if f.notesHost then
+        f.notesHost:SetShown(hasNotes and true or false)
+    end
+    if f.canvas then
+        f.canvas:ClearAllPoints()
+        f.canvas:SetPoint("TOPLEFT", f, "TOPLEFT", 14, hasPlanTabs and -84 or -56)
+        f.canvas:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, hasNotes and 96 or 14)
+    end
+end
+
+local function rebuildIncomingSharePlanTabs(f)
+    if not f then return end
+    local plans = f.sharedPlans or {}
+    local showTabs = #plans > 1
+    layoutIncomingSharePopup(f, showTabs, cleanedPlanNote(plans[f.activeSharedPlanIdx]) ~= nil)
+
+    for _, btn in ipairs(f.planTabButtons or {}) do
+        btn:Hide()
+    end
+    if not showTabs then return end
+
+    local cx = 0
+    for i, plan in ipairs(plans) do
+        local tabLabel = ((plan and plan.name) or ""):gsub("^%s*(.-)%s*$", "%1")
+        if tabLabel == "" then tabLabel = "Plan " .. tostring(i) end
+
+        local b = f.planTabButtons[i] or CreateFrame("Button", nil, f.planTabsHost, "UIPanelButtonTemplate")
+        f.planTabButtons[i] = b
+        b:SetText(tabLabel)
+        local textW = b.GetTextWidth and b:GetTextWidth() or 48
+        local tabW = math.max(50, math.min(118, math.floor(textW + 18)))
+        b:SetSize(tabW, 22)
+        b:ClearAllPoints()
+        b:SetPoint("LEFT", f.planTabsHost, "LEFT", cx, 0)
+        b:Show()
+        b:SetButtonState(i == f.activeSharedPlanIdx and "PUSHED" or "NORMAL", i == f.activeSharedPlanIdx)
+        b:SetScript("OnClick", function()
+            f.activeSharedPlanIdx = i
+            rebuildIncomingSharePlanTabs(f)
+            renderIncomingSharePreview(f, plans[i])
+        end)
+        b:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:SetText(tabLabel)
+            GameTooltip:AddLine("Show this shared plan.", 0.7, 0.7, 0.7, true)
+            GameTooltip:Show()
+        end)
+        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        cx = cx + tabW + 4
+    end
+end
+
+renderIncomingSharePreview = function(f, plan)
+    if not (f and plan) then return end
+    buildPaletteIndex()
+
+    local note = cleanedPlanNote(plan)
+    if f.notesText then
+        f.notesText:SetText(note or "")
+    end
+    layoutIncomingSharePopup(f, #(f.sharedPlans or {}) > 1, note ~= nil)
+
+    for _, c in ipairs({f.iconsHost:GetChildren()}) do c:Hide(); c:SetParent(nil) end
+    clearIncomingShareDrawSegments()
+
+    if plan.background then
+        f.canvasBg:SetTexture(bgTexture(plan.background))
+        f.canvasBg:SetVertexColor(1, 1, 1, 1)
+    else
+        f.canvasBg:SetTexture(nil)
+        f.canvasBg:SetColorTexture(0.05, 0.05, 0.05, 1)
+    end
+
+    local w = f.canvas:GetWidth() or 0
+    local h = f.canvas:GetHeight() or 0
+    if w <= 0 or h <= 0 then
+        w, h = 700, 500
+    end
+
+    for _, icon in ipairs(plan.icons or {}) do
+        local holder = CreateFrame("Frame", nil, f.iconsHost)
+        holder:SetSize(PLACED_DEFAULT_SIZE, PLACED_DEFAULT_SIZE)
+        holder:SetPoint("CENTER", f.canvas, "TOPLEFT",
+            (icon.x or 0.5) * w, -((icon.y or 0.5) * h))
+        drawDirectionIndicator(holder, icon)
+
+        local tex = holder:CreateTexture(nil, "ARTWORK")
+        tex:SetAllPoints()
+        local path, tc
+        if icon.iconTex then
+            path = icon.iconTex
+        end
+        if icon.variant and icon.key and icon.key ~= "" then
+            local vk = icon.key .. ":" .. icon.variant
+            path = path or KEY_TO_TEX[vk]
+            tc = KEY_TO_TEXCOORD[vk]
+        end
+        path = path or KEY_TO_TEX[icon.key]
+        tc = tc or KEY_TO_TEXCOORD[icon.key]
+        if not path and icon.kind == "boss" then
+            path = "Interface\\Icons\\INV_Misc_Head_Dragon_01"
+        end
+        if path then
+            tex:SetTexture(path)
+            applyIconTexCoord(tex, tc)
+            local hex = icon.color or "ffffff"
+            if hex ~= "ffffff" then
+                local r = tonumber(hex:sub(1, 2), 16)
+                local g = tonumber(hex:sub(3, 4), 16)
+                local b = tonumber(hex:sub(5, 6), 16)
+                if r and g and b then
+                    tex:SetVertexColor(r / 255, g / 255, b / 255, 1)
+                end
+            end
+        else
+            tex:SetColorTexture(1, 1, 1, 0.25)
+        end
+
+        if icon.text and icon.text ~= "" then
+            local lbl = holder:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            lbl:SetPoint("TOP", holder, "BOTTOM", 0, -1)
+            lbl:SetText(icon.text)
+            lbl:SetTextColor(1, 1, 1, 1)
+        end
+    end
+
+    for _, stroke in ipairs(plan.drawings or {}) do
+        local hex = stroke.color or "ffffff"
+        local r = tonumber(hex:sub(1, 2), 16) / 255
+        local g = tonumber(hex:sub(3, 4), 16) / 255
+        local b = tonumber(hex:sub(5, 6), 16) / 255
+        local size = stroke.size or 4
+        local pts = stroke.points or {}
+        for i = 2, #pts do
+            local p1, p2 = pts[i - 1], pts[i]
+            drawIncomingShareSegment(f.drawHost,
+                p1.x * w, p1.y * h, p2.x * w, p2.y * h,
+                size, r, g, b, 1)
+        end
+    end
+end
+
+local function showIncomingShare(senderShort, encName, planIdx, payload)
+    local bundle = deserializePlanBundle(payload, planIdx)
+    if not bundle then
+        print("|cffffd100L3FTools:|r received a shared visual, but it could not be decoded.")
+        return
+    end
+    local f = ensureIncomingSharePopup()
+    local shownEncName = (encName and encName ~= "")
+        and encName or bundle.encounterName or "Unknown"
+    f.sharedPlans = bundle.plans or {}
+    f.activeSharedPlanIdx = math.max(1, math.min(#f.sharedPlans, bundle.activePlanIdx or 1))
+    local count = #f.sharedPlans
+    if count > 1 then
+        f.meta:SetText(string.format("|cffffd100%s|r sent %d plans for |cffaaccff%s|r.",
+            senderShort or "?", count, shownEncName))
+    else
+        f.meta:SetText(string.format("|cffffd100%s|r sent a visual for |cffaaccff%s|r.",
+            senderShort or "?", shownEncName))
+    end
+    rebuildIncomingSharePlanTabs(f)
+    f:Show()
+    renderIncomingSharePreview(f, f.sharedPlans[f.activeSharedPlanIdx])
 end
 
 
@@ -2184,6 +4148,10 @@ refresh = function()
     refreshEncounterPanel()
     refreshSearchPanel()
     refreshNotesPanel()
+    plannerHistory.refreshButtons()
+    if leftClearPlanBtn then
+        leftClearPlanBtn:SetShown(not isCoOpGuest())
+    end
 
     local plan = currentPlan()
     if canvasBg then
@@ -2197,23 +4165,42 @@ refresh = function()
     end
 end
 
+L3F._RPRefresh = scheduleRefresh
+
 
 local function buildRaidPlanner(parent)
     buildPaletteIndex()
     ensureState()
 
+    if not L3F._RPRaidContextWatcher then
+        local watch = CreateFrame("Frame")
+        watch:RegisterEvent("PLAYER_ENTERING_WORLD")
+        watch:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+        watch:RegisterEvent("ZONE_CHANGED_INDOORS")
+        watch:RegisterEvent("ZONE_CHANGED")
+        watch:SetScript("OnEvent", function()
+            syncEncounterToInstanceRaid()
+            if topStripFrame and topStripFrame:IsShown() then
+                scheduleRefresh()
+            end
+        end)
+        L3F._RPRaidContextWatcher = watch
+    end
+
     buildTopStrip(parent)
     shareBtn:SetScript("OnClick", openSharePopup)
+    if shareAllBtn then shareAllBtn:SetScript("OnClick", openShareAllDialog) end
+    if importBtn then importBtn:SetScript("OnClick", openImportDialog) end
 
     buildLeftPanel(parent)
     buildRightPanel(parent)
 
-    -- Co-op: build the roster panel (hidden by default) parented to
-    -- the main planner area. The top-strip "Co-op" button toggles it.
+    -- Co-op: build the roster panel as a fixed always-visible panel
+    -- on the planner (no top-strip toggle button).
     if L3F.RPCoOp and L3F.RPCoOp.AttachRosterPanel then
         local panel = L3F.RPCoOp.AttachRosterPanel(parent,
             "TOPRIGHT", parent, "TOPRIGHT", -8, -TOP_H - 8)
-        if panel then panel:Hide() end
+        if panel then panel:Show() end
     end
     -- Co-op: route incoming SHARE-to-raid messages through our popup.
     if L3F.RPCoOp then

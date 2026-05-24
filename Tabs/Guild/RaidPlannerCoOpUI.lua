@@ -132,14 +132,9 @@ function RPCoOp.AttachRosterPanel(parent, anchor, ref, relPoint, ox, oy)
     title:SetPoint("TOPLEFT", rosterPanel, "TOPLEFT", 8, -6)
     title:SetText("Co-op session")
 
-    local close = CreateFrame("Button", nil, rosterPanel, "UIPanelCloseButton")
-    close:SetSize(20, 20)
-    close:SetPoint("TOPRIGHT", rosterPanel, "TOPRIGHT", 2, 2)
-    close:SetScript("OnClick", function() rosterPanel:Hide() end)
-
     statusFS = rosterPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     statusFS:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
-    statusFS:SetPoint("RIGHT", rosterPanel, "RIGHT", -24, 0)
+    statusFS:SetPoint("RIGHT", rosterPanel, "RIGHT", -8, 0)
     statusFS:SetJustifyH("LEFT")
     statusFS:SetText("|cffaaaaaaNot in a session|r")
 
@@ -180,7 +175,8 @@ end
 
 function RPCoOp.ToggleRosterPanel()
     if rosterPanel then
-        rosterPanel:SetShown(not rosterPanel:IsShown())
+        -- Fixed panel mode for Raid Planner: keep it visible.
+        rosterPanel:Show()
     end
 end
 
@@ -272,6 +268,10 @@ local function buildInvitePopup()
     f.statusFS:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 12)
     f.statusFS:SetJustifyH("LEFT")
 
+    local function closeAfterInvite(ok)
+        if ok then f:Hide() end
+    end
+
     f.refresh = function()
         -- Active button highlight.
         for k, b in pairs(f.modeButtons) do
@@ -309,7 +309,9 @@ local function buildInvitePopup()
                 b:SetPoint("TOPLEFT", content, "TOPLEFT", 4, -((i - 1) * 22))
                 local r, g, bl = classColor(ent.class)
                 b:SetText(string.format("|cff%02x%02x%02x%s|r", r * 255, g * 255, bl * 255, ent.short))
-                b:SetScript("OnClick", function() RPCoOp.Invite(ent.name) end)
+                b:SetScript("OnClick", function()
+                    closeAfterInvite(RPCoOp.Invite(ent.name))
+                end)
             end
             f.statusFS:SetText("Click a name to invite.")
 
@@ -342,7 +344,9 @@ local function buildInvitePopup()
                         b:SetPoint("TOPLEFT", content, "TOPLEFT", 4, -(shown * 22))
                         local r, g, bl = classColor(ent.class)
                         b:SetText(string.format("|cff%02x%02x%02x%s|r", r * 255, g * 255, bl * 255, ent.short))
-                        b:SetScript("OnClick", function() RPCoOp.Invite(ent.name) end)
+                        b:SetScript("OnClick", function()
+                            closeAfterInvite(RPCoOp.Invite(ent.name))
+                        end)
                         shown = shown + 1
                     end
                 end
@@ -365,7 +369,13 @@ local function buildInvitePopup()
             sendBtn:SetPoint("LEFT", nameEdit, "RIGHT", 6, 0)
             local function go()
                 local n = nameEdit:GetText() or ""
-                if n ~= "" then RPCoOp.Invite(n); nameEdit:SetText("") end
+                if n ~= "" then
+                    local ok = RPCoOp.Invite(n)
+                    if ok then
+                        nameEdit:SetText("")
+                    end
+                    closeAfterInvite(ok)
+                end
             end
             sendBtn:SetScript("OnClick", go)
             nameEdit:SetScript("OnEnterPressed", go)
@@ -382,8 +392,12 @@ local function buildInvitePopup()
                 sendBtn:SetSize(180, 24); sendBtn:SetText("Invite entire online guild")
                 sendBtn:SetPoint("TOPLEFT", label, "BOTTOMLEFT", 0, -16)
                 sendBtn:SetScript("OnClick", function()
-                    RPCoOp.InviteAllGuild()
-                    f.refresh()
+                    local ok = RPCoOp.InviteAllGuild()
+                    if ok then
+                        f:Hide()
+                    else
+                        f.refresh()
+                    end
                 end)
                 f.statusFS:SetText("5-minute cooldown applies after sending.")
             else
@@ -462,4 +476,8 @@ end
 -- Wire the co-op module's incoming-invite signal to our popup.
 RPCoOp.OnIncomingInvite = function(sessionId, hostName, encounterName)
     RPCoOp.ShowIncomingInvitePopup(sessionId, hostName, encounterName)
+end
+
+RPCoOp.OnIncomingInviteCanceled = function(sessionId)
+    dismissIncoming(sessionId)
 end

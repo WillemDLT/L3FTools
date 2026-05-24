@@ -389,6 +389,9 @@ function L3F.BuildFrame()
     -- When the main window closes, dismiss any open hover preview too.
     mainFrame:HookScript("OnHide", function()
         if L3F.HoverPreview then L3F.HoverPreview:Hide() end
+        if L3F.RPCoOp and L3F.RPCoOp.OnMainFrameHidden then
+            L3F.RPCoOp.OnMainFrameHidden()
+        end
     end)
 
     mainFrame.TitleText:SetText("L3FTools")
@@ -473,6 +476,16 @@ function L3F.ToggleFrame()
     if mainFrame:IsShown() then
         mainFrame:Hide()
     else
+        mainFrame:Show()
+    end
+end
+
+function L3F.ShowFrame(tabName)
+    if not mainFrame then L3F.BuildFrame() end
+    if tabName and L3F.tabs[tabName] then
+        showTab(tabName)
+    end
+    if mainFrame and not mainFrame:IsShown() then
         mainFrame:Show()
     end
 end
